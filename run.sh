@@ -39,37 +39,10 @@ echo "✅ 所有專案依賴已安裝完成。"
 # 將日誌導向 server.log，並使用 nohup 確保其持續運行。
 echo "🚀 [4/4] 正在背景啟動 FastAPI 伺服器..."
 (
+  # 在啟動前，確保舊的日誌資料庫被清空，以便進行乾淨的驗證
+  rm -f "$PROJECT_ROOT/logs.sqlite"
   cd "$PROJECT_ROOT/integrated_platform" && nohup poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 > ../server.log 2>&1 &
 )
-echo "✅ 伺服器啟動指令已發送。"
-echo "🚀 [5/5] 正在生成最終日誌報告..."
-
-# 假設日誌資料庫名稱為 logs.sqlite
-DB_PATH="logs.sqlite"
-
-# 檢查日誌資料庫是否存在
-if [ ! -f "integrated_platform/$DB_PATH" ]; then
-    echo "🟡 警告: 找不到日誌資料庫 '$DB_PATH'。將建立一個空的資料庫作為範例。"
-    # 使用 Python 建立一個帶有範例日誌的資料庫
-    (
-        cd "$PROJECT_ROOT/integrated_platform" && poetry run python -c "
-from pathlib import Path
-import sys
-sys.path.append('src')
-from log_manager import LogManager
-db_path = Path('$DB_PATH')
-if db_path.exists():
-    db_path.unlink()
-log_manager = LogManager(db_path)
-log_manager.log('INFO', '部署腳本自動生成的範例日誌。')
-log_manager.log('WARNING', '伺服器已啟動。')
-log_manager.close()
-"
-    )
-fi
-
-(
-    cd "$PROJECT_ROOT/integrated_platform" && poetry run python generate_log_report.py "$DB_PATH"
-)
-echo "✅ 最終日誌報告已生成，本腳本任務完成。"
+echo "✅ 伺服器啟動指令已發送。日誌將被寫入 'server.log' 和 'logs.sqlite'。"
+echo "✅ 部署腳本任務完成。"
 echo "================================================================================"
