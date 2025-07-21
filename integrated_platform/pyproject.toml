@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.9"
 fastapi = "*"
 uvicorn = {extras = ["standard"], version = "*"}
+python-multipart = "*"
 
 # 將測試工具定義為開發依賴 (dev-dependencies)
 [tool.poetry.group.dev.dependencies]
