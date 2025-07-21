@@ -1,9 +1,10 @@
 # src/main.py
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import os
+import time # 用於模擬延遲
 
 # 建立 FastAPI 應用實例
 app = FastAPI(
@@ -61,3 +62,23 @@ async def get_applications():
             "description": "這是一個尚未啟用的功能佔位符。",
         },
     ]
+
+
+# --- 【新增】錄音轉寫 API 端點 ---
+@app.post("/api/transcribe/upload")
+async def upload_audio_for_transcription(audio_file: UploadFile = File(...)):
+    """
+    接收上傳的音訊檔案，並回傳一個模擬的轉寫結果。
+    """
+    # 這裡可以加入儲存檔案的邏輯，但草圖階段我們先省略
+    # print(f"收到了檔案: {audio_file.filename}")
+
+    # 模擬 AI 處理所需的時間
+    time.sleep(3)
+
+    # 回傳一個假的、寫死的轉寫結果
+    return {
+        "filename": audio_file.filename,
+        "content_type": audio_file.content_type,
+        "transcription": f"這是一段針對 '{audio_file.filename}' 的模擬語音轉寫結果。實際的 AI 模型尚未整合。"
+    }
