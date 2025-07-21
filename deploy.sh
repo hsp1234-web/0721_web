@@ -41,5 +41,10 @@ echo "🚀 [4/4] 正在背景啟動 FastAPI 伺服器..."
 (
   cd "$PROJECT_ROOT/integrated_platform" && nohup poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 > ../server.log 2>&1 &
 )
-echo "✅ 伺服器啟動指令已發送，本腳本任務完成。"
+echo "✅ 伺服器啟動指令已發送。"
+echo "🚀 [5/5] 正在生成最終日誌報告..."
+(
+    cd "$PROJECT_ROOT/integrated_platform" && python generate_log_report.py
+)
+echo "✅ 最終日誌報告已生成，本腳本任務完成。"
 echo "================================================================================"
