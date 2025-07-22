@@ -18,6 +18,7 @@ ipywidgets = "^8.1.3"
 pytest = "^7.0.0"
 httpx = "^0.23.0" # FastAPI 推薦的測試用 HTTP client
 pytest-mock = "^3.12.0"
+requests = "*"
 
 # 告知 pytest 在 src 目錄下尋找原始碼，解決導入問題
 [tool.pytest.ini_options]
