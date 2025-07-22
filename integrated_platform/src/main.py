@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import uuid
 import aiofiles
+import whisper
 from .log_manager import LogManager
 
 # --- 全域設定 ---

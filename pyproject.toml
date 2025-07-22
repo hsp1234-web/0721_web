@@ -5,6 +5,7 @@ description = "API-driven dynamic frontend with automated testing"
 authors = ["Commander"]
 readme = "README.md"
 packages = [{include = "src"}]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -14,6 +15,8 @@ ipython = "^8.20.0"
 ipywidgets = "^8.1.1"
 uvicorn = "^0.30.3"
 openai-whisper = "^20231117"
+
+[tool.poetry.group.dev.dependencies]
 deptry = "^0.13.0"
 ruff = "^0.5.5"
 

@@ -6,14 +6,15 @@
 set -e
 
 # --- 步驟 1: 自我定位 ---
-PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# 使用 Python 和 pathlib 來取得專案根目錄，確保跨平台相容性
+PROJECT_ROOT=$(python -c "from pathlib import Path; print(Path(__file__).resolve().parent)")
 
 # --- 步驟 2: 環境準備 ---
-# 我們將使用我們在 /tmp 中創建的虛擬環境
+# Poetry 會自動管理虛擬環境
 
 # --- 步驟 3: 依賴安裝 ---
-# 我們已經手動安裝了依賴項
+# 假設依賴已經透過 `poetry install` 安裝
 
 # --- 步驟 4: 在背景啟動伺服器 ---
-cd "$PROJECT_ROOT/integrated_platform"
-/tmp/venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8000
+cd "$PROJECT_ROOT"
+poetry run uvicorn integrated_platform.src.main:app --host 0.0.0.0 --port 8000

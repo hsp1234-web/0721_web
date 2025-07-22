@@ -1,7 +1,6 @@
 # tests/test_colab_main.py
 import sys
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # --- 模擬 Colab 和 IPython 的模組 ---
 sys.modules['google'] = MagicMock()

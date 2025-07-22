@@ -6,7 +6,6 @@ from pathlib import Path
 from integrated_platform.src.log_manager import LogManager
 from integrated_platform.src.display_manager import DisplayManager
 from google.colab import output as colab_output
-from IPython.display import display, HTML
 
 # --- 核心設定 ---
 LOG_DB_PATH = Path("logs.sqlite")
