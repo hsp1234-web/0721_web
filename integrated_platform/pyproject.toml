@@ -16,6 +16,7 @@ tomli = "^2.0.1"
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"
 httpx = "^0.23.0" # FastAPI 推薦的測試用 HTTP client
+pytest-mock = "^3.14.1"
 
 # 告知 pytest 在 src 目錄下尋找原始碼，解決導入問題
 [tool.pytest.ini_options]

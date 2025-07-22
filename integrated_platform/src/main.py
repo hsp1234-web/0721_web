@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 import os
 import time
 from pathlib import Path
-from .log_manager import LogManager
+from src.log_manager import LogManager
 
 # --- 全域日誌管理器 ---
 # 專案根目錄的相對路徑，指向 logs.sqlite
