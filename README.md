@@ -1,3 +1,3 @@
-# Integrated Platform
+# 整合平台
 
-This is a placeholder README file.
+這是一個預留的 README 檔案。
