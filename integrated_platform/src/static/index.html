@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>整合型應用平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://rsms.me/inter/inter.css');
+        html { font-family: 'Inter', sans-serif; }
+        body { background-color: #f1f5f9; }
+    </style>
+</head>
+<body class="antialiased text-slate-800">
+    <div id="main-container" class="container mx-auto p-4 md:p-8 max-w-5xl">
+        <header class="mb-8">
+            <h1 id="page-title" class="text-3xl md:text-4xl font-bold text-slate-900">應用程式儀表板</h1>
+            <p id="page-subtitle" class="text-slate-600 mt-1">請選擇一項服務以繼續</p>
+        </header>
+        <main id="content-area" class="transition-opacity duration-300"></main>
+    </div>
+    <script>
+        const contentArea = document.getElementById('content-area');
+        const pageTitle = document.getElementById('page-title');
+        const pageSubtitle = document.getElementById('page-subtitle');
+        const createCard = (app) => `<div class="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer" onclick="routeToApp('${app.id}', '${app.name}', '${app.description}')"><div class="p-6"><div class="flex items-center space-x-4"><div class="flex-shrink-0"><div class="w-12 h-12 bg-indigo-500 text-white rounded-lg flex items-center justify-center"><i data-lucide="${app.icon}"></i></div></div><div><div class="text-xl font-medium text-black">${app.name}</div><p class="text-slate-500">${app.description}</p></div></div></div></div>`;
+        const createGenericPlaceholder = (appName, appDescription) => `<div class="bg-white p-8 rounded-xl shadow-md"><button onclick="renderDashboard()" class="flex items-center text-sm text-indigo-600 hover:text-indigo-800 font-semibold mb-6"><i data-lucide="arrow-left" class="w-4 h-4 mr-2"></i>返回儀表板</button><h2 class="text-2xl font-bold mb-2">${appName}</h2><p class="text-slate-600 mb-6">${appDescription}</p><div class="border-t border-slate-200 pt-6"><h3 class="font-semibold mb-4">功能佔位符</h3><div class="bg-slate-50 p-6 rounded-lg text-center text-slate-500"><p>此處將會是「${appName}」的實際操作介面。</p></div></div></div>`;
+        const createTranscribeUI = () => `<div><button onclick="renderDashboard()" class="flex items-center text-sm text-indigo-600 hover:text-indigo-800 font-semibold mb-6"><i data-lucide="arrow-left" class="w-4 h-4 mr-2"></i>返回儀表板</button><div class="border-b pb-6 mb-6"><h3 class="font-semibold mb-2">1. 選擇音訊檔案</h3><input type="file" id="audio-file-input" accept="audio/*" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/><button onclick="handleFileUpload()" class="mt-4 bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors">上傳並開始轉寫</button></div><div><h3 class="font-semibold mb-2">2. 處理狀態與結果</h3><div id="status-area" class="text-slate-500 mb-4">請上傳檔案...</div><textarea id="result-textarea" class="w-full h-48 p-2 border rounded-md bg-slate-50" readonly placeholder="轉寫結果將顯示於此..."></textarea></div></div>`;
+        const handleFileUpload = async () => {
+            const fileInput = document.getElementById('audio-file-input');
+            const statusArea = document.getElementById('status-area');
+            const resultTextarea = document.getElementById('result-textarea');
+            if (!fileInput.files.length) { statusArea.textContent = '錯誤：請先選擇一個檔案。'; return; }
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('audio_file', file);
+            statusArea.textContent = '上傳中，請稍候...';
+            resultTextarea.value = '';
+            try {
+                const response = await fetch('/api/transcribe/upload', { method: 'POST', body: formData });
+                if (!response.ok) throw new Error('上傳失敗，伺服器錯誤。');
+                statusArea.textContent = '處理中，模擬 AI 運算...';
+                const result = await response.json();
+                statusArea.textContent = '轉寫完成！';
+                resultTextarea.value = result.transcription;
+            } catch (error) { statusArea.textContent = \`錯誤：\${error.message}\`; }
+        };
+        const routeToApp = (appId, appName, appDescription) => {
+            pageTitle.textContent = appName;
+            pageSubtitle.textContent = appDescription;
+            if (appId === 'transcribe') { contentArea.innerHTML = createTranscribeUI(); }
+            else { contentArea.innerHTML = createGenericPlaceholder(appName, appDescription); }
+            lucide.createIcons();
+        };
+        const renderDashboard = async () => {
+            pageTitle.textContent = '應用程式儀表板';
+            pageSubtitle.textContent = '請選擇一項服務以繼續';
+            contentArea.innerHTML = '<p class="text-slate-500">正在從後端載入功能列表...</p>';
+            try {
+                const response = await fetch('/api/apps');
+                if (!response.ok) throw new Error(\`無法取得應用程式列表 (HTTP \${response.status})\`);
+                const apps = await response.json();
+                contentArea.innerHTML = \`<div class="grid grid-cols-1 md:grid-cols-2 gap-6">\${apps.map(createCard).join('')}</div>\`;
+            } catch (error) { contentArea.innerHTML = \`<p class="text-red-600 font-semibold">錯誤: \${error.message}</p>\`; }
+            finally { lucide.createIcons(); }
+        };
+        document.addEventListener('DOMContentLoaded', renderDashboard);
+    </script>
+</body>
+</html>
