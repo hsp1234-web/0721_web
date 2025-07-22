@@ -4,10 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
-# 將 src 目錄添加到系統路徑中，以便導入模組
-sys.path.append(str(Path(__file__).parent.joinpath('src')))
-
-from archiver import generate_final_log_file
+from .archiver import generate_final_log_file
 
 def main():
     """

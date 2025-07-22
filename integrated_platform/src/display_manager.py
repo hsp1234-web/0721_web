@@ -4,7 +4,7 @@ import threading
 import time
 import sqlite3
 from pathlib import Path
-from IPython.display import display, clear_output
+from IPython.display import display
 import ipywidgets as widgets
 
 class DisplayManager:

@@ -4,20 +4,24 @@ version = "0.2.0"
 description = "API-driven dynamic frontend with automated testing"
 authors = ["Commander"]
 readme = "README.md"
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 fastapi = "*"
-uvicorn = {extras = ["standard"], version = "*"}
-python-multipart = "*"
-tomli = "^2.0.1"
+typer = {extras = ["all"], version = "^0.16.0"}
+ipython = "^8.20.0"
+ipywidgets = "^8.1.1"
+
 
 # 將測試工具定義為開發依賴 (dev-dependencies)
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"
 httpx = "^0.23.0" # FastAPI 推薦的測試用 HTTP client
-
-# 告知 pytest 在 src 目錄下尋找原始碼，解決導入問題
-typer = {extras = ["all"], version = "^0.16.0"}
+deptry = "^0.13.0"
+ruff = "^0.5.5"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "smoke: marks tests as smoke tests (fast, core functionality)"
+]

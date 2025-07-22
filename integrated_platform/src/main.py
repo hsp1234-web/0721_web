@@ -12,15 +12,20 @@ from .log_manager import LogManager
 LOG_DB_PATH = Path("../logs.sqlite")
 log_manager = LogManager(LOG_DB_PATH)
 
-app = FastAPI(title="整合型應用平台")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Code to run on startup
+    log_manager.log("INFO", "伺服器應用已啟動。")
+    yield
+    # Code to run on shutdown
+    log_manager.log("INFO", "伺服器應用已關閉。")
+
+app = FastAPI(title="整合型應用平台", lifespan=lifespan)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_path = os.path.join(current_dir, "static")
-
-@app.on_event("startup")
-async def startup_event():
-    """應用啟動時記錄一條日誌。"""
-    log_manager.log("INFO", "伺服器應用已啟動。")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

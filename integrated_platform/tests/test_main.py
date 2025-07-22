@@ -12,6 +12,9 @@ def test_read_root():
     assert "text/html" in response.headers["content-type"]
     assert "應用程式儀表板" in response.text
 
+import pytest
+
+@pytest.mark.smoke
 def test_get_applications():
     """測試 /api/apps 是否回傳正確的 JSON 結構與內容。"""
     response = client.get("/api/apps")
