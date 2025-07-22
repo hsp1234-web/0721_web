@@ -1,12 +1,9 @@
 import sys
 print(sys.path)
-from fastapi import FastAPI, UploadFile, File, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 import os
 from pathlib import Path
-import uuid
-import aiofiles
-import whisper
 from .log_manager import LogManager
 
 # --- 全域設定 ---
@@ -15,23 +12,6 @@ log_manager = LogManager(LOG_DB_PATH)
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 TRANSCRIPTION_JOBS = {}
-
-# --- Whisper 模型加載 ---
-def get_model_size():
-    return os.environ.get("WHISPER_MODEL_SIZE", "medium")
-
-def load_whisper_model():
-    model_size = get_model_size()
-    log_manager.log("INFO", f"正在加載 Whisper 模型，尺寸: {model_size}...")
-    try:
-        model = whisper.load_model(model_size)
-        log_manager.log("SUCCESS", f"成功加載 Whisper 模型 ({model_size})。")
-        return model
-    except Exception as e:
-        log_manager.log("CRITICAL", f"加載 Whisper 模型失敗: {e}")
-        return None
-
-model = load_whisper_model()
 
 from contextlib import asynccontextmanager
 
@@ -72,67 +52,3 @@ async def get_applications():
     ]
     log_manager.log("INFO", f"成功返回 {len(apps_list)} 個應用程式。")
     return apps_list
-
-def process_transcription(job_id: str, audio_path: str):
-    global TRANSCRIPTION_JOBS
-    try:
-        log_manager.log("INFO", f"工作 {job_id}: 開始轉寫檔案 {audio_path}...")
-        TRANSCRIPTION_JOBS[job_id] = {"status": "processing", "result": None}
-
-        if model is None:
-            raise RuntimeError("Whisper 模型未能成功加載。")
-
-        result = model.transcribe(audio_path)
-
-        TRANSCRIPTION_JOBS[job_id] = {"status": "completed", "result": result}
-        log_manager.log("SUCCESS", f"工作 {job_id}: 轉寫完成。")
-    except Exception as e:
-        log_manager.log("ERROR", f"工作 {job_id}: 轉寫過程中發生錯誤: {e}")
-        TRANSCRIPTION_JOBS[job_id] = {"status": "failed", "error": str(e)}
-    finally:
-        # 清理上傳的檔案
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-            log_manager.log("INFO", f"工作 {job_id}: 已清理臨時檔案 {audio_path}。")
-
-
-@app.post("/api/transcribe/upload")
-async def upload_audio_for_transcription(background_tasks: BackgroundTasks, audio_file: UploadFile = File(...)):
-    log_manager.log("INFO", f"收到檔案上傳請求: {audio_file.filename} ({audio_file.content_type})")
-
-    job_id = str(uuid.uuid4())
-    file_extension = Path(audio_file.filename).suffix
-    temp_audio_path = UPLOAD_DIR / f"{job_id}{file_extension}"
-
-    try:
-        async with aiofiles.open(temp_audio_path, 'wb') as out_file:
-            content = await audio_file.read()
-            await out_file.write(content)
-
-        log_manager.log("INFO", f"檔案已暫存至 {temp_audio_path}")
-
-        background_tasks.add_task(process_transcription, job_id, str(temp_audio_path))
-
-        TRANSCRIPTION_JOBS[job_id] = {"status": "queued"}
-
-        return JSONResponse(
-            status_code=202,
-            content={
-                "job_id": job_id,
-                "status": "queued",
-                "message": "轉寫任務已加入佇列，請稍後查詢結果。"
-            }
-        )
-    except Exception as e:
-        log_manager.log("ERROR", f"檔案上傳或任務創建失敗: {e}")
-        return JSONResponse(status_code=500, content={"error": "處理檔案時發生內部錯誤。"})
-
-
-@app.get("/api/transcribe/status/{job_id}")
-async def get_transcription_status(job_id: str):
-    job = TRANSCRIPTION_JOBS.get(job_id)
-    if not job:
-        return JSONResponse(status_code=404, content={"error": "找不到指定的任務 ID。"})
-
-    log_manager.log("INFO", f"正在查詢工作 {job_id} 的狀態: {job['status']}")
-    return JSONResponse(content=job)

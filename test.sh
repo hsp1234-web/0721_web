@@ -1,6 +1,8 @@
 #!/bin/bash
 # 腳本：test.sh - 基石契約模式
 
+export PYTHONPATH=./integrated_platform
+
 # 防線一：語法完整性檢查 (最快，< 1 秒)
 # 確保所有程式碼的「語法」正確無誤，這是程式能被執行的最基本前提。
 echo "正在執行 [1/4] 語法完整性檢查..."

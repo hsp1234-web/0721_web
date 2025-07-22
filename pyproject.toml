@@ -1,3 +1,13 @@
+# ======================================================================
+# !! 重要警告：磁碟空間有限 (8-10GB) !!
+# 在新增任何套件 (尤其是 AI/ML 相關) 到 [tool.poetry.dependencies]
+# 或 [tool.poetry.group.dev.dependencies] 之前，請務必：
+# 1. 仔細評估套件及其所有子依賴的總大小。
+# 2. 優先選擇輕量級的替代方案。
+# 3. 避免安裝任何會自動下載大型模型 (>100MB) 的套件。
+# 4. 如果不確定，請先與專案負責人確認。
+# ======================================================================
+
 [tool.poetry]
 name = "integrated-platform"
 version = "0.2.0"
@@ -14,21 +24,21 @@ typer = {extras = ["all"], version = "^0.16.0"}
 ipython = "^8.20.0"
 ipywidgets = "^8.1.1"
 uvicorn = "^0.30.3"
-openai-whisper = "^20231117"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.13.0"
 ruff = "^0.5.5"
-
-
-# 將測試工具定義為開發依賴 (dev-dependencies)
-[tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"
 httpx = "^0.23.0" # FastAPI 推薦的測試用 HTTP client
 requests = "^2.32.3"
 scipy = "^1.14.0"
+pytest-timeout = "^2.2.0"
+numpy = "^1.26.4"
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]
 markers = [
     "smoke: marks tests as smoke tests (fast, core functionality)"
 ]
+
+[tool.deptry]
+known_first_party = ["src"]
