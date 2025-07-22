@@ -12,79 +12,37 @@ from IPython.display import display, HTML
 LOG_DB_PATH = Path("logs.sqlite")
 log_manager = LogManager(LOG_DB_PATH)
 
-def create_public_portal(port=8000, retries=5, delay=3):
+def create_public_portal(port=8000):
     """
-    建立一個從 Colab 連接到後端服務的公開門戶。
-
-    這個函式會嘗試使用 `google.colab.output.serve_kernel_port_as_window`
-    來建立一個可公開存取的 URL。如果失敗，它會進行有限次數的重試。
-
-    Args:
-        port (int): 要公開的本地埠號。
-        retries (int): 失敗時的最大重試次數。
-        delay (int): 每次重試之間的延遲秒數。
+    使用 serve_kernel_port_as_iframe 建立一個內嵌的服務入口。
     """
-    log_manager.log("INFO", "奉命建立服務入口...")
-
-    button_html_template = """
-    <a href="{url}" target="_blank" style="
-        display: inline-block;
-        padding: 12px 24px;
-        background-color: #4CAF50; /* Green */
-        color: white;
-        text-align: center;
-        text-decoration: none;
-        font-size: 16px;
-        font-weight: bold;
-        border-radius: 8px;
-        box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
-        transition: 0.3s;
-    ">
-        🚀 點此開啟「鳳凰轉錄儀」指揮中心
-    </a>
-    """
-
-    for attempt in range(retries):
-        try:
-            # 呼叫 Colab API 來建立並開啟一個代理視窗
-            colab_output.serve_kernel_port_as_window(port, path="/")
-
-            # 在 Colab 中，serve_kernel_port_as_window 會自動處理 URL
-            # 我們這裡假設它成功了，並顯示一個按鈕
-            # 注意：在本地環境中，這行會拋出異常
-            public_url = f"https://localhost:{port}" # 僅為示意
-
-            # 顯示漂亮的 HTML 按鈕
-            display(HTML(button_html_template.format(url=public_url)))
-
-            log_manager.log("SUCCESS", f"服務入口已建立！請點擊上方按鈕開啟指揮中心。")
-            return
-        except Exception as e:
-            log_manager.log("WARNING", f"建立服務入口嘗試 #{attempt + 1} 失敗: {e}")
-            if attempt < retries - 1:
-                log_manager.log("INFO", f"將在 {delay} 秒後重試...")
-                time.sleep(delay)
-
-    log_manager.log("CRITICAL", "所有建立公開服務入口的嘗試均失敗。請檢查 Colab 環境設定。")
+    log_manager.log("INFO", f"奉命建立服務入口...")
+    try:
+        colab_output.serve_kernel_port_as_iframe(port, path='/', height='800')
+        log_manager.log("SUCCESS", "服務入口已成功建立！")
+    except Exception as e:
+        log_manager.log("CRITICAL", f"建立 iframe 服務入口時發生致命錯誤: {e}")
 
 
 def main():
     """
     Colab Notebook 的主執行流程。
     """
-    # 1. 初始化日誌管理器 (已移至全域)
+    display_thread = None
+    # 引入 STOP_EVENT 以協調關閉
+    STOP_EVENT = threading.Event()
 
-    # 2. 提前喚醒「畫家」
-    display_manager = DisplayManager(LOG_DB_PATH)
-    display_manager.start()
-
-    log_manager.log("INFO", "顯示管理器已在背景啟動。")
-
-    # 3. 執行耗時的後端部署腳本
-    log_manager.log("INFO", "正在執行後端部署腳本 (run.sh)...")
-
-    run_success = False
     try:
+        # 1. 初始化並啟動 DisplayManager
+        # 我們將 stop_event 傳遞給它
+        display_manager = DisplayManager(LOG_DB_PATH, STOP_EVENT)
+        display_manager.start()
+        display_thread = display_manager.thread # 引用執行緒以供稍後 join
+        log_manager.log("INFO", "顯示管理器已在背景啟動。")
+
+        # 2. 執行後端部署腳本
+        log_manager.log("INFO", "正在執行後端部署腳本 (run.sh)...")
+        run_success = False
         process = subprocess.Popen(
             ["bash", "run.sh"],
             stdout=subprocess.PIPE,
@@ -92,10 +50,8 @@ def main():
             text=True,
             encoding='utf-8'
         )
-
         for line in iter(process.stdout.readline, ''):
             log_manager.log("SHELL", line.strip())
-
         process.wait()
 
         if process.returncode == 0:
@@ -104,18 +60,35 @@ def main():
         else:
             log_manager.log("ERROR", f"後端部署腳本執行失敗，返回碼: {process.returncode}")
 
+        # 3. 如果成功，建立服務入口
+        if run_success:
+            create_public_portal()
+
+        # 4. 讓腳本保持運行，直到被手動中斷
+        log_manager.log("INFO", "主要作戰流程已執行完畢。請手動中斷儲存格以結束任務。")
+        while not STOP_EVENT.is_set():
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        log_manager.log("WARNING", "偵測到手動中斷指令！正在準備優雅關閉...")
+
     except Exception as e:
-        log_manager.log("CRITICAL", f"執行 run.sh 時發生嚴重錯誤: {e}")
+        log_manager.log("CRITICAL", f"主流程發生未預期錯誤: {e}")
 
-    # 4. 如果後端部署成功，則建立公開服務入口
-    if run_success:
-        create_public_portal()
+    finally:
+        log_manager.log("INFO", "正在執行終端清理程序...")
+        STOP_EVENT.set()
 
-    # 5. 任務結束，提示使用者
-    log_manager.log("INFO", "主要作戰流程已執行完畢。顯示管理器將會繼續運行以接收後續日誌。")
-    # 我們不再自動停止，讓用戶可以持續看到日誌
-    # time.sleep(5)
-    # display_manager.stop()
+        # 確保 display_thread 存在且不是當前執行緒
+        if display_thread and display_thread.is_alive():
+            display_thread.join(timeout=2) # 等待顯示執行緒結束
+            log_manager.log("INFO", "顯示管理器已關閉。")
+
+        # 這裡可以加上日誌歸檔的邏輯
+        # from integrated_platform.src.archiver import archive_final_log
+        # archive_final_log(LOG_DB_PATH)
+
+        print("\n[部署流程已結束，所有服務已安全關閉。]")
 
 if __name__ == "__main__":
     # 為了能在本地測試，我們假設有一個 `__main__`

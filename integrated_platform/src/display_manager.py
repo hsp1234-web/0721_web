@@ -11,10 +11,11 @@ class DisplayManager:
     """
     職責：作為唯一的「畫家」，從 SQLite 讀取日誌並在 Colab 中穩定地顯示。
     """
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, stop_event: threading.Event):
+        super().__init__()
         self.db_path = db_path
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.stop_event = stop_event
+        self.thread = threading.Thread(target=self._run)
         self.last_log_id = 0
 
         # --- UI 元件 ---
