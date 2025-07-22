@@ -2,7 +2,6 @@ import requests
 import time
 from pathlib import Path
 import pytest
-import os
 
 # --- 測試設定 ---
 BASE_URL = "http://127.0.0.1:8000"

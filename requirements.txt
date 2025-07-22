@@ -1,0 +1,12 @@
+ruff
+deptry
+pytest
+httpx
+requests
+fastapi
+typer
+ipython
+ipywidgets
+uvicorn
+aiofiles
+python-multipart

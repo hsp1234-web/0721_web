@@ -3,10 +3,7 @@ print(sys.path)
 from fastapi import FastAPI, UploadFile, File, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 import os
-import time
 from pathlib import Path
-import whisper
-import torch
 import uuid
 import aiofiles
 from .log_manager import LogManager
