@@ -7,7 +7,7 @@ from pathlib import Path
 from .log_manager import LogManager
 
 # --- 全域設定 ---
-LOG_DB_PATH = Path("../logs.sqlite")
+LOG_DB_PATH = Path(__file__).parent.parent.parent / "logs.sqlite"
 log_manager = LogManager(LOG_DB_PATH)
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
