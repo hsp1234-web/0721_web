@@ -20,6 +20,11 @@ database:
   # 新增任務佇列資料庫的路徑設定
   task_queue_db_path: "output/task_queue.db"
 
+# --- Transcriber 設定 ---
+transcriber:
+  database_file: "data/transcriber.db"
+  upload_dir: "data/uploads"
+
 # --- 數據獲取設定 ---
 data_acquisition:
   # 重試次數

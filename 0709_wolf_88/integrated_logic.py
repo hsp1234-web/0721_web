@@ -1,3 +1,27 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+整合後的業務邏輯
+================================================================================
+
+本檔案整合了【普羅米修斯之火】金融數據框架與【鳳凰專案】錄音轉寫服務的核心業務邏輯。
+
+--------------------------------------------------------------------------------
+第一部分：【普羅米修斯之火】核心邏輯
+--------------------------------------------------------------------------------
+這部分包含了金融數據的獲取、處理、因子計算與模擬。
+"""
+
+# ... (從 0709_wolf_88/src/prometheus/ 下的相關檔案複製核心邏輯) ...
+
+"""
+--------------------------------------------------------------------------------
+第二部分：【鳳凰專案】核心邏輯
+--------------------------------------------------------------------------------
+這部分包含了錄音轉寫服務的 API、工人進程和任務管理。
+"""
+
+# ... (從 0709_wolf_88/src/prometheus/transcriber/ 下的相關檔案複製核心邏輯) ...
 import typer
 from prometheus.entrypoints.ai_analyst_app import ai_analyst_job
 from prometheus.entrypoints.query_gateway import run_dashboard_service
@@ -879,3 +903,370 @@ def run_transcriber_server(
 
 if __name__ == "__main__":
     app()
+\n\n# ==================== Transcriber Logic ====================\n\n
+"""轉寫服務 API 主應用程式"""
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, AsyncGenerator
+import logging
+
+import aiofiles
+import aiosqlite
+from fastapi import FastAPI, File, HTTPException, UploadFile, Request
+from fastapi.staticfiles import StaticFiles
+
+from prometheus.core.logging.log_manager import LogManager
+from prometheus.transcriber.core import DATABASE_FILE, UPLOAD_DIR, initialize_database
+
+# --- 靜態檔案目錄設定 ---
+static_dir = Path("static")
+static_dir.mkdir(exist_ok=True)
+
+# --- 日誌記錄器設定 ---
+log_manager = LogManager(log_file="transcriber_api.log")
+logger = log_manager.get_logger(__name__)
+
+
+# --- 應用程式生命週期管理 ---
+import multiprocessing as mp
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """處理應用程式啟動與關閉事件"""
+    logger.info("轉寫服務 API 啟動中...")
+    await initialize_database()
+    # 如果沒有從 CLI 注入佇列，則建立一個新的
+    if not hasattr(app.state, 'task_queue'):
+        logger.warning("未在 app.state 中找到任務佇列，正在建立新的佇列。")
+        app.state.task_queue = mp.Queue()
+    yield
+    logger.info("轉寫服務 API 已關閉。")
+    # 佇列的生命週期由 CLI 管理，此處不關閉
+
+
+# --- FastAPI 應用程式實例 ---
+app = FastAPI(lifespan=lifespan)
+
+
+# --- API 端點 ---
+@app.get("/health", status_code=200, summary="健康檢查")
+async def health_check() -> dict[str, str]:
+    """提供一個簡單的健康檢查端點，確認服務是否正常運行。"""
+    return {"status": "ok"}
+
+
+@app.post("/upload", status_code=202, summary="上傳音檔並建立轉寫任務")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(..., description="要上傳的音訊檔案"),
+) -> dict[str, str]:
+    """
+    接收客戶端上傳的音訊檔案，將其儲存至伺服器，並為其建立一個新的轉寫任務。
+
+    - **儲存檔案**: 檔案會以 UUID 重新命名，以避免檔名衝突。
+    - **建立任務**: 在資料庫中新增一筆任務記錄。
+    - **加入佇列**: 將任務 ID 加入背景處理佇列，交由工人進程處理。
+    """
+    task_id = str(uuid.uuid4())
+    # 確保上傳目錄存在
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    filepath = UPLOAD_DIR / f"{task_id}_{file.filename}"
+
+    try:
+        # 以 1MB 的區塊讀寫檔案，避免一次性載入過大檔案佔用記憶體
+        async with aiofiles.open(filepath, "wb") as out_file:
+            while content := await file.read(1024 * 1024):
+                await out_file.write(content)
+        logger.info("檔案 '%s' 已成功上傳至 '%s'", file.filename, filepath)
+
+        # 在資料庫中記錄此任務
+        async with aiosqlite.connect(DATABASE_FILE) as db:
+            await db.execute(
+                "INSERT INTO transcription_tasks (id, original_filepath) VALUES (?, ?)",
+                (task_id, str(filepath)),
+            )
+            await db.commit()
+
+        # 將任務 ID 推入佇列
+        task_queue = request.app.state.task_queue
+        task_queue.put(task_id)
+        logger.info("任務 %s 已成功加入轉寫佇列。", task_id)
+
+    except IOError as e:
+        logger.exception("檔案操作時發生錯誤: %s", e)
+        raise HTTPException(status_code=500, detail="檔案儲存失敗，請檢查伺服器權限或磁碟空間。") from e
+    except aiosqlite.Error as e:
+        logger.exception("資料庫操作時發生錯誤: %s", e)
+        raise HTTPException(status_code=500, detail="無法建立轉寫任務，請檢查資料庫狀態。") from e
+
+    return {"task_id": task_id}
+
+
+@app.get("/status/{task_id}", summary="查詢轉寫任務狀態")
+async def get_task_status(
+    task_id: str,
+) -> dict[str, Any]:
+    """根據任務 ID，查詢並返回該任務的當前狀態、進度及轉寫結果。"""
+    try:
+        async with aiosqlite.connect(DATABASE_FILE) as db:
+            db.row_factory = aiosqlite.Row  # 讓查詢結果可以像字典一樣取值
+            async with db.execute(
+                "SELECT * FROM transcription_tasks WHERE id = ?", (task_id,)
+            ) as cursor:
+                task = await cursor.fetchone()
+
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"找不到任務 ID: {task_id}")
+
+        return dict(task)
+
+    except aiosqlite.Error as e:
+        logger.exception("查詢任務 %s 狀態時發生資料庫錯誤: %s", task_id, e)
+        raise HTTPException(status_code=500, detail="查詢任務狀態時發生錯誤。") from e
+
+
+# --- 掛載靜態檔案 ---
+# 將 static 目錄下的檔案作為根路徑 (/) 的靜態資源，並提供 index.html 作為預設頁面
+app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+
+# --- 直接執行時的備用啟動方式 ---
+if __name__ == "__main__":
+    import uvicorn
+    logger.info("使用 uvicorn 直接啟動 API 伺服器 (僅供開發測試)...")
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+"""真實轉寫工人模組"""
+import asyncio
+import multiprocessing as mp
+import time
+from typing import Any, Optional
+
+from faster_whisper import WhisperModel
+import aiosqlite
+
+from prometheus.core.logging.log_manager import LogManager
+from prometheus.transcriber.core import DATABASE_FILE
+from prometheus.transcriber.core.hardware import get_best_hardware_config
+
+# --- 日誌記錄器設定 ---
+log_manager = LogManager(log_file="transcriber_worker.log")
+logger = log_manager.get_logger(__name__)
+
+
+async def process_single_task(task_id: str) -> None:
+    """
+    處理一個指定的轉寫任務。
+
+    Args:
+        task_id (str): 要處理的任務 ID。
+    """
+    logger.info("開始處理任務: %s", task_id)
+    audio_path = None
+
+    try:
+        # 1. 更新任務狀態為 'processing'
+        await update_task_status_in_db(task_id, "processing")
+
+        # 2. 從資料庫獲取音檔路徑
+        async with aiosqlite.connect(DATABASE_FILE) as db:
+            async with db.execute(
+                "SELECT original_filepath FROM transcription_tasks WHERE id = ?",
+                (task_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    logger.error("在資料庫中找不到任務 %s 的檔案路徑。", task_id)
+                    await update_task_status_in_db(task_id, "failed", error_message="找不到檔案路徑")
+                    return
+                audio_path = row[0]
+
+        # 3. 執行轉寫
+        hardware_config = get_best_hardware_config()
+        logger.info("使用硬體設定: %s", hardware_config)
+        model = WhisperModel(
+            "tiny",  # 暫時使用 tiny 模型以利測試
+            device=hardware_config["device"],
+            compute_type=hardware_config["compute_type"],
+        )
+        segments, _info = model.transcribe(audio_path, beam_size=5)
+        full_transcript = "".join(segment.text for segment in segments)
+        logger.info("任務 %s: 轉寫完成。", task_id)
+
+        # 4. 更新最終結果
+        await update_task_status_in_db(
+            task_id, "completed", result_text=full_transcript.strip()
+        )
+        logger.info("任務 %s 狀態更新為: completed", task_id)
+
+    except Exception as e:
+        logger.exception("處理任務 %s 過程中發生錯誤", task_id)
+        await update_task_status_in_db(task_id, "failed", error_message=str(e))
+        logger.info("任務 %s 狀態更新為: failed", task_id)
+
+
+async def update_task_status_in_db(
+    task_id: str,
+    status: str,
+    result_text: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    """在資料庫中更新任務的狀態、結果或錯誤訊息。"""
+    try:
+        async with aiosqlite.connect(DATABASE_FILE) as db:
+            await db.execute(
+                """
+                UPDATE transcription_tasks
+                SET status = ?, result_text = ?, error_message = ?
+                WHERE id = ?
+                """,
+                (status, result_text, error_message, task_id),
+            )
+            await db.commit()
+    except aiosqlite.Error as e:
+        logger.exception("更新任務 %s 狀態時發生資料庫錯誤", task_id)
+
+
+def transcriber_worker_process(
+    log_queue: Optional[mp.Queue],
+    task_queue: mp.Queue,
+    result_queue: Optional[mp.Queue],
+    config: Optional[dict[str, Any]],
+) -> None:
+    """
+    轉寫工人行程的主函數。
+
+    它會持續從任務佇列中獲取任務 ID，並呼叫 `process_single_task` 進行處理。
+    """
+    # 此處的 log_queue, result_queue, config 暫未使用，但保留簽名以符合架構
+    logger.info("真實轉寫工人行程已啟動 (PID: %s)", mp.current_process().pid)
+
+    async def main_loop() -> None:
+        while True:
+            try:
+                # 從佇列中獲取任務，如果佇列為空，會阻塞等待
+                task_id = task_queue.get()
+                if task_id is None:
+                    logger.info("收到結束信號，工人行程即將關閉。")
+                    break
+                await process_single_task(task_id)
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("工人行程收到中斷信號，正在關閉。")
+                break
+            except Exception:
+                logger.exception("工人在主循環中發生嚴重錯誤，將在10秒後重試。")
+                await asyncio.sleep(10)
+
+    # 為了能在同步函數中運行異步循環
+    asyncio.run(main_loop())
+
+
+if __name__ == "__main__":
+    # 這部分保留用於獨立測試
+    # 為了直接運行, 需要一個模擬的佇列
+    class MockQueue:
+        """模擬佇列."""
+
+        def put(self, *args: Any, **kwargs: Any) -> None:
+            """模擬 put."""
+            pass
+
+    transcriber_worker_process(MockQueue(), mp.Queue(), mp.Queue(), {})
+"""模擬轉寫工人模組"""
+import asyncio
+import multiprocessing as mp
+import time
+from typing import Any, Optional
+
+import aiosqlite
+
+from prometheus.core.logging.log_manager import LogManager
+from prometheus.transcriber.core import DATABASE_FILE
+
+# --- 日誌記錄器設定 ---
+log_manager = LogManager(log_file="transcriber_mock_worker.log")
+logger = log_manager.get_logger(__name__)
+
+
+async def simulate_task_processing(task_id: str) -> None:
+    """
+    模擬處理一個指定的轉寫任務。
+
+    Args:
+        task_id (str): 要模擬處理的任務 ID。
+    """
+    logger.info("模擬處理任務: %s", task_id)
+
+    try:
+        # 1. 模擬更新任務狀態為 'processing'
+        await update_task_status_in_db(task_id, "processing")
+        logger.info("任務 %s: 狀態更新為 -> processing", task_id)
+        await asyncio.sleep(0.5)  # 模擬處理延遲
+
+        # 2. 模擬轉寫完成
+        mock_transcript = f"這是任務 {task_id} 的模擬轉寫結果。"
+        logger.info("任務 %s: 模擬轉寫完成。", task_id)
+        await asyncio.sleep(0.5)
+
+        # 3. 更新最終結果
+        await update_task_status_in_db(
+            task_id, "completed", result_text=mock_transcript
+        )
+        logger.info("任務 %s: 狀態更新為 -> completed", task_id)
+
+    except Exception as e:
+        logger.exception("模擬處理任務 %s 過程中發生錯誤", task_id)
+        await update_task_status_in_db(task_id, "failed", error_message=str(e))
+        logger.info("任務 %s: 狀態更新為 -> failed", task_id)
+
+
+async def update_task_status_in_db(
+    task_id: str,
+    status: str,
+    result_text: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    """在資料庫中更新任務的狀態、結果或錯誤訊息。"""
+    try:
+        async with aiosqlite.connect(DATABASE_FILE) as db:
+            await db.execute(
+                """
+                UPDATE transcription_tasks
+                SET status = ?, result_text = ?, error_message = ?
+                WHERE id = ?
+                """,
+                (status, result_text, error_message, task_id),
+            )
+            await db.commit()
+    except aiosqlite.Error as e:
+        logger.exception("更新任務 %s 狀態時發生資料庫錯誤", task_id)
+
+
+def mock_worker_process(
+    log_queue: Optional[mp.Queue],
+    task_queue: mp.Queue,
+    result_queue: Optional[mp.Queue],
+    config: Optional[dict[str, Any]],
+) -> None:
+    """
+    模擬轉寫工人行程的主函數。
+
+    它會持續從任務佇列中獲取任務 ID，並呼叫 `simulate_task_processing` 進行模擬處理。
+    """
+    logger.info("模擬轉寫工人行程已啟動 (PID: %s)", mp.current_process().pid)
+
+    async def main_loop() -> None:
+        while True:
+            try:
+                task_id = task_queue.get()
+                if task_id is None:
+                    logger.info("收到結束信號，模擬工人行程即將關閉。")
+                    break
+                await simulate_task_processing(task_id)
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("模擬工人行程收到中斷信號，正在關閉。")
+                break
+            except Exception:
+                logger.exception("模擬工人在主循環中發生嚴重錯誤，將在10秒後重試。")
+                await asyncio.sleep(10)
+
+    asyncio.run(main_loop())
