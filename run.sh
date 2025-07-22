@@ -7,7 +7,7 @@ set -e
 
 # --- 步驟 1: 自我定位 ---
 # 使用 Python 和 pathlib 來取得專案根目錄，確保跨平台相容性
-PROJECT_ROOT=$(python -c "from pathlib import Path; print(Path(__file__).resolve().parent)")
+PROJECT_ROOT=$(pwd)
 
 # --- 步驟 2: 環境準備 ---
 # Poetry 會自動管理虛擬環境

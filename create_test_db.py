@@ -1,8 +1,5 @@
 from pathlib import Path
-import sys
-sys.path.append(str(Path(__file__).parent.joinpath('integrated_platform/src')))
-
-from log_manager import LogManager
+from integrated_platform.src.log_manager import LogManager
 
 db_path = Path("test_logs.sqlite")
 if db_path.exists():

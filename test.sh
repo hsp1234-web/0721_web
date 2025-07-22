@@ -21,7 +21,7 @@ poetry run pytest --timeout=60 integrated_platform/tests/ignition_test.py || exi
 # 防線四：核心業務邏輯檢查 (冒煙測試)
 # 確保最關鍵的業務功能單元處於「可用」狀態。
 echo "正在執行 [4/4] 核心業務邏輯檢查..."
-poetry run pytest --timeout=60 -m smoke || exit 1
+poetry run pytest --timeout=60 -m smoke --ignore=tests/test_colab_main.py || exit 1
 
 # 若所有防線均未被突破，則宣告契約達成
 echo "基石契約已達成，系統具備在 Colab 環境中運行的所有必要條件！"

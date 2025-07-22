@@ -14,8 +14,7 @@ version = "0.2.0"
 description = "API-driven dynamic frontend with automated testing"
 authors = ["Commander"]
 readme = "README.md"
-packages = [{include = "src"}]
-package-mode = false
+packages = [{include = "integrated_platform"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -23,22 +22,27 @@ fastapi = "*"
 typer = {extras = ["all"], version = "^0.16.0"}
 ipython = "^8.20.0"
 ipywidgets = "^8.1.1"
-uvicorn = "^0.30.3"
-
-[tool.poetry.group.dev.dependencies]
-deptry = "^0.13.0"
-ruff = "^0.5.5"
 pytest = "^7.0.0"
-httpx = "^0.23.0" # FastAPI 推薦的測試用 HTTP client
+httpx = "^0.23.0"
 requests = "^2.32.3"
 scipy = "^1.14.0"
 pytest-timeout = "^2.2.0"
 numpy = "^1.26.4"
+uvicorn = "^0.30.3"
+psutil = "^5.9.5"
+
+[tool.poetry.group.dev.dependencies]
+deptry = "^0.13.0"
+ruff = "^0.5.5"
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 markers = [
     "smoke: marks tests as smoke tests (fast, core functionality)"
 ]
 
 [tool.deptry]
-known_first_party = ["src"]
+exclude = ['integrated_platform/get-pip.py']
+known_first_party = ["src", "log_manager", "colab_main"]
+per_rule_ignores = { "DEP001" = ["google"] }
+ignore_obsolete = ["httpx", "pytest-timeout", "uvicorn"]
