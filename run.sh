@@ -19,7 +19,5 @@ export PATH="/root/.local/bin:$PATH"
 )
 
 # --- 步驟 4: 在背景啟動伺服器 ---
-(
-  cd "$PROJECT_ROOT/integrated_platform"
-  nohup poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 > "$PROJECT_ROOT/server.log" 2>&1 &
-)
+cd "$PROJECT_ROOT/integrated_platform"
+poetry run python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 > "$PROJECT_ROOT/server.log" 2>&1 &
