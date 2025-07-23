@@ -19,15 +19,31 @@ echof "Setup" "正在安裝必要的系統工具 (sqlite3)..."
 apt-get update > /dev/null && apt-get install -y sqlite3 > /dev/null
 
 # --- 執行總指揮 ---
-echof "Execution" "準備執行總指揮 start_platform.py..."
-PORT=8899
-# 使用最直接、最不可能失敗的方式執行
-python3 integrated_platform/start_platform.py \
-    --fastapi-port "$PORT" \
-    --display-lines 100 &
+echof "Execution" "準備執行 v2.1.0 堡壘架構..."
+export FASTAPI_PORT=8899
+export LOG_DISPLAY_LINES=100
+export PROJECT_FOLDER_NAME="WEB"
 
+# 模擬 Colab 環境，直接呼叫 colab_bootstrap.main
+# 我們需要一個 mock 來處理 colab/ipython 的導入
+# 我們將這個 mock 寫在一個臨時檔案中
+cat > mock_colab.py <<EOF
+import sys
+from unittest.mock import MagicMock
+sys.modules['IPython'] = MagicMock()
+sys.modules['IPython.display'] = MagicMock()
+sys.modules['google.colab'] = MagicMock()
+sys.modules['google.colab.output'] = MagicMock()
+sys.modules['psutil'] = MagicMock()
+
+from integrated_platform.src import colab_bootstrap
+colab_bootstrap.FASTAPI_PORT = int(sys.argv[1])
+colab_bootstrap.main()
+EOF
+
+python3 mock_colab.py $FASTAPI_PORT &
 START_PLATFORM_PID=$!
-echof "Execution" "總指揮已在背景啟動 (PID: $START_PLATFORM_PID)。開始監控..."
+echof "Execution" "堡壘架構已在背景啟動 (PID: $START_PLATFORM_PID)。開始監控..."
 
 # --- 監控與驗證 ---
 WAIT_SECONDS=80
@@ -36,7 +52,7 @@ sleep $WAIT_SECONDS
 
 # --- 驗證 ---
 echof "Validation" "正在執行手動健康檢查..."
-HEALTH_CHECK_URL="http://localhost:${PORT}/health"
+HEALTH_CHECK_URL="http://localhost:${FASTAPI_PORT}/health"
 if curl -fsS "${HEALTH_CHECK_URL}" > /dev/null; then
     echof "Validation" "健康檢查成功！後端服務已正確啟動。" "\e[1;32m"
 else

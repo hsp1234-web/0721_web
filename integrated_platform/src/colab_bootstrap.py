@@ -178,18 +178,20 @@ def run_command(command, cwd):
         raise subprocess.CalledProcessError(return_code, command)
     log_manager.log("SUCCESS", f"指令 '{' '.join(command)}' 執行成功。")
 
-def start_fastapi_server():
+def start_fastapi_server(log_manager):
     """在一個獨立的線程中啟動 FastAPI 伺服器。"""
     log_manager.log("INFO", "正在準備啟動 FastAPI 伺服器...")
     try:
         import uvicorn
         from integrated_platform.src.main import app
 
+        # 將 log_manager 傳遞給 app，以便在 FastAPI 內部使用
+        app.state.log_manager = log_manager
+
         config = uvicorn.Config(app, host="0.0.0.0", port=FASTAPI_PORT, log_level="info")
         server = uvicorn.Server(config)
 
         # 在一個新的 daemon 線程中運行伺服器
-        # 這可以防止它阻塞主線程
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()
         log_manager.log("SUCCESS", f"FastAPI 伺服器已在背景線程中啟動。")
@@ -198,7 +200,7 @@ def start_fastapi_server():
         log_manager.log("CRITICAL", f"FastAPI 伺服器啟動失敗: {e}")
         raise
 
-def health_check():
+def health_check(log_manager):
     """執行健康檢查循環，直到服務就緒或超時。"""
     import requests
     log_manager.log("INFO", "啟動健康檢查程序...")
@@ -216,7 +218,7 @@ def health_check():
     log_manager.log("CRITICAL", "健康檢查超時，服務啟動失敗。")
     return False
 
-def create_public_portal():
+def create_public_portal(log_manager):
     """建立公開連結。"""
     from google.colab import output as colab_output
     log_manager.log("INFO", f"奉命建立服務入口，目標埠號: {FASTAPI_PORT}...")
@@ -231,40 +233,66 @@ def create_public_portal():
 # --- 主流程 ---
 def main():
     """單線程堡壘架構的主執行流程。"""
+    # 由於此腳本是在 Colab 環境中被 import 後才執行，
+    # 我們可以假設工作目錄已經被切換到專案根目錄。
+    # 因此，我們可以直接存取 run.sh 和其他專案檔案。
+    project_root = Path(os.getcwd())
+
+    # --- 階段一：阻塞式前景安裝 ---
+    # 這是整個流程的第一步，也是最關鍵的一步。
+    # 我們不進行任何日誌記錄或 UI 初始化，就是為了確保
+    # 在一個「乾淨」的環境中完成安裝。
+    # Colab 的輸出欄位在此階段會直接顯示 run.sh 的輸出。
+    print("==> [階段一] 正在鞏固執行環境...")
+    print("==> [階段一] 執行依賴安裝腳本 (run.sh)...")
+    try:
+        # 使用 subprocess.run 實現阻塞式執行
+        # check=True 會在返回碼非 0 時拋出 CalledProcessError
+        subprocess.run(
+            ["bash", "run.sh"],
+            cwd=project_root,
+            check=True,
+            capture_output=False, # 直接將輸出打印到當前終端
+            text=True
+        )
+        print("==> [階段一] 環境鞏固成功。")
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"==> [階段一][致命錯誤] 環境鞏固失敗: {e}", file=sys.stderr)
+        print("==> [階段一][致命錯誤] 作戰終止。", file=sys.stderr)
+        return # 關鍵：如果安裝失敗，則立即終止
+
+    # --- 安裝完成後，才能安全地導入其他模組 ---
+    # 這是為了防止在 pip install 完成前，就嘗試導入不存在的套件。
+    import traceback
+    from IPython.display import display, Javascript
+    from google.colab import output as colab_output
+
+    # --- 階段二：初始化日誌系統並啟動儀表板 ---
     global log_manager
     start_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
 
-    # 步驟 0: 初始化最基礎的日誌系統
-    # 注意：此時 display_manager 尚未啟動
-    db_path = Path(f"/content/{PROJECT_FOLDER_NAME}/logs.sqlite")
+    db_path = project_root / "logs.sqlite"
     if db_path.exists(): db_path.unlink()
     log_manager = LogManager(db_path=db_path, version=APP_VERSION)
     log_manager.log("INFO", f"作戰流程開始 (版本 {APP_VERSION}，啟動於 {start_time_str})。")
+    log_manager.log("INFO", "依賴安裝完成，正在啟動戰情儀表板...")
 
-    display_thread = None
+    display_thread = DisplayManager(db_path, STOP_EVENT)
+    display_thread.start()
+    time.sleep(1) # 給予 UI 一點時間渲染
 
     try:
-        # 步驟 1: 執行 run.sh 來安裝所有依賴
-        project_root = Path(f"/content/{PROJECT_FOLDER_NAME}")
-        run_command(["bash", "run.sh"], cwd=project_root)
-
-        # 步驟 2: 依賴安裝完成後，啟動日誌顯示
-        log_manager.log("INFO", "依賴安裝完成，正在啟動戰情儀表板...")
-        display_thread = DisplayManager(db_path, STOP_EVENT)
-        display_thread.start()
-        time.sleep(1) # 給予 UI 一點時間渲染
-
         # 步驟 3: 在線程中啟動後端
-        start_fastapi_server()
+        start_fastapi_server(log_manager)
 
         # 步驟 4: 執行健康檢查
-        if not health_check():
+        if not health_check(log_manager):
             raise RuntimeError("後端服務健康檢查失敗。")
 
         # 步驟 5: 建立公開連結
-        create_public_portal()
+        create_public_portal(log_manager)
 
-        log_manager.log("SUCCESS", "作戰系統已上線！要停止所有服務，請點擊此儲存格的「中斷執行」(■) 按鈕。")
+        log_manager.log("SUCCESS", "✅ 作戰平台已成功啟動。要停止所有服務，請點擊此儲存格的「中斷執行」(■) 按鈕。")
         while not STOP_EVENT.is_set():
             time.sleep(1)
 
@@ -277,7 +305,7 @@ def main():
         print(f"\n💥 作戰流程發生未預期的嚴重錯誤: {e}", file=sys.stderr)
     finally:
         STOP_EVENT.set()
-        if display_thread and display_thread.is_alive():
+        if 'display_thread' in locals() and display_thread.is_alive():
             display_thread.join(timeout=2)
 
         end_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
