@@ -7,9 +7,15 @@ from pathlib import Path
 from .log_manager import LogManager
 
 # --- 全域設定 ---
-LOG_DB_PATH = Path("../logs.sqlite")
+# 建立一個指向專案根目錄的絕對路徑
+# __file__ 是 '.../integrated_platform/src/main.py'
+# .parent 是 '.../integrated_platform/src'
+# .parent.parent 是 '.../integrated_platform'
+# .parent.parent.parent 是專案根目錄
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+LOG_DB_PATH = PROJECT_ROOT / "logs.sqlite"
 log_manager = LogManager(LOG_DB_PATH)
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = PROJECT_ROOT / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 TRANSCRIPTION_JOBS = {}
 
@@ -52,3 +58,12 @@ async def get_applications():
     ]
     log_manager.log("INFO", f"成功返回 {len(apps_list)} 個應用程式。")
     return apps_list
+
+# --- 應用程式啟動 ---
+if __name__ == "__main__":
+    import uvicorn
+    # 使用 uvicorn 來啟動應用程式
+    # host="0.0.0.0" 讓服務可以從外部網路存取
+    # port=8000 是常用的開發埠號
+    # reload=True 可以在程式碼變更時自動重啟伺服器，方便開發
+    uvicorn.run("integrated_platform.src.main:app", host="0.0.0.0", port=8000, reload=True)

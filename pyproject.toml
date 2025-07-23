@@ -11,7 +11,7 @@
 [tool.poetry]
 name = "integrated-platform"
 version = "0.2.0"
-description = "API-driven dynamic frontend with automated testing"
+description = "一個由 API 驅動、具備自動化測試的動態前端專案"
 authors = ["Commander"]
 readme = "README.md"
 packages = [{include = "src"}]
