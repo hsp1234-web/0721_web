@@ -116,7 +116,8 @@ class DisplayManager(threading.Thread):
                 f"<div class='grid-item' style='color: #FFFFFF;'>| CPU: {cpu:4.1f}%</div>"
                 f"<div class='grid-item' style='color: #FFFFFF;'>| RAM: {ram:4.1f}% | [系統運行中 <span class='version-tag'>{APP_VERSION}</span>]</div>"
             )
-            js_code = f"document.getElementById('status-bar').innerHTML = `{status_html.replace('`', '\\`')}`;"
+            escaped_status_html = status_html.replace('`', '\\`')
+            js_code = f"document.getElementById('status-bar').innerHTML = `{escaped_status_html}`;"
             self._execute_js(js_code)
         except Exception:
             pass
@@ -221,6 +222,7 @@ def health_check(log_manager):
 def create_public_portal(log_manager):
     """建立公開連結。"""
     from google.colab import output as colab_output
+    from IPython.display import display, Javascript
     log_manager.log("INFO", f"奉命建立服務入口，目標埠號: {FASTAPI_PORT}...")
     try:
         with colab_output.redirect_to_element('#portal-container'):
