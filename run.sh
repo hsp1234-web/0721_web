@@ -87,21 +87,41 @@ python3 -m integrated_platform.src.main > backend_startup.log 2>&1 &
 echof "Application Launch" "應用程式已在背景啟動。"
 
 # ==============================================================================
-# Phase 6: 服務健康檢查
+# Phase 6: 服務健康檢查 (強化版)
 # ==============================================================================
-# 從環境變數讀取埠號，如果未設定則使用預設值 8000
+# [作戰藍圖 244-V] 實施帶有重試機制的健康檢查循環
+# --- 健康檢查設定 ---
 : "${UVICORN_PORT:=8000}"
-echof "Health Check" "等待 15 秒讓服務完全啟動..."
-sleep 15
+HEALTH_CHECK_URL="http://localhost:${UVICORN_PORT}/health"
+MAX_ATTEMPTS=10 # 最大嘗試次數 (10 * 3s = 30s)
+WAIT_SECONDS=3  # 每次嘗試間隔秒數
+ATTEMPT_NUM=1
 
-echof "Health Check" "正在對 http://localhost:${UVICORN_PORT}/health 進行健康檢查..."
-if curl -fsS http://localhost:${UVICORN_PORT}/health > /dev/null; then
-    echof "Mission Complete" "後端服務已成功啟動並通過健康檢查！" "\e[1;32m"
-    echof "Mission Complete" "您現在可以透過 tail -f backend_startup.log 來監控即時日誌。" "\e[1;32m"
-else
-    echof "Health Check" "錯誤: 後端服務未通過健康檢查或未在預期埠號響應。" "\e[31m"
-    echof "Health Check" "--- 後端啟動日誌 (backend_startup.log) ---" "\e[33m"
-    cat backend_startup.log
-    echof "Health Check" "----------------------------------------" "\e[33m"
-    exit 1
-fi
+echof "Health Check" "啟動健康檢查程序，目標: ${HEALTH_CHECK_URL}"
+
+while [ $ATTEMPT_NUM -le $MAX_ATTEMPTS ]; do
+    echof "Health Check" "第 ${ATTEMPT_NUM}/${MAX_ATTEMPTS} 次嘗試連線..."
+    # -f: 若伺服器錯誤則快速失敗 (不輸出 HTML 錯誤頁)
+    # -sS: 靜默模式，但顯示錯誤
+    if curl -fsS "${HEALTH_CHECK_URL}" > /dev/null; then
+        echof "Mission Complete" "後端服務已成功啟動並通過健康檢查！" "\e[1;32m"
+        echof "Mission Complete" "您現在可以透過 tail -f backend_startup.log 來監控即時日誌。" "\e[1;32m"
+        exit 0 # 成功，正常退出腳本
+    fi
+
+    if [ $ATTEMPT_NUM -eq $MAX_ATTEMPTS ]; then
+        echof "Health Check" "已達最大嘗試次數，服務啟動失敗。" "\e[31m"
+        break # 跳出循環，執行失敗後的處理
+    fi
+
+    echof "Health Check" "服務尚未就緒，將在 ${WAIT_SECONDS} 秒後重試..." "\e[33m"
+    sleep $WAIT_SECONDS
+    ATTEMPT_NUM=$((ATTEMPT_NUM + 1))
+done
+
+# --- 若循環結束後仍未成功，則顯示錯誤並退出 ---
+echof "Health Check" "錯誤: 後端服務未通過健康檢查或未在預期埠號響應。" "\e[31m"
+echof "Health Check" "--- 後端啟動日誌 (backend_startup.log) ---" "\e[33m"
+cat backend_startup.log
+echof "Health Check" "----------------------------------------" "\e[33m"
+exit 1
