@@ -16,8 +16,9 @@ from . import config
 from . import integrated_logic
 
 # --- 設定結構化日誌 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# 移除 basicConfig，改為在啟動時動態設定 handler
+logger = logging.getLogger()
+logger.setLevel(logging.INFO) # 設定根 logger 的級別
 
 # --- 全域變數與模擬資料庫 ---
 # 使用簡單的字典來模擬資料庫和任務儲存
@@ -31,6 +32,31 @@ async def lifespan(app: FastAPI):
     """
     應用程式啟動與關閉時的生命週期事件。
     """
+    # --- 日誌系統與 Colab 環境整合 ---
+    # 檢查環境變數，如果設定了 LOG_DB_PATH，就使用 SQLiteHandler
+    # 這使得應用程式可以將日誌無縫寫入 Colab UI 的資料庫
+    log_db_path_str = os.getenv("LOG_DB_PATH")
+    if log_db_path_str:
+        from .sqlite_log_handler import SQLiteHandler
+        log_db_path = Path(log_db_path_str)
+        # 確保目錄存在
+        log_db_path.parent.mkdir(exist_ok=True)
+        sqlite_handler = SQLiteHandler(db_path=log_db_path)
+
+        # 為 handler 設定一個 formatter，使其只輸出訊息本身
+        formatter = logging.Formatter('%(message)s')
+        sqlite_handler.setFormatter(formatter)
+
+        logger.addHandler(sqlite_handler)
+        logger.info("偵測到 LOG_DB_PATH，已啟用 SQLite 日誌處理器。")
+    else:
+        # 如果沒有設定環境變數，則退回到標準的控制台輸出
+        stream_handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+        logger.info("未偵測到 LOG_DB_PATH，日誌將輸出至控制台。")
+
     logger.info("應用程式啟動中，開始執行啟動程序...")
 
     # 確保上傳目錄存在
@@ -38,7 +64,6 @@ async def lifespan(app: FastAPI):
     logger.info(f"確保上傳目錄 '{config.UPLOAD_DIR}' 存在。")
 
     # 啟動模擬轉寫工人作為背景任務
-    # 這將會持續在背景執行，處理佇列中的任務
     worker = integrated_logic.MockTranscriberWorker(mock_tasks, mock_task_queue)
     asyncio.create_task(worker.process_tasks())
     logger.info("模擬轉寫工人已作為背景任務啟動。")

@@ -7,14 +7,30 @@
 set -e
 
 # --- 步驟 1: 環境準備 ---
-echo "正在準備環境並安裝依賴..."
-poetry install --no-root --with dev
+echo "正在準備環境..."
+
+# 檢查 Poetry 是否已安裝，若無則自動安裝
+# 這對於在 Colab 等乾淨環境中運行至關重要
+if ! command -v poetry &> /dev/null
+then
+    echo "Poetry 未安裝，正在透過 pip 安裝..."
+    pip install poetry
+    echo "Poetry 已安裝。"
+else
+    echo "Poetry 已安裝。"
+fi
+
+# 定義 Poetry 的絕對路徑以避免 PATH 問題
+POETRY_CMD="$HOME/.local/bin/poetry"
+
+echo "正在使用 Poetry 安裝專案依賴..."
+$POETRY_CMD install --no-root --with dev
 
 # --- 步驟 2: 啟動應用程式並捕獲輸出 ---
 export PYTHONPATH=.
 echo "正在啟動應用程式..."
 # 將標準輸出與標準錯誤同時重定向到日誌檔和控制台
-poetry run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
+$POETRY_CMD run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
 
 # --- 步驟 3: 等待服務啟動並進行健康檢查 ---
 # 從環境變數讀取埠號，如果未設定則使用預設值 8000
