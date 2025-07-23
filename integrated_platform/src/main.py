@@ -68,7 +68,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(worker.process_tasks())
     logger.info("模擬轉寫工人已作為背景任務啟動。")
 
-    logger.info("應用程式啟動程序完成。")
+    # [作戰藍圖 244-V] 加入啟動寬限期
+    logger.info(f"啟動程序完成，進入 {config.STARTUP_GRACE_PERIOD} 秒的寬限期...")
+    await asyncio.sleep(config.STARTUP_GRACE_PERIOD)
+    logger.info("寬限期結束，應用程式已完全就緒。")
+
     yield
     logger.info("伺服器應用已關閉。")
 
