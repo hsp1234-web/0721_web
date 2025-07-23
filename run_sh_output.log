@@ -1,0 +1,5 @@
+e[32m==> [Phase: Setup                    ] 正在設定工作目錄...[0m
+e[32m==> [Phase: Setup                    ] 工作目錄已設定為: /app[0m
+e[32m==> [Phase: Sanity Check             ] 正在檢查核心工具 (python3, pip)...[0m
+e[32m==> [Phase: Sanity Check             ] 核心工具檢查通過。[0m
+e[32m==> [Phase: Poetry Setup             ] 正在檢查並安裝 Poetry...[0m
