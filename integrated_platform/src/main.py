@@ -52,3 +52,12 @@ async def get_applications():
     ]
     log_manager.log("INFO", f"成功返回 {len(apps_list)} 個應用程式。")
     return apps_list
+
+# --- 應用程式啟動 ---
+if __name__ == "__main__":
+    import uvicorn
+    # 使用 uvicorn 來啟動應用程式
+    # host="0.0.0.0" 讓服務可以從外部網路存取
+    # port=8000 是常用的開發埠號
+    # reload=True 可以在程式碼變更時自動重啟伺服器，方便開發
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
