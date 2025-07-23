@@ -1,41 +1,106 @@
 #!/bin/bash
 
-# 【作戰藍圖 244-D：鳳凰之心 - 部署腳本】
-# 目標：根除靜默錯誤，確保後端啟動過程透明且可追蹤。
+# ==============================================================================
+# 作戰藍圖 244-L: 鳳凰之心 - 環境感知與自我修復部署腳本
+# 最高指導原則: 腳本必須像一個經驗豐富的工程師一樣思考和行動。
+# ==============================================================================
 
+# --- 通用設定 ---
 # 當任何指令失敗時，立即終止腳本
 set -e
 
-# --- 步驟 1: 環境準備 ---
-echo "正在準備環境並安裝依賴..."
-poetry install --no-root --with dev
+# --- 格式化日誌函式 ---
+# echof: Echo, Formatted
+# $1: 階段名稱
+# $2: 訊息
+# $3: 顏色 (可選)
+echof() {
+    local phase=$1
+    local message=$2
+    local color=${3:-\e[32m} # 預設為綠色
+    local nocolor='\033[0m'
+    printf "${color}==> [Phase: %-25s] %s${nocolor}\n" "$phase" "$message"
+}
 
-# --- 步驟 2: 啟動應用程式並捕獲輸出 ---
-export PYTHONPATH=.
-echo "正在啟動應用程式..."
-# 將標準輸出與標準錯誤同時重定向到日誌檔和控制台
-poetry run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
+# ==============================================================================
+# Phase 0: 設定工作目錄
+# ==============================================================================
+echof "Setup" "正在設定工作目錄..."
+cd "$(dirname "$0")"
+echof "Setup" "工作目錄已設定為: $(pwd)"
 
-# --- 步驟 3: 檢查應用啟動狀態 ---
-# 等待一小段時間讓應用程式啟動
-sleep 10
-
-# 檢查日誌中是否有 FastAPI 的啟動成功訊息
-if grep -q "Uvicorn running on" backend_startup.log; then
-    echo "訊息：後端應用已成功啟動。"
-else
-    echo "錯誤：後端應用啟動失敗。請檢查 backend_startup.log 獲取詳細資訊。"
-    cat backend_startup.log
+# ==============================================================================
+# Phase 1: 環境健全性檢查 (Sanity Check)
+# ==============================================================================
+echof "Sanity Check" "正在檢查核心工具 (python3, pip)..."
+if ! command -v python3 &> /dev/null; then
+    echof "Sanity Check" "錯誤: python3 未安裝。" "\e[31m"
     exit 1
 fi
+if ! command -v pip &> /dev/null; then
+    echof "Sanity Check" "錯誤: pip 未安裝。" "\e[31m"
+    exit 1
+fi
+echof "Sanity Check" "核心工具檢查通過。"
 
-# --- 步驟 4: 服務健康檢查 ---
-echo "正在進行服務健康檢查..."
-if curl -s http://localhost:8000/docs > /dev/null; then
-    echo "成功：後端服務已成功啟動並在 http://localhost:8000 響應！"
-    echo "您現在可以透過 tail -f backend_startup.log 來監控即時日誌。"
+# ==============================================================================
+# Phase 2: 依賴管理器設定 (Poetry)
+# ==============================================================================
+echof "Poetry Setup" "正在檢查並安裝 Poetry..."
+if ! python3 -m poetry --version &> /dev/null; then
+    echof "Poetry Setup" "Poetry 未安裝，正在透過 pip 安裝..."
+    pip install poetry
+    echof "Poetry Setup" "Poetry 已成功安裝。"
 else
-    echo "警告：後端服務似乎未在預期埠號響應。請檢查 backend_startup.log 以獲取更多線索。"
+    echof "Poetry Setup" "Poetry 已安裝。"
+fi
+
+# ==============================================================================
+# Phase 3: Colab 環境感知與配置
+# ==============================================================================
+echof "Environment Sensing" "正在偵測執行環境..."
+if [ -n "$COLAB_GPU" ]; then
+    echof "Environment Sensing" "偵測到 Colab 環境！正在設定 Poetry 以使用系統 Python..." "\e[33m"
+    python3 -m poetry config virtualenvs.create false --local
+    echof "Environment Sensing" "Poetry 已配置為不建立虛擬環境。" "\e[33m"
+else
+    echof "Environment Sensing" "未偵測到 Colab 環境，將使用預設的 Poetry 設定。"
+fi
+
+# ==============================================================================
+# Phase 4: 安裝專案依賴
+# ==============================================================================
+echof "Dependency Install" "正在使用 Poetry 安裝專案依賴 (詳細模式)..."
+# --no-ansi: 移除顏色代碼，讓日誌更乾淨
+# --verbose: 提供最詳細的輸出，便於除錯
+python3 -m poetry install --no-root --with dev --no-ansi --verbose
+echof "Dependency Install" "專案依賴安裝完成。"
+
+# ==============================================================================
+# Phase 5: 啟動應用程式
+# ==============================================================================
+echof "Application Launch" "正在啟動後端應用程式..."
+export PYTHONPATH=.
+# 將日誌同時輸出到 backend_startup.log 和控制台
+python3 -m poetry run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
+echof "Application Launch" "應用程式已在背景啟動。"
+
+# ==============================================================================
+# Phase 6: 服務健康檢查
+# ==============================================================================
+# 從環境變數讀取埠號，如果未設定則使用預設值 8000
+: "${UVICORN_PORT:=8000}"
+echof "Health Check" "等待 15 秒讓服務完全啟動..."
+sleep 15
+
+echof "Health Check" "正在對 http://localhost:${UVICORN_PORT}/health 進行健康檢查..."
+if curl -fsS http://localhost:${UVICORN_PORT}/health > /dev/null; then
+    echof "Mission Complete" "後端服務已成功啟動並通過健康檢查！" "\e[1;32m"
+    echof "Mission Complete" "您現在可以透過 tail -f backend_startup.log 來監控即時日誌。" "\e[1;32m"
+else
+    echof "Health Check" "錯誤: 後端服務未通過健康檢查或未在預期埠號響應。" "\e[31m"
+    echof "Health Check" "--- 後端啟動日誌 (backend_startup.log) ---" "\e[33m"
     cat backend_startup.log
+    echof "Health Check" "----------------------------------------" "\e[33m"
     exit 1
 fi
