@@ -20,17 +20,15 @@ else
     echo "Poetry 已安裝。"
 fi
 
-# 定義 Poetry 的絕對路徑以避免 PATH 問題
-POETRY_CMD="$HOME/.local/bin/poetry"
-
 echo "正在使用 Poetry 安裝專案依賴..."
-$POETRY_CMD install --no-root --with dev
+# 使用 python -m poetry 來執行，這是最穩健、不受 PATH 影響的方式
+python -m poetry install --no-root --with dev
 
 # --- 步驟 2: 啟動應用程式並捕獲輸出 ---
 export PYTHONPATH=.
 echo "正在啟動應用程式..."
-# 將標準輸出與標準錯誤同時重定向到日誌檔和控制台
-$POETRY_CMD run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
+# 同樣使用 python -m poetry run 來啟動應用
+python -m poetry run python -m integrated_platform.src.main > backend_startup.log 2>&1 &
 
 # --- 步驟 3: 等待服務啟動並進行健康檢查 ---
 # 從環境變數讀取埠號，如果未設定則使用預設值 8000
