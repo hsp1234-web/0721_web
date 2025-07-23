@@ -23,8 +23,8 @@ from IPython.display import display, HTML, Javascript, clear_output
 from google.colab import output as colab_output
 
 # --- 全域常數與設定 ---
-# [作戰藍圖 244-H] 加入版本號
-APP_VERSION = "v1.9.1"
+# [作戰藍圖 244-W] 新增版本號，用於追蹤與驗證
+APP_VERSION = "v1.9.2-mission-244w"
 ARCHIVE_FOLDER_NAME = "作戰日誌歸檔"
 FASTAPI_PORT = 8000
 LOG_DISPLAY_LINES = 15
@@ -89,7 +89,7 @@ class DisplayManager(threading.Thread):
 
     def setup_ui(self):
         clear_output(wait=True)
-        # [作戰藍圖 244-H] 在 UI 中加入版本號
+        # [作戰藍圖 244-W] 在 UI 中加入版本號
         ui_html = f"""
         <style>
             .grid-container {{ display: grid; grid-template-columns: 10ch 11ch 1fr; gap: 0 8px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.6; }}
@@ -111,7 +111,7 @@ class DisplayManager(threading.Thread):
         try:
             cpu, ram = psutil.cpu_percent(), psutil.virtual_memory().percent
             time_str = datetime.now(TAIPEI_TZ).strftime('%H:%M:%S')
-            # [作戰藍圖 244-H] 在狀態列加入版本號
+            # [作戰藍圖 244-W] 在狀態列加入版本號
             status_html = f"<div class='grid-item' style='color: #FFFFFF;'>{time_str}</div>" \
                           f"<div class='grid-item' style='color: #FFFFFF;'>| CPU: {cpu:4.1f}%</div>" \
                           f"<div class='grid-item' style='color: #FFFFFF;'>| RAM: {ram:4.1f}% | [系統運行中 <span class='version-tag'>{APP_VERSION}</span>]</div>"
@@ -159,39 +159,46 @@ class DisplayManager(threading.Thread):
             time.sleep(0.1)
 
 # ==============================================================================
-# SECTION 3: 公開服務入口建立官
+# SECTION 3: 公開服務入口建立官 (現代化)
 # ==============================================================================
 def create_public_portal(port, max_retries=5, delay_seconds=3):
-    """以高可靠性的方式，嘗試為指定的埠號建立一個公開的 Colab 代理連結。"""
+    """
+    [作戰藍圖 244-W] 採用 colab 建議的 serve_kernel_port_as_iframe，
+    以高可靠性的方式，嘗試為指定的埠號建立一個公開的 Colab 代理連結。
+    """
     global log_manager
     log_manager.log("INFO", f"奉命建立服務入口，目標埠號: {port}...")
-    button_html = """
-    <style>
-        .portal-button {{ background: linear-gradient(145deg, #2e6cdf, #4a8dff); border: none; border-radius: 8px; color: white; padding: 12px 24px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; font-weight: bold; font-family: 'Segoe UI', 'Noto Sans TC', sans-serif; margin: 4px 2px; cursor: pointer; box-shadow: 0 4px 15px 0 rgba(74, 144, 255, 0.45); transition: all 0.3s ease; }}
-        .portal-button:hover {{ background: linear-gradient(145deg, #4a8dff, #2e6cdf); box-shadow: 0 6px 20px 0 rgba(74, 144, 255, 0.6); transform: translateY(-2px); }}
-    </style>
-    <a href="{url}" target="_blank" class="portal-button">🚀 進入鳳凰轉錄儀作戰中心 ({version})</a>
-    """
+
     for attempt in range(max_retries):
         try:
+            # 使用官方推薦的 iframe 方式
             with colab_output.redirect_to_element('#portal-container'):
-                colab_output.clear()
-                colab_output.serve_kernel_port_as_window(port, path='/')
-            from google.colab import _kernel
-            base_url = _kernel.get_parent_request_header()['Referer'].split('?')[0]
-            public_url = f"{{base_url}}proxy/{{port}}/"
-            with colab_output.redirect_to_element('#portal-container'):
-                display(HTML(button_html.format(url=public_url, version=APP_VERSION)))
-            log_manager.log("SUCCESS", f"服務入口已成功建立！")
+                # 清理目標容器，確保冪等性
+                display(Javascript("document.getElementById('portal-container').innerHTML = '';"))
+                colab_output.serve_kernel_port_as_iframe(
+                    port,
+                    path='/',
+                    height=500,
+                )
+
+            log_manager.log("SUCCESS", f"服務入口已成功建立！(採用 iframe 模式)")
+            info_html = f"""
+            <p style="font-family: 'Segoe UI', 'Noto Sans TC', sans-serif; font-size: 16px;">
+                <b>🚀 鳳凰轉錄儀作戰中心已上線 (版本: {APP_VERSION})</b><br>
+                請點擊上方由 Colab 生成的 <code>https://...</code> 連結進入介面。
+            </p>
+            """
+            display(HTML(info_html))
             return
         except Exception as e:
-            log_manager.log("WARNING", f"建立入口嘗試 #{attempt + 1} 失敗...")
+            log_manager.log("WARNING", f"建立入口嘗試 #{attempt + 1} 失敗: {e}")
             if attempt < max_retries - 1:
                 time.sleep(delay_seconds)
             else:
                 log_manager.log("CRITICAL", "所有建立服務入口的嘗試均告失敗。")
-                with colab_output.redirect_to_element('#portal-container'):
-                     display(HTML("<p style='color:#F44336;'><b>錯誤：</b>無法建立公開連結。</p>"))
+                error_html = f"<p style='color:#F44336; font-family: sans-serif;'><b>錯誤：</b>無法建立公開連結。({APP_VERSION})</p>"
+                display(HTML(error_html))
+
 
 # ==============================================================================
 # SECTION 4: 核心輔助函式
@@ -296,6 +303,8 @@ def main():
         env = os.environ.copy()
         env['LOG_DB_PATH'] = str(SQLITE_DB_PATH)
         env['UVICORN_PORT'] = str(FASTAPI_PORT)
+        # [作戰藍圖 244-W] 將版本號傳遞給後端
+        env['APP_VERSION'] = APP_VERSION
 
         # 4. 使用新的串流日誌函式執行後端部署
         run_subprocess_with_streaming_logs(
