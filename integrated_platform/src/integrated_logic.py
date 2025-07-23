@@ -1,111 +1,95 @@
 # integrated_platform/src/integrated_logic.py
 import logging
-from . import config
+import time
+import uuid
+import asyncio
+from pydantic import BaseModel
 
-# 獲取與 main.py 中相同的 logger 實例
 logger = logging.getLogger(__name__)
 
-# --- 鳳凰專案：MP3 錄音轉寫服務 ---
-class TranscriberWorker:
-    """
-    職責：處理音訊轉寫的核心邏輯。
-    管理 Whisper 模型的載入、執行轉寫任務、並回報進度。
-    """
-    def __init__(self, model_name: str):
-        self.model_name = model_name
-        self.model = None
-        logger.info(f"轉寫工作者已初始化，準備使用的模型: {self.model_name}")
+# --- 普羅米修斯之火：金融因子工程與模擬框架 (模擬版) ---
+class MockDataPipeline:
+    def __init__(self, factors_db_path: str):
+        self.factors_db_path = factors_db_path
+        logger.info(f"模擬數據管線初始化，因子資料庫路徑: {self.factors_db_path}")
 
-    def load_model(self):
-        """
-        載入 faster-whisper 模型。
-        這是一個耗時操作，應該在背景或應用程式啟動時執行。
-        """
-        logger.info(f"正在載入 Whisper 模型: {self.model_name}...")
-        try:
-            # from faster_whisper import WhisperModel
-            # self.model = WhisperModel(self.model_name, device="cuda", compute_type="float16")
-            # 模擬模型載入成功
-            logger.info("Whisper 模型已成功載入 (模擬)。")
-            return True
-        except Exception as e:
-            logger.error(f"載入 Whisper 模型失敗: {e}", exc_info=True)
-            return False
+    def run_factor_calculation(self, asset_symbol: str):
+        logger.info(f"模擬為資產 {asset_symbol} 執行因子計算...")
+        time.sleep(2) # 模擬耗時操作
+        logger.info(f"模擬 {asset_symbol} 因子計算完成。")
+        return {"status": "success", "message": f"模擬因子計算完成：{asset_symbol}"}
 
-    def transcribe_audio(self, audio_path: str) -> str:
-        """
-        執行音訊檔案轉寫。
-        """
-        if not self.model:
-            logger.error("模型未載入，無法執行轉寫。")
-            raise RuntimeError("模型未載入，無法執行轉寫。")
+class MockBacktestingService:
+    def __init__(self, factors_db_path: str):
+        self.factors_db_path = factors_db_path
+        logger.info(f"模擬回測服務初始化，因子資料庫路徑: {self.factors_db_path}")
 
-        logger.info(f"開始轉寫檔案: {audio_path}")
-        # segments, info = self.model.transcribe(audio_path, beam_size=5)
-        # transcription = "".join([segment.text for segment in segments])
-        transcription = "這是一段模擬的轉寫文字稿。" # 模擬返回結果
-        logger.info(f"檔案轉寫完成: {audio_path}")
-        return transcription
+    def run_backtest(self, strategy_config: dict):
+        logger.info(f"模擬執行策略回測，策略配置: {strategy_config}...")
+        time.sleep(3) # 模擬耗時操作
+        logger.info(f"模擬策略回測完成。")
+        return {"status": "success", "report": {"sharpe_ratio": 1.5, "annual_return": 0.2}}
 
-# --- 普羅米修斯之火：金融因子工程與模擬框架 ---
-class StockFactorEngine:
-    """
-    職責：處理金融數據、計算因子。
-    連接到 DuckDB 並提供數據查詢和因子計算的介面。
-    """
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self.connection = None
-        logger.info(f"金融因子引擎已初始化，資料庫路徑: {self.db_path}")
+class MockEvolutionChamber:
+    def __init__(self, factors_db_path: str):
+        self.factors_db_path = factors_db_path
+        logger.info(f"模擬演化室初始化，因子資料庫路徑: {self.factors_db_path}")
 
-    def connect(self):
-        """
-        連接到 DuckDB 資料庫。
-        """
-        logger.info(f"正在連接到金融資料庫: {self.db_path}...")
-        try:
-            # import duckdb
-            # self.connection = duckdb.connect(self.db_path)
-            logger.info("金融資料庫連接成功 (模擬)。")
-            return True
-        except Exception as e:
-            logger.error(f"連接到金融資料庫失敗: {e}", exc_info=True)
-            return False
+    def evolve_strategy(self, generations: int):
+        logger.info(f"模擬執行策略演化，世代數: {generations}...")
+        time.sleep(5) # 模擬耗時操作
+        logger.info(f"模擬策略演化完成。")
+        return {"status": "success", "best_strategy": {"factors": ["mock_factor_A", "mock_factor_B"], "fitness": 1.8}}
 
-    def calculate_factor(self, factor_name: str) -> dict:
-        """
-        計算指定的金融因子。
-        """
-        if not self.connection:
-            logger.error("資料庫未連接，無法計算因子。")
-            raise RuntimeError("資料庫未連接，無法計算因子。")
+# --- 鳳凰專案：MP3 錄音轉寫服務 (模擬版) ---
+class TranscriptionTask(BaseModel):
+    task_id: str
+    file_path: str
+    status: str = "pending"
+    result: str = None
+    error: str = None
 
-        logger.info(f"開始計算金融因子: {factor_name}")
-        # 模擬因子計算
-        result = {"factor": factor_name, "value": 0.95}
-        logger.info(f"金融因子計算完成: {factor_name}")
-        return result
+class MockTaskQueue:
+    def __init__(self):
+        self._queue = []
+        logger.info("模擬任務佇列初始化。")
 
-class BacktestingService:
-    """
-    職責：執行基於金融因子的回測策略。
-    使用 StockFactorEngine 提供的數據來模擬交易策略的歷史表現。
-    """
-    def __init__(self, factor_engine: StockFactorEngine):
-        self.factor_engine = factor_engine
-        logger.info("回測服務已初始化。")
+    def put(self, task_id: str):
+        self._queue.append(task_id)
+        logger.info(f"模擬任務 {task_id} 已放入佇列。")
 
-    def run_backtest(self, strategy_name: str) -> dict:
-        """
-        執行回測。
-        """
-        logger.info(f"開始執行回測策略: {strategy_name}")
-        # factor_data = self.factor_engine.calculate_factor("momentum_60d")
-        # 模擬回測
-        report = {"strategy": strategy_name, "sharpe_ratio": 1.5, "max_drawdown": 0.1}
-        logger.info(f"回測執行完成: {strategy_name}")
-        return report
+    def get(self):
+        if self._queue:
+            task_id = self._queue.pop(0)
+            logger.info(f"模擬任務 {task_id} 已從佇列取出。")
+            return task_id
+        return None
 
-# --- 未來可將 FastAPI 路由邏輯移至此處，以進一步分離關注點 ---
-# 例如，可以建立一個名為 'create_api_router' 的函式，
-# 它返回一個 APIRouter 物件，包含了所有與這些業務邏輯相關的端點。
+class MockTranscriberWorker:
+    def __init__(self, tasks_db: dict, task_queue: MockTaskQueue):
+        self.tasks_db = tasks_db # 這裡使用一個字典來模擬資料庫
+        self.task_queue = task_queue
+        logger.info("模擬轉寫工人初始化。")
+
+    async def process_tasks(self):
+        while True:
+            task_id = self.task_queue.get()
+            if task_id:
+                task = self.tasks_db.get(task_id)
+                if task:
+                    logger.info(f"模擬處理轉寫任務: {task_id} (檔案: {task.file_path})...")
+                    task.status = "processing"
+                    self.tasks_db[task_id] = task # 更新狀態
+                    await asyncio.sleep(5) # 模擬轉寫時間
+                    if "error" in task.file_path: # 模擬錯誤情況
+                        task.status = "failed"
+                        task.error = "模擬轉寫失敗：檔案內容有問題。"
+                        logger.error(f"模擬轉寫任務 {task_id} 失敗。")
+                    else:
+                        task.status = "completed"
+                        task.result = f"這是檔案 {task.file_path} 的模擬轉寫結果。"
+                        logger.info(f"模擬轉寫任務 {task_id} 完成。")
+                    self.tasks_db[task_id] = task # 更新結果
+                else:
+                    logger.warning(f"模擬任務 {task_id} 不存在。")
+            await asyncio.sleep(1) # 短暫等待，避免忙碌循環
