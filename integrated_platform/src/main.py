@@ -7,7 +7,8 @@ from pathlib import Path
 from .log_manager import LogManager
 
 # --- 全域設定 ---
-LOG_DB_PATH = Path("../logs.sqlite")
+# 修正：將路徑調整為相對於專案根目錄，確保執行時能正確找到日誌資料庫
+LOG_DB_PATH = Path("logs.sqlite")
 log_manager = LogManager(LOG_DB_PATH)
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
