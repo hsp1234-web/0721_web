@@ -1,11 +1,13 @@
 # integrated_platform/src/colab_bootstrap.py
 # -*- coding: utf-8 -*-
 
-# --- v2.1.0 單線程堡壘架構 ---
-# 核心理念：回歸本源，採用最簡單、最可靠的單線程、順序執行流程。
-# 1. 先安裝所有依賴。
-# 2. 再導入所有需要這些依賴的模組。
-# 3. 在線程中啟動後端，主線程負責健康檢查和維持運行。
+# --- v2.2.0 智慧整合架構 ---
+# 核心理念：將環境部署的複雜性完全委託給 run.sh 和 poetry_manager.py。
+#           此腳本專注於：
+#           1. 啟動視覺化儀表板。
+#           2. 呼叫 run.sh 執行智慧安裝。
+#           3. 啟動後端服務。
+#           4. 執行健康檢查並發布服務。
 
 import argparse
 import html
@@ -20,14 +22,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # --- 全域變數 ---
-# 這些變數可以被 Colab 儲存格在執行 main() 之前覆寫
-APP_VERSION = "v2.1.0"
+APP_VERSION = "v2.2.0"
 LOG_DISPLAY_LINES = 50
 STATUS_REFRESH_INTERVAL = 1.0
 FASTAPI_PORT = 8000
-PROJECT_FOLDER_NAME = "WEB" # 預設的專案資料夾名稱
+PROJECT_FOLDER_NAME = "WEB"
 
-# 全域停止事件，用於優雅地關閉所有線程
 STOP_EVENT = threading.Event()
 
 # --- 日誌管理器 ---
@@ -57,9 +57,8 @@ class LogManager:
                                  (self.version, ts, level, message))
                     conn.commit()
             except Exception as e:
-                print(f"CRITICAL DB LOGGING ERROR: {e}", file=sys.stderr)
+                print(f"資料庫日誌記錄時發生嚴重錯誤: {e}", file=sys.stderr)
 
-# 全域日誌管理器實例
 log_manager = None
 
 # --- 顯示管理器 ---
@@ -72,7 +71,6 @@ class DisplayManager(threading.Thread):
         self.last_log_id = 0
         self.last_status_update = 0
         self.taipei_tz = ZoneInfo("Asia/Taipei")
-        # 延遲導入
         from IPython.display import display, HTML, Javascript
         self.display = display
         self.HTML = HTML
@@ -163,11 +161,15 @@ class DisplayManager(threading.Thread):
             time.sleep(0.1)
 
 # --- 核心輔助函式 ---
-def run_command(command, cwd):
+def print_separator(title):
+    """打印一個帶有標題和符號的視覺分隔線，以美化輸出。"""
+    log_manager.log("INFO", f"======= ⚡️ {title} ⚡️ =======")
+
+def run_command(command):
     """在前景執行一個命令，並將其輸出即時串流到日誌。"""
-    log_manager.log("INFO", f"準備在目錄 '{cwd}' 中執行指令: {' '.join(command)}")
+    log_manager.log("INFO", f"準備執行指令: {' '.join(command)}")
     process = subprocess.Popen(
-        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding='utf-8', errors='replace'
     )
     for line in iter(process.stdout.readline, ''):
@@ -183,16 +185,11 @@ def start_fastapi_server(log_manager):
     """在一個獨立的線程中啟動 FastAPI 伺服器。"""
     log_manager.log("INFO", "正在準備啟動 FastAPI 伺服器...")
     try:
-        import uvicorn
+        from uvicorn import Config, Server
         from integrated_platform.src.main import app
-
-        # 將 log_manager 傳遞給 app，以便在 FastAPI 內部使用
         app.state.log_manager = log_manager
-
-        config = uvicorn.Config(app, host="0.0.0.0", port=FASTAPI_PORT, log_level="info")
-        server = uvicorn.Server(config)
-
-        # 在一個新的 daemon 線程中運行伺服器
+        config = Config(app, host="0.0.0.0", port=FASTAPI_PORT, log_level="info")
+        server = Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()
         log_manager.log("SUCCESS", f"FastAPI 伺服器已在背景線程中啟動。")
@@ -206,7 +203,7 @@ def health_check(log_manager):
     import requests
     log_manager.log("INFO", "啟動健康檢查程序...")
     start_time = time.time()
-    timeout = 40 # 秒
+    timeout = 40
     while time.time() - start_time < timeout:
         try:
             response = requests.get(f"http://localhost:{FASTAPI_PORT}/health", timeout=2)
@@ -234,62 +231,36 @@ def create_public_portal(log_manager):
 
 # --- 主流程 ---
 def main():
-    """單線程堡壘架構的主執行流程。"""
-    # 由於此腳本是在 Colab 環境中被 import 後才執行，
-    # 我們可以假設工作目錄已經被切換到專案根目錄。
-    # 因此，我們可以直接存取 run.sh 和其他專案檔案。
-    project_root = Path(os.getcwd())
-
-    # --- 階段一：阻塞式前景安裝 ---
-    print("\n====================================")
-    print("⚡️ 階段一：鞏固執行環境")
-    print("====================================")
-    print("- 任務：安裝所有必要的作戰套件...")
-    try:
-        # 使用 subprocess.run 實現阻塞式執行
-        # check=True 會在返回碼非 0 時拋出 CalledProcessError
-        subprocess.run(
-            ["bash", "run.sh"],
-            cwd=project_root,
-            check=True,
-            capture_output=False, # 直接將輸出打印到當前終端
-            text=True
-        )
-        print("- ✅ 環境鞏固成功！")
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"- ❌ [致命錯誤] 環境鞏固失敗: {e}", file=sys.stderr)
-        print("- 作戰終止。", file=sys.stderr)
-        return # 關鍵：如果安裝失敗，則立即終止
-
-    # --- 安裝完成後，才能安全地導入其他模組 ---
-    # 這是為了防止在 pip install 完成前，就嘗試導入不存在的套件。
-    import traceback
-    from IPython.display import display, Javascript
-    from google.colab import output as colab_output
-
-    # --- 階段二：初始化日誌系統並啟動儀表板 ---
+    """智慧整合架構的主執行流程。"""
     global log_manager
-    start_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
-
+    project_root = Path(os.getcwd())
     db_path = project_root / "logs.sqlite"
     if db_path.exists(): db_path.unlink()
     log_manager = LogManager(db_path=db_path, version=APP_VERSION)
+    start_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
     log_manager.log("INFO", f"作戰流程開始 (版本 {APP_VERSION}，啟動於 {start_time_str})。")
-    log_manager.log("INFO", "依賴安裝完成，正在啟動戰情儀表板...")
 
+    # --- 階段一：初始化儀表板 ---
+    print_separator("正在初始化戰情儀表板")
     display_thread = DisplayManager(db_path, STOP_EVENT)
     display_thread.start()
-    time.sleep(1) # 給予 UI 一點時間渲染
+    time.sleep(1)
 
     try:
-        # 步驟 3: 在線程中啟動後端
+        # --- 階段二：執行環境部署 ---
+        print_separator("正在執行環境部署 (日誌由 run.sh 提供)")
+        run_command(["bash", "run.sh"])
+
+        # --- 階段三：啟動後端服務 ---
+        print_separator("正在啟動後端 FastAPI 服務")
         start_fastapi_server(log_manager)
 
-        # 步驟 4: 執行健康檢查
+        # --- 階段四：健康檢查與服務發布 ---
+        print_separator("正在進行健康檢查")
         if not health_check(log_manager):
             raise RuntimeError("後端服務健康檢查失敗。")
 
-        # 步驟 5: 建立公開連結
+        print_separator("發布服務入口")
         create_public_portal(log_manager)
 
         log_manager.log("SUCCESS", "✅ 作戰平台已成功啟動。要停止所有服務，請點擊此儲存格的「中斷執行」(■) 按鈕。")
@@ -299,26 +270,18 @@ def main():
     except (KeyboardInterrupt, SystemExit):
         log_manager.log("INFO", "\n[偵測到使用者手動中斷請求...]")
     except Exception as e:
-        if log_manager:
-            log_manager.log("CRITICAL", f"作戰流程發生未預期的嚴重錯誤: {e}")
-            log_manager.log("CRITICAL", traceback.format_exc())
-        print(f"\n💥 作戰流程發生未預期的嚴重錯誤: {e}", file=sys.stderr)
+        import traceback
+        log_manager.log("CRITICAL", f"作戰流程發生未預期的嚴重錯誤: {e}")
+        log_manager.log("CRITICAL", traceback.format_exc())
     finally:
         STOP_EVENT.set()
         if 'display_thread' in locals() and display_thread.is_alive():
             display_thread.join(timeout=2)
-
         end_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
-        if log_manager:
-            log_manager.log("INFO", f"作戰流程結束 (結束於 {end_time_str})。")
-
+        log_manager.log("INFO", f"作戰流程結束 (結束於 {end_time_str})。")
         print("\n--- 所有流程已結束 ---")
 
-# 這個檔案本身不應該被直接執行，而是由 Colab 儲存格導入並呼叫 main()
-# 但為了測試，我們可以保留一個 if __name__ == "__main__": 塊
 if __name__ == "__main__":
     print("此腳本應作為模組被 Colab 儲存格導入並執行 main() 函式。")
     print("直接執行此腳本不會啟動 Colab 的前端顯示。")
-    # 為了方便本地測試，可以模擬一個簡化的流程
-    # main()
     pass
