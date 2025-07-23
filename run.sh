@@ -13,7 +13,7 @@ PROJECT_ROOT=$(python -c "from pathlib import Path; print(Path(__file__).resolve
 # Poetry 會自動管理虛擬環境
 
 # --- 步驟 3: 依賴安裝 ---
-# 假設依賴已經透過 `poetry install` 安裝
+poetry install --no-root --with dev
 
 # --- 步驟 4: 在背景啟動伺服器 ---
 cd "$PROJECT_ROOT"

@@ -1,6 +1,11 @@
 #!/bin/bash
 # 腳本：test.sh - 基石契約模式
 
+echo "正在更新 lock 檔案..."
+poetry lock
+echo "正在安裝依賴..."
+poetry install --no-root --with dev
+
 export PYTHONPATH=./integrated_platform
 
 # 防線一：語法完整性檢查 (最快，< 1 秒)

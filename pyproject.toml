@@ -34,6 +34,8 @@ requests = "^2.32.3"
 scipy = "^1.14.0"
 pytest-timeout = "^2.2.0"
 numpy = "^1.26.4"
+psutil = "^6.0.0"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 markers = [
@@ -41,4 +43,9 @@ markers = [
 ]
 
 [tool.deptry]
-known_first_party = ["src"]
+known_first_party = ["src", "log_manager"]
+exclude = ["integrated_platform/get-pip.py", "create_test_db.py"]
+ignore_missing = []
+ignore_unused = ["uvicorn"]
+ignore_transitive = []
+ignore_misplaced_dev = ["pytest", "httpx", "requests", "scipy", "numpy", "psutil"]
