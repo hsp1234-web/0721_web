@@ -68,7 +68,10 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(worker.process_tasks())
     logger.info("模擬轉寫工人已作為背景任務啟動。")
 
-    logger.info("應用程式啟動程序完成。")
+    # [作戰藍圖 244-Z.2] 移除 asyncio.sleep，因为它在 Colab 環境中可能與 ipykernel 的事件循環衝突。
+    # run.sh 中的健康檢查重試機制已足夠健壯。
+    logger.info("應用程式啟動程序完成，準備接受連線。")
+
     yield
     logger.info("伺服器應用已關閉。")
 
@@ -104,8 +107,13 @@ async def get_applications():
 
 @app.get(config.HEALTH_CHECK_ENDPOINT)
 async def health_check():
-    # 在模擬版中，我們簡化健康檢查，總是返回成功
-    return {"status": "ok", "message": "服務運行正常 (模擬模式)"}
+    # [作戰藍圖 244-X] 在健康檢查中加入版本號
+    app_version = os.getenv("APP_VERSION", "未知版本")
+    return {
+        "status": "ok",
+        "message": "服務運行正常 (模擬模式)",
+        "version": app_version
+    }
 
 # --- 鳳凰專案：MP3 錄音轉寫服務 API (模擬版) ---
 @app.post("/upload")
@@ -183,5 +191,5 @@ if __name__ == "__main__":
         "integrated_platform.src.main:app",
         host="0.0.0.0",
         port=config.UVICORN_PORT,
-        reload=True
+        reload=False
     )
