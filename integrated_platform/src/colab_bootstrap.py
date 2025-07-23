@@ -265,7 +265,15 @@ def main():
 
         # 5. 執行後端部署
         log_manager.log("INFO", "正在執行後端部署腳本 (run.sh)...")
-        result = subprocess.run(["bash", str(RUN_SCRIPT_PATH)], capture_output=True, text=True, encoding='utf-8')
+        # [作戰藍圖 244-J] 新增 cwd=PROJECT_PATH 參數
+        # 這確保 run.sh 在正確的專案根目錄下執行，以便 poetry 能找到 pyproject.toml
+        result = subprocess.run(
+            ["bash", str(RUN_SCRIPT_PATH)],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            cwd=PROJECT_PATH
+        )
         if result.returncode != 0:
             log_manager.log("ERROR", "後端部署腳本執行失敗。")
             log_manager.log("ERROR", f"詳細錯誤: {result.stderr.strip()}")
