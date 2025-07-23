@@ -30,15 +30,16 @@ pytest-timeout = "^2.2.0"
 numpy = "^1.26.4"
 uvicorn = "^0.30.3"
 python-multipart = "^0.0.9"
+psutil = "^5.9.5"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.13.0"
 ruff = "^0.5.5"
-psutil = "^5.9.5"
 
 [tool.pytest.ini_options]
 markers = [
-    "smoke: marks tests as smoke tests (fast, core functionality)"
+    "smoke: marks tests as smoke tests (fast, core functionality)",
+    "e2e: marks tests as end-to-end tests (slower, full system flow)"
 ]
 
 [tool.deptry]
