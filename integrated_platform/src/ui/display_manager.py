@@ -1,18 +1,18 @@
-# integrated_platform/src/display_manager.py
+# integrated_platform/src/ui/display_manager.py
 
 import threading
 import time
 import sqlite3
-from pathlib import Path
 from IPython.display import display
 import ipywidgets as widgets
+from ..log_manager import LogManager
 
 class DisplayManager:
     """
     職責：作為唯一的「畫家」，從 SQLite 讀取日誌並在 Colab 中穩定地顯示。
     """
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
+    def __init__(self, log_manager: LogManager):
+        self.log_manager = log_manager
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.last_log_id = 0
@@ -22,14 +22,10 @@ class DisplayManager:
         self.status_label = widgets.Label(value="狀態：正在初始化...")
         self.ui = widgets.VBox([self.status_label, self.log_output])
 
-    def _get_connection(self):
-        """返回一個新的資料庫連接。"""
-        return sqlite3.connect(self.db_path, check_same_thread=False)
-
     def _fetch_new_logs(self):
         """從資料庫中獲取新的日誌。"""
         try:
-            with self._get_connection() as conn:
+            with self.log_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT id, timestamp, level, message FROM logs WHERE id > ? ORDER BY id ASC",

@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from src.main import app # 從 src/main.py 導入 app
+from integrated_platform.src.main import app
 import io
 
 # 建立一個測試客戶端

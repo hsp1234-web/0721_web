@@ -61,8 +61,8 @@ def test_full_transcription_flow(server_is_ready):
         if status_data["status"] == "completed":
             # 4. 驗證結果
             assert "result" in status_data
-            assert "text" in status_data["result"]
-            assert status_data["result"]["text"] != ""
+            assert isinstance(status_data["result"], str)
+            assert len(status_data["result"]) > 0
             # 測試成功，跳出迴圈
             return
         elif status_data["status"] == "failed":

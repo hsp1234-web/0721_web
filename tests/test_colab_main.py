@@ -12,7 +12,9 @@ sys.modules['IPython.core.display'] = MagicMock()
 sys.modules['ipywidgets'] = MagicMock()
 
 
-from colab_main import create_public_portal, log_manager
+from pathlib import Path
+from integrated_platform.src.colab.colab_manager import ColabManager
+from integrated_platform.src.log_manager import LogManager
 from google.colab import output as mock_colab_output
 from IPython.display import display as mock_display
 
@@ -26,13 +28,15 @@ def test_create_portal_success(mocker):
     mock_colab_output.reset_mock()
     mock_display.reset_mock()
     # 我們也需要偽裝 log_manager 和 time.sleep
+    log_manager = LogManager(Path("test_logs.sqlite"))
     mocker.patch.object(log_manager, 'log')
     mocker.patch('time.sleep')
     mock_colab_output.serve_kernel_port_as_window.side_effect = None
 
 
     # 2. 執行待測函式
-    create_public_portal()
+    colab_manager = ColabManager(log_manager)
+    colab_manager.create_public_portal()
 
     # 3. 驗證 (Assert)
     # 驗證 Colab API 是否被正確呼叫
@@ -55,6 +59,7 @@ def test_create_portal_retry_and_fail(mocker):
     # 1. 偽裝依賴，並讓其中一個假人「假裝失敗」
     mock_colab_output.reset_mock()
     mock_display.reset_mock()
+    log_manager = LogManager(Path("test_logs.sqlite"))
     mock_log = mocker.patch.object(log_manager, 'log')
     mock_sleep = mocker.patch('time.sleep')
 
@@ -62,7 +67,8 @@ def test_create_portal_retry_and_fail(mocker):
     mock_colab_output.serve_kernel_port_as_window.side_effect = Exception("模擬 API 失敗")
 
     # 2. 執行待測函式
-    create_public_portal(retries=3, delay=5) # 測試時使用不同的參數
+    colab_manager = ColabManager(log_manager)
+    colab_manager.create_public_portal(retries=3, delay=5) # 測試時使用不同的參數
 
     # 3. 驗證
     # 驗證 API 被呼叫了 3 次

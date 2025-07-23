@@ -23,7 +23,7 @@ class LogManager:
         self.lock = threading.Lock()
         self._create_table()
 
-    def _get_connection(self):
+    def get_connection(self):
         """返回一個新的資料庫連接。"""
         return sqlite3.connect(self.db_path, check_same_thread=False)
 
@@ -40,7 +40,7 @@ class LogManager:
         );
         """
         try:
-            with self._get_connection() as conn:
+            with self.get_connection() as conn:
                 conn.execute(CREATE_TABLE_SQL)
         except sqlite3.Error as e:
             # 在真實世界的應用中，這裡應該有更完善的錯誤處理
@@ -62,7 +62,7 @@ class LogManager:
         with self.lock:
             try:
                 # 每次都建立新的連線，確保執行緒安全
-                with self._get_connection() as conn:
+                with self.get_connection() as conn:
                     timestamp = datetime.now(ZoneInfo("Asia/Taipei")).isoformat()
                     conn.execute(INSERT_LOG_SQL, (timestamp, level, message))
             except sqlite3.Error as e:

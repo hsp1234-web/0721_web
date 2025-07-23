@@ -29,14 +29,14 @@ scipy = "^1.14.0"
 pytest-timeout = "^2.2.0"
 numpy = "^1.26.4"
 uvicorn = "^0.30.3"
-psutil = "^5.9.5"
+python-multipart = "^0.0.9"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.13.0"
 ruff = "^0.5.5"
+psutil = "^5.9.5"
 
 [tool.pytest.ini_options]
-pythonpath = [".", "src"]
 markers = [
     "smoke: marks tests as smoke tests (fast, core functionality)"
 ]
@@ -44,5 +44,5 @@ markers = [
 [tool.deptry]
 exclude = ['integrated_platform/get-pip.py']
 known_first_party = ["src", "log_manager", "colab_main"]
-per_rule_ignores = { "DEP001" = ["google"] }
+per_rule_ignores = { "DEP001" = ["google"], "DEP004" = ["psutil"] }
 ignore_obsolete = ["httpx", "pytest-timeout", "uvicorn"]
