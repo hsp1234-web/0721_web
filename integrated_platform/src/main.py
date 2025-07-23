@@ -68,7 +68,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(worker.process_tasks())
     logger.info("模擬轉寫工人已作為背景任務啟動。")
 
-    logger.info("應用程式啟動程序完成。")
+    # [作戰藍圖 244-V] 加入啟動寬限期
+    logger.info(f"啟動程序完成，進入 {config.STARTUP_GRACE_PERIOD} 秒的寬限期...")
+    await asyncio.sleep(config.STARTUP_GRACE_PERIOD)
+    logger.info("寬限期結束，應用程式已完全就緒。")
+
     yield
     logger.info("伺服器應用已關閉。")
 
@@ -104,8 +108,13 @@ async def get_applications():
 
 @app.get(config.HEALTH_CHECK_ENDPOINT)
 async def health_check():
-    # 在模擬版中，我們簡化健康檢查，總是返回成功
-    return {"status": "ok", "message": "服務運行正常 (模擬模式)"}
+    # [作戰藍圖 244-X] 在健康檢查中加入版本號
+    app_version = os.getenv("APP_VERSION", "未知版本")
+    return {
+        "status": "ok",
+        "message": "服務運行正常 (模擬模式)",
+        "version": app_version
+    }
 
 # --- 鳳凰專案：MP3 錄音轉寫服務 API (模擬版) ---
 @app.post("/upload")
