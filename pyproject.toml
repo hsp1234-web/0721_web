@@ -24,6 +24,7 @@ typer = {extras = ["all"], version = "^0.16.0"}
 ipython = "^8.20.0"
 ipywidgets = "^8.1.1"
 uvicorn = "^0.30.3"
+python-multipart = "*"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.13.0"
