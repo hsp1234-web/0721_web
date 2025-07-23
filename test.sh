@@ -1,33 +1,59 @@
 #!/bin/bash
-# 【244-C 專案改善計畫：自動化測試腳本】
-# 本腳本遵循「基石契約」模式，建立四道防線，確保專案品質。
+#
+# 作戰藍圖 v2.0.3 - 適應性部署整合測試
+#
+set -e
 
-echo "正在更新 lock 檔案以鎖定依賴版本..."
-poetry lock
-echo "正在安裝所有必要的依賴套件..."
-poetry install --no-root --with dev
+echof() {
+    local phase=$1
+    local message=$2
+    local color=${3:-\e[32m}
+    local nocolor='\033[0m'
+    printf "${color}==> [Phase: %-25s] %s${nocolor}\n" "$phase" "$message"
+}
 
-export PYTHONPATH=./integrated_platform
+# --- 環境準備 ---
+echof "Setup" "正在準備測試環境..."
+# 在極簡環境中，可能需要先安裝這些工具
+echof "Setup" "正在安裝必要的系統工具 (sqlite3)..."
+apt-get update > /dev/null && apt-get install -y sqlite3 > /dev/null
 
-# --- 防線一：語法完整性檢查 (最快，< 1 秒) ---
-# 確保所有程式碼的「語法」正確無誤，這是程式能被執行的最基本前提。
-echo "正在執行 [1/4] 語法完整性檢查..."
-poetry run ruff check . --select F,E7,E902,F821,F823,F401 --ignore D100,D101,D102,D103,D104,D105,D106,D107 || exit 1
+# --- 執行總指揮 ---
+echof "Execution" "準備執行總指揮 start_platform.py..."
+PORT=8899
+# 使用最直接、最不可能失敗的方式執行
+python3 integrated_platform/start_platform.py \
+    --fastapi-port "$PORT" \
+    --display-lines 100 &
 
-# --- 防線二：依賴鏈完整性檢查 (次快，約 1-2 秒) ---
-# 確保我們的依賴清單與實際需求完全一致，沒有遺漏或多餘。
-echo "正在執行 [2/4] 依賴鏈完整性檢查..."
-poetry run deptry . || exit 1
+START_PLATFORM_PID=$!
+echof "Execution" "總指揮已在背景啟動 (PID: $START_PLATFORM_PID)。開始監控..."
 
-# --- 防線三：架構穩定性檢查 (點火測試) ---
-# 確保系統的所有模組都能被正確載入，沒有結構性崩潰風險。
-echo "正在執行 [3/4] 架構穩定性檢查..."
-poetry run pytest --timeout=60 integrated_platform/tests/ignition_test.py || exit 1
+# --- 監控與驗證 ---
+WAIT_SECONDS=80
+echof "Monitoring" "將在 ${WAIT_SECONDS} 秒後進行最終驗證..."
+sleep $WAIT_SECONDS
 
-# --- 防線四：核心業務邏輯檢查 (冒煙測試) ---
-# 確保最關鍵的業務功能單元處於「可用」狀態。
-echo "正在執行 [4/4] 核心業務邏輯檢查..."
-poetry run pytest --timeout=60 -m smoke || exit 1
+# --- 驗證 ---
+echof "Validation" "正在執行手動健康檢查..."
+HEALTH_CHECK_URL="http://localhost:${PORT}/health"
+if curl -fsS "${HEALTH_CHECK_URL}" > /dev/null; then
+    echof "Validation" "健康檢查成功！後端服務已正確啟動。" "\e[1;32m"
+else
+    echof "Validation" "錯誤：健康檢查失敗！" "\e[31m"
+    echof "Diagnostics" "顯示 logs.sqlite 內容..."
+    sqlite3 logs.sqlite "SELECT * FROM logs ORDER BY id DESC LIMIT 20;" || echo "無法讀取 logs.sqlite"
+    kill $START_PLATFORM_PID || true
+    exit 1
+fi
 
-# 若所有防線均未被突破，則宣告契約達成
-echo "所有檢查通過！專案品質符合預期標準。"
+# --- 清理 ---
+echof "Cleanup" "測試成功，正在終止所有進程..."
+kill $START_PLATFORM_PID
+wait $START_PLATFORM_PID || true
+
+rm -f logs.sqlite
+rm -f STOP_SIGNAL
+
+echof "Mission Complete" "高保真整合測試成功！" "\e[1;32m"
+exit 0

@@ -1,95 +1,92 @@
 # integrated_platform/src/colab_bootstrap.py
 # -*- coding: utf-8 -*-
 
-# ==============================================================================
-# SECTION 0: 環境初始化與核心模組導入
-# ==============================================================================
+# --- v2.1.0 單線程堡壘架構 ---
+# 核心理念：回歸本源，採用最簡單、最可靠的單線程、順序執行流程。
+# 1. 先安裝所有依賴。
+# 2. 再導入所有需要這些依賴的模組。
+# 3. 在線程中啟動後端，主線程負責健康檢查和維持運行。
+
+import argparse
+import html
 import os
-import sys
 import subprocess
+import sys
 import threading
 import time
 import sqlite3
-import psutil
-import traceback
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from collections import deque
-import html
 
-# Colab 專用模組
-from IPython.display import display, HTML, Javascript, clear_output
-from google.colab import output as colab_output
-
-# --- 全域常數與設定 ---
-# [作戰藍圖 244-H] 加入版本號
-APP_VERSION = "v1.9.1"
-ARCHIVE_FOLDER_NAME = "作戰日誌歸檔"
-FASTAPI_PORT = 8000
-LOG_DISPLAY_LINES = 15
+# --- 全域變數 ---
+# 這些變數可以被 Colab 儲存格在執行 main() 之前覆寫
+APP_VERSION = "v2.1.0"
+LOG_DISPLAY_LINES = 50
 STATUS_REFRESH_INTERVAL = 1.0
-ARCHIVE_DIR = Path("/content") / ARCHIVE_FOLDER_NAME
-TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+FASTAPI_PORT = 8000
+PROJECT_FOLDER_NAME = "WEB" # 預設的專案資料夾名稱
+
+# 全域停止事件，用於優雅地關閉所有線程
 STOP_EVENT = threading.Event()
 
-# ==============================================================================
-# SECTION 1: 後端日誌管理器
-# ==============================================================================
+# --- 日誌管理器 ---
 class LogManager:
-    """負責將日誌安全地寫入中央 SQLite 資料庫。"""
-    def __init__(self, db_path):
+    """將日誌寫入 SQLite 資料庫，並提供版本標定。"""
+    def __init__(self, db_path, version):
         self.db_path = db_path
+        self.version = version
         self.lock = threading.Lock()
         self._create_table()
 
-    def _get_connection(self):
-        return sqlite3.connect(self.db_path, timeout=10)
-
     def _create_table(self):
         with self.lock:
-            with self._get_connection() as conn:
+            with sqlite3.connect(self.db_path, timeout=10) as conn:
                 conn.execute("""
                 CREATE TABLE IF NOT EXISTS logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    level TEXT NOT NULL,
-                    message TEXT NOT NULL
-                );
-                """)
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT, timestamp TEXT, level TEXT, message TEXT
+                );""")
                 conn.commit()
 
     def log(self, level, message):
-        ts = datetime.now(TAIPEI_TZ).isoformat()
+        ts = datetime.now(ZoneInfo("Asia/Taipei")).isoformat()
         with self.lock:
             try:
-                with self._get_connection() as conn:
-                    conn.execute("INSERT INTO logs (timestamp, level, message) VALUES (?, ?, ?);", (ts, level, message))
+                with sqlite3.connect(self.db_path, timeout=10) as conn:
+                    conn.execute("INSERT INTO logs (version, timestamp, level, message) VALUES (?, ?, ?, ?);",
+                                 (self.version, ts, level, message))
                     conn.commit()
             except Exception as e:
-                print(f"CRITICAL DB LOGGING ERROR: {e}")
+                print(f"CRITICAL DB LOGGING ERROR: {e}", file=sys.stderr)
 
-# ==============================================================================
-# SECTION 2: 智慧顯示管理器
-# ==============================================================================
+# 全域日誌管理器實例
+log_manager = None
+
+# --- 顯示管理器 ---
 class DisplayManager(threading.Thread):
-    """在獨立執行緒中，作為唯一的「畫家」，持續從資料庫讀取日誌並更新前端UI。"""
-    def __init__(self, db_path, display_lines, refresh_interval, stop_event):
+    """在獨立線程中，持續從資料庫讀取日誌並更新 Colab UI。"""
+    def __init__(self, db_path, stop_event):
         super().__init__(daemon=True)
         self.db_path = db_path
-        self.display_lines = max(1, display_lines)
-        self.refresh_interval = max(0.1, refresh_interval)
         self.stop_event = stop_event
         self.last_log_id = 0
         self.last_status_update = 0
+        self.taipei_tz = ZoneInfo("Asia/Taipei")
+        # 延遲導入
+        from IPython.display import display, HTML, Javascript
+        self.display = display
+        self.HTML = HTML
+        self.Javascript = Javascript
 
     def _execute_js(self, js_code):
-        try: display(Javascript(js_code))
-        except Exception: pass
+        try:
+            self.display(self.Javascript(js_code))
+        except Exception:
+            pass
 
     def setup_ui(self):
+        from IPython.display import clear_output
         clear_output(wait=True)
-        # [作戰藍圖 244-H] 在 UI 中加入版本號
         ui_html = f"""
         <style>
             .grid-container {{ display: grid; grid-template-columns: 10ch 11ch 1fr; gap: 0 8px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.6; }}
@@ -102,54 +99,60 @@ class DisplayManager(threading.Thread):
         <div id="log-panel" class="grid-container"></div>
         <div id="status-bar" class="grid-container"></div>
         """
-        display(HTML(ui_html))
+        self.display(self.HTML(ui_html))
 
     def _update_status_bar(self):
         now = time.time()
-        if now - self.last_status_update < self.refresh_interval: return
+        if now - self.last_status_update < STATUS_REFRESH_INTERVAL:
+            return
         self.last_status_update = now
         try:
-            cpu, ram = psutil.cpu_percent(), psutil.virtual_memory().percent
-            time_str = datetime.now(TAIPEI_TZ).strftime('%H:%M:%S')
-            # [作戰藍圖 244-H] 在狀態列加入版本號
-            status_html = f"<div class='grid-item' style='color: #FFFFFF;'>{time_str}</div>" \
-                          f"<div class='grid-item' style='color: #FFFFFF;'>| CPU: {cpu:4.1f}%</div>" \
-                          f"<div class='grid-item' style='color: #FFFFFF;'>| RAM: {ram:4.1f}% | [系統運行中 <span class='version-tag'>{APP_VERSION}</span>]</div>"
-            escaped_html = status_html.replace('`', '\\`')
-            js_code = f"document.getElementById('status-bar').innerHTML = `{escaped_html}`;"
+            import psutil
+            cpu = psutil.cpu_percent()
+            ram = psutil.virtual_memory().percent
+            time_str = datetime.now(self.taipei_tz).strftime('%H:%M:%S')
+            status_html = (
+                f"<div class='grid-item' style='color: #FFFFFF;'>{time_str}</div>"
+                f"<div class='grid-item' style='color: #FFFFFF;'>| CPU: {cpu:4.1f}%</div>"
+                f"<div class='grid-item' style='color: #FFFFFF;'>| RAM: {ram:4.1f}% | [系統運行中 <span class='version-tag'>{APP_VERSION}</span>]</div>"
+            )
+            js_code = f"document.getElementById('status-bar').innerHTML = `{status_html.replace('`', '\\`')}`;"
             self._execute_js(js_code)
-        except Exception: pass
+        except Exception:
+            pass
 
     def _update_log_panel(self):
         if not self.db_path.exists(): return
         try:
             with sqlite3.connect(self.db_path) as conn:
-                new_logs = conn.execute("SELECT id, timestamp, level, message FROM logs WHERE id > ? ORDER BY id ASC", (self.last_log_id,)).fetchall()
+                new_logs = conn.execute("SELECT id, version, timestamp, level, message FROM logs WHERE id > ? ORDER BY id ASC", (self.last_log_id,)).fetchall()
             if not new_logs: return
-            for log_id, ts, level, msg in new_logs:
+
+            for log_id, version, ts, level, msg in new_logs:
                 formatted_ts = datetime.fromisoformat(ts).strftime('%H:%M:%S')
                 level_upper = level.upper()
-                colors = {{"SUCCESS": '#4CAF50', "ERROR": '#F44336', "CRITICAL": '#F44336', "WARNING": '#FBC02D', "INFO": '#B0BEC5'}}
+                colors = {"SUCCESS": '#4CAF50', "ERROR": '#F44336', "CRITICAL": '#F44336', "WARNING": '#FBC02D', "INFO": '#B0BEC5'}
                 level_color = colors.get(level_upper, '#B0BEC5')
-                # [作戰藍圖 244-H] 調整日誌對齊
-                log_html = f"<div class='grid-item' style='color: #FFFFFF;'>[{formatted_ts}]</div>" \
-                           f"<div class='grid-item' style='color: {level_color}; font-weight: bold;'>[{level_upper:<8}]</div>" \
-                           f"<div class='grid-item' style='color: #FFFFFF;'>{html.escape(msg)}</div>"
-                escaped_log_html = log_html.replace('`', '\\`')
+                log_html = (
+                    f"<div class='grid-item' style='color: #FFFFFF;'>[{formatted_ts}]</div>"
+                    f"<div class='grid-item' style='color: {level_color}; font-weight: bold;'>[{level_upper:<8}]</div>"
+                    f"<div class='grid-item' style='color: #FFFFFF;'>[{version}] {html.escape(msg)}</div>"
+                )
                 js_code = f"""
                 const panel = document.getElementById('log-panel');
                 if (panel) {{
                     const entry = document.createElement('div');
                     entry.style.display = 'contents';
-                    entry.innerHTML = `{escaped_log_html}`;
+                    entry.innerHTML = `{log_html.replace('`', '\\`').replace('\\n', '<br>')}`;
                     Array.from(entry.children).reverse().forEach(c => panel.prepend(c));
-                    while (panel.childElementCount > ({self.display_lines} * 3)) {{
+                    while (panel.childElementCount > ({LOG_DISPLAY_LINES} * 3)) {{
                         for(let i=0; i<3; i++) panel.removeChild(panel.lastChild);
                     }}
                 }}"""
                 self._execute_js(js_code)
                 self.last_log_id = log_id
-        except Exception: pass
+        except Exception:
+            pass
 
     def run(self):
         self.setup_ui()
@@ -158,180 +161,136 @@ class DisplayManager(threading.Thread):
             self._update_log_panel()
             time.sleep(0.1)
 
-# ==============================================================================
-# SECTION 3: 公開服務入口建立官
-# ==============================================================================
-def create_public_portal(port, max_retries=5, delay_seconds=3):
-    """以高可靠性的方式，嘗試為指定的埠號建立一個公開的 Colab 代理連結。"""
-    global log_manager
-    log_manager.log("INFO", f"奉命建立服務入口，目標埠號: {port}...")
-    button_html = """
-    <style>
-        .portal-button {{ background: linear-gradient(145deg, #2e6cdf, #4a8dff); border: none; border-radius: 8px; color: white; padding: 12px 24px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; font-weight: bold; font-family: 'Segoe UI', 'Noto Sans TC', sans-serif; margin: 4px 2px; cursor: pointer; box-shadow: 0 4px 15px 0 rgba(74, 144, 255, 0.45); transition: all 0.3s ease; }}
-        .portal-button:hover {{ background: linear-gradient(145deg, #4a8dff, #2e6cdf); box-shadow: 0 6px 20px 0 rgba(74, 144, 255, 0.6); transform: translateY(-2px); }}
-    </style>
-    <a href="{url}" target="_blank" class="portal-button">🚀 進入鳳凰轉錄儀作戰中心 ({version})</a>
-    """
-    for attempt in range(max_retries):
-        try:
-            with colab_output.redirect_to_element('#portal-container'):
-                colab_output.clear()
-                colab_output.serve_kernel_port_as_window(port, path='/')
-            from google.colab import _kernel
-            base_url = _kernel.get_parent_request_header()['Referer'].split('?')[0]
-            public_url = f"{{base_url}}proxy/{{port}}/"
-            with colab_output.redirect_to_element('#portal-container'):
-                display(HTML(button_html.format(url=public_url, version=APP_VERSION)))
-            log_manager.log("SUCCESS", f"服務入口已成功建立！")
-            return
-        except Exception as e:
-            log_manager.log("WARNING", f"建立入口嘗試 #{attempt + 1} 失敗...")
-            if attempt < max_retries - 1:
-                time.sleep(delay_seconds)
-            else:
-                log_manager.log("CRITICAL", "所有建立服務入口的嘗試均告失敗。")
-                with colab_output.redirect_to_element('#portal-container'):
-                     display(HTML("<p style='color:#F44336;'><b>錯誤：</b>無法建立公開連結。</p>"))
-
-# ==============================================================================
-# SECTION 4: 核心輔助函式
-# ==============================================================================
-def archive_final_log(db_path):
-    """在作戰結束時，將所有日誌從資料庫匯出為 .txt 檔案。"""
-    log_manager.log("INFO", "正在生成最終作戰報告...")
-    if not db_path.is_file(): return
-    try:
-        ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-        archive_filename = f"作戰日誌_{datetime.now(TAIPEI_TZ).strftime('%Y-%m-%d_%H-%M-%S')}.txt"
-        archive_filepath = ARCHIVE_DIR / archive_filename
-        with sqlite3.connect(db_path) as conn:
-            logs = conn.execute("SELECT timestamp, level, message FROM logs ORDER BY id ASC").fetchall()
-        with open(archive_filepath, 'w', encoding='utf-8') as f:
-            for ts, lvl, msg in logs: f.write(f"[{ts}] [{lvl.upper()}] {msg}\\n")
-        log_manager.log("SUCCESS", f"完整日誌已歸檔至: {archive_filepath}")
-    except Exception as e:
-        log_manager.log("ERROR", f"歸檔日誌時發生錯誤: {e}")
-
-def find_project_path():
-    """動態偵測 run.sh 的位置以確定專案根目錄。"""
-    log_manager.log("INFO", "正在動態偵測專案路徑...")
-    search_root = Path("/content")
-    found_scripts = list(search_root.rglob('run.sh'))
-
-    if not found_scripts:
-        raise FileNotFoundError(f"致命錯誤：在 '{{search_root}}' 目錄下找不到任何 'run.sh' 部署腳本！")
-
-    if len(found_scripts) > 1:
-        log_manager.log("WARNING", f"偵測到多個 run.sh 腳本，將使用第一個: {found_scripts[0]}")
-
-    run_script_path = found_scripts[0]
-    project_path = run_script_path.parent
-    log_manager.log("SUCCESS", f"專案路徑已鎖定: {project_path}")
-    return project_path, run_script_path
-
-# ==============================================================================
-# SECTION 5: 即時日誌子程序執行器
-# ==============================================================================
-def run_subprocess_with_streaming_logs(command, cwd, env=None):
-    """
-    執行一個子程序，並將其 stdout 和 stderr 即時串流到 LogManager。
-    """
-    global log_manager
+# --- 核心輔助函式 ---
+def run_command(command, cwd):
+    """在前景執行一個命令，並將其輸出即時串流到日誌。"""
     log_manager.log("INFO", f"準備在目錄 '{cwd}' 中執行指令: {' '.join(command)}")
-
     process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, # 將 stderr 合併到 stdout
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        env=env or os.environ
+        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding='utf-8', errors='replace'
     )
-
-    # 逐行讀取輸出並記錄
     for line in iter(process.stdout.readline, ''):
-        log_manager.log("INFO", line.strip())
-
+        log_manager.log("INFO", f"[{command[0]}] {line.strip()}")
     process.stdout.close()
     return_code = process.wait()
-
     if return_code != 0:
-        log_manager.log("ERROR", f"指令執行失敗，返回碼: {return_code}")
+        log_manager.log("ERROR", f"指令 '{' '.join(command)}' 執行失敗，返回碼: {return_code}")
         raise subprocess.CalledProcessError(return_code, command)
+    log_manager.log("SUCCESS", f"指令 '{' '.join(command)}' 執行成功。")
 
-    log_manager.log("SUCCESS", "指令執行成功。")
-    return True
+def start_fastapi_server():
+    """在一個獨立的線程中啟動 FastAPI 伺服器。"""
+    log_manager.log("INFO", "正在準備啟動 FastAPI 伺服器...")
+    try:
+        import uvicorn
+        from integrated_platform.src.main import app
 
-# ==============================================================================
-# SECTION 6: 作戰主流程
-# ==============================================================================
+        config = uvicorn.Config(app, host="0.0.0.0", port=FASTAPI_PORT, log_level="info")
+        server = uvicorn.Server(config)
+
+        # 在一個新的 daemon 線程中運行伺服器
+        # 這可以防止它阻塞主線程
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        log_manager.log("SUCCESS", f"FastAPI 伺服器已在背景線程中啟動。")
+        return thread
+    except Exception as e:
+        log_manager.log("CRITICAL", f"FastAPI 伺服器啟動失敗: {e}")
+        raise
+
+def health_check():
+    """執行健康檢查循環，直到服務就緒或超時。"""
+    import requests
+    log_manager.log("INFO", "啟動健康檢查程序...")
+    start_time = time.time()
+    timeout = 40 # 秒
+    while time.time() - start_time < timeout:
+        try:
+            response = requests.get(f"http://localhost:{FASTAPI_PORT}/health", timeout=2)
+            if response.status_code == 200:
+                log_manager.log("SUCCESS", f"健康檢查成功！後端服務已就緒。")
+                return True
+        except requests.exceptions.RequestException:
+            log_manager.log("INFO", "服務尚未就緒，將在 2 秒後重試...")
+            time.sleep(2)
+    log_manager.log("CRITICAL", "健康檢查超時，服務啟動失敗。")
+    return False
+
+def create_public_portal():
+    """建立公開連結。"""
+    from google.colab import output as colab_output
+    log_manager.log("INFO", f"奉命建立服務入口，目標埠號: {FASTAPI_PORT}...")
+    try:
+        with colab_output.redirect_to_element('#portal-container'):
+            display(Javascript("document.getElementById('portal-container').innerHTML = '';"))
+            colab_output.serve_kernel_port_as_iframe(FASTAPI_PORT, path='/', height=500)
+        log_manager.log("SUCCESS", f"服務入口已成功建立！")
+    except Exception as e:
+        log_manager.log("CRITICAL", f"建立服務入口的嘗試失敗: {e}")
+
+# --- 主流程 ---
 def main():
-    global log_manager, display_thread, SQLITE_DB_PATH
-    log_manager = None
-    display_thread = None
-    SQLITE_DB_PATH = None
+    """單線程堡壘架構的主執行流程。"""
+    global log_manager
+    start_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
 
-    # [作戰藍圖 244-P] 將 UI 啟動提前，確保日誌顯示的絕對優先
-    temp_db_path = Path("/content/temp_logs.sqlite")
-    if temp_db_path.exists(): temp_db_path.unlink()
-    log_manager = LogManager(temp_db_path)
-    display_thread = DisplayManager(temp_db_path, LOG_DISPLAY_LINES, STATUS_REFRESH_INTERVAL, STOP_EVENT)
-    display_thread.start()
-    time.sleep(0.5) # 給予 UI 一點點時間來渲染
+    # 步驟 0: 初始化最基礎的日誌系統
+    # 注意：此時 display_manager 尚未啟動
+    db_path = Path(f"/content/{PROJECT_FOLDER_NAME}/logs.sqlite")
+    if db_path.exists(): db_path.unlink()
+    log_manager = LogManager(db_path=db_path, version=APP_VERSION)
+    log_manager.log("INFO", f"作戰流程開始 (版本 {APP_VERSION}，啟動於 {start_time_str})。")
+
+    display_thread = None
 
     try:
-        # 1. 動態偵測專案路徑
-        PROJECT_PATH, RUN_SCRIPT_PATH = find_project_path()
+        # 步驟 1: 執行 run.sh 來安裝所有依賴
+        project_root = Path(f"/content/{PROJECT_FOLDER_NAME}")
+        run_command(["bash", "run.sh"], cwd=project_root)
 
-        # 2. 確定最終的日誌路徑並重新設定
-        SQLITE_DB_PATH = PROJECT_PATH / "logs.sqlite"
-        if SQLITE_DB_PATH.exists(): SQLITE_DB_PATH.unlink()
-        log_manager.db_path = SQLITE_DB_PATH
-        log_manager._create_table()
-        display_thread.db_path = SQLITE_DB_PATH
+        # 步驟 2: 依賴安裝完成後，啟動日誌顯示
+        log_manager.log("INFO", "依賴安裝完成，正在啟動戰情儀表板...")
+        display_thread = DisplayManager(db_path, STOP_EVENT)
+        display_thread.start()
+        time.sleep(1) # 給予 UI 一點時間渲染
 
-        # 3. 設定環境變數
-        env = os.environ.copy()
-        env['LOG_DB_PATH'] = str(SQLITE_DB_PATH)
-        env['UVICORN_PORT'] = str(FASTAPI_PORT)
+        # 步驟 3: 在線程中啟動後端
+        start_fastapi_server()
 
-        # 4. 使用新的串流日誌函式執行後端部署
-        run_subprocess_with_streaming_logs(
-            command=["bash", str(RUN_SCRIPT_PATH)],
-            cwd=PROJECT_PATH,
-            env=env
-        )
+        # 步驟 4: 執行健康檢查
+        if not health_check():
+            raise RuntimeError("後端服務健康檢查失敗。")
 
-        # 5. 呼叫入口建立官
-        create_public_portal(port=FASTAPI_PORT)
+        # 步驟 5: 建立公開連結
+        create_public_portal()
 
-        # 6. 保持儲存格運行
-        log_manager.log("SUCCESS", f"作戰系統已上線！({APP_VERSION}) 要停止所有服務，請點擊此儲存格的「中斷執行」(■) 按鈕。")
+        log_manager.log("SUCCESS", "作戰系統已上線！要停止所有服務，請點擊此儲存格的「中斷執行」(■) 按鈕。")
         while not STOP_EVENT.is_set():
             time.sleep(1)
 
-    except (KeyboardInterrupt, subprocess.CalledProcessError):
-        # 如果是手動中斷或子程序失敗，優雅地處理
-        if isinstance(sys.exc_info()[1], subprocess.CalledProcessError):
-            log_manager.log("CRITICAL", "後端部署失敗，請檢查上方日誌以了解詳細原因。")
-        else:
-            log_manager.log("INFO", "\\n[偵測到使用者手動中斷請求...]")
+    except (KeyboardInterrupt, SystemExit):
+        log_manager.log("INFO", "\n[偵測到使用者手動中斷請求...]")
     except Exception as e:
-        log_manager.log("CRITICAL", f"作戰流程發生未預期的嚴重錯誤: {e}")
-        log_manager.log("CRITICAL", traceback.format_exc())
-        print(f"\\n💥 作戰流程發生未預期的嚴重錯誤，系統即將終止。")
-        traceback.print_exc()
-        time.sleep(1)
+        if log_manager:
+            log_manager.log("CRITICAL", f"作戰流程發生未預期的嚴重錯誤: {e}")
+            log_manager.log("CRITICAL", traceback.format_exc())
+        print(f"\n💥 作戰流程發生未預期的嚴重錯誤: {e}", file=sys.stderr)
     finally:
         STOP_EVENT.set()
-        if log_manager and SQLITE_DB_PATH:
-            log_manager.log("INFO", "[正在執行終端清理與日誌歸檔程序...]")
-            archive_final_log(SQLITE_DB_PATH)
-            log_manager.log("SUCCESS", "部署流程已結束，所有服務已安全關閉。")
-        if display_thread:
+        if display_thread and display_thread.is_alive():
             display_thread.join(timeout=2)
 
+        end_time_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime('%Y-%m-%d %H:%M:%S')
+        if log_manager:
+            log_manager.log("INFO", f"作戰流程結束 (結束於 {end_time_str})。")
+
+        print("\n--- 所有流程已結束 ---")
+
+# 這個檔案本身不應該被直接執行，而是由 Colab 儲存格導入並呼叫 main()
+# 但為了測試，我們可以保留一個 if __name__ == "__main__": 塊
 if __name__ == "__main__":
-    main()
+    print("此腳本應作為模組被 Colab 儲存格導入並執行 main() 函式。")
+    print("直接執行此腳本不會啟動 Colab 的前端顯示。")
+    # 為了方便本地測試，可以模擬一個簡化的流程
+    # main()
+    pass

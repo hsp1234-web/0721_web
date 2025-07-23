@@ -15,6 +15,8 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(PROJECT_ROOT / "uploads"))
 # --- FastAPI 服務配置 ---
 UVICORN_PORT = int(os.getenv("UVICORN_PORT", 8000))
 HEALTH_CHECK_ENDPOINT = os.getenv("HEALTH_CHECK_ENDPOINT", "/health")
+# [作戰藍圖 244-V] 新增啟動寬限期，給予服務完全啟動的緩衝時間
+STARTUP_GRACE_PERIOD = int(os.getenv("STARTUP_GRACE_PERIOD", 5))
 
 # --- 鳳凰專案 - 語音轉寫模型配置 ---
 # 預設使用 'small' 模型，可根據需求調整為 'base', 'medium', 'large' 等
