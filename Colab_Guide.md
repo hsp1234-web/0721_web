@@ -1,46 +1,110 @@
-# 在 Google Colab 中使用本平台
+# Colab 使用者指南：鳳凰之心作戰平台
 
-本指南旨在引導您如何在 Google Colab 環境中快速啟動和使用這個模組化平台。得益於新的架構，現在的流程非常簡單。
+## 簡介
 
-## 快速啟動
+歡迎使用「鳳凰之心」作戰平台！本平台專為在 Google Colab 環境中穩定、可靠地運行 Web 服務而設計。您無需關心複雜的環境設定和進程管理，只需將您的應用程式碼放入專案中，並使用下方的儲存格範本，即可一鍵啟動您的服務。
 
-您只需要在 Colab 的一個儲存格 (Cell) 中執行兩行指令即可完成所有設定和啟動。
+平台會自動處理：
 
-### 步驟 1：下載專案
+*   依賴安裝
+*   日誌監控
+*   後端服務啟動
+*   健康檢查
+*   生成公開訪問連結
 
-首先，將本專案從 GitHub 下載到您的 Colab 環境中。
+## Colab 儲存格範本
+
+下方的儲存格是啟動平台的唯一入口。請點擊右上角的「複製」按鈕，然後將其貼到您的 Colab 筆記本中執行。
+
+<details>
+<summary>點此展開/收合 🚀 啟動鳳凰之心作戰平台 的程式碼</summary>
 
 ```python
-!git clone [您的專案 GitHub URL]
-%cd [您的專案目錄名稱]
+#@title 🚀 啟動鳳凰之心作戰平台 (v2.1.0)
+#@markdown ---
+#@markdown ### **1. 顯示偏好設定**
+#@markdown > **在啟動前，設定您的戰情室顯示偏好。**
+LOG_DISPLAY_LINES = 100 #@param {type:"integer"}
+STATUS_REFRESH_INTERVAL = 1.0 #@param {type:"number"}
+
+#@markdown ---
+#@markdown ### **2. 專案與伺服器設定**
+#@markdown > **`PROJECT_FOLDER_NAME` 是您在 `/content/` 下的專案資料夾名稱。**
+PROJECT_FOLDER_NAME = "WEB" #@param {type:"string"}
+#@markdown > **`FASTAPI_PORT` 是您的後端服務運行的埠號。**
+FASTAPI_PORT = 8000 #@param {type:"integer"}
+
+# ==============================================================================
+#                      ⚠️ 請勿修改下方的引導程式碼 ⚠️
+# ==============================================================================
+import os
+import sys
+from pathlib import Path
+import traceback
+
+# --- 步驟 1: 設定工作目錄 ---
+# 確保我們的執行環境在專案的根目錄下
+project_path = Path(f"/content/{PROJECT_FOLDER_NAME}")
+if not project_path.is_dir():
+    print(f"❌ 致命錯誤：找不到專案資料夾 '{project_path}'。")
+    print("   請確認您已將專案上傳或 clone 到正確的位置，並且 PROJECT_FOLDER_NAME 設定正確。")
+else:
+    os.chdir(project_path)
+    # 將專案路徑添加到系統路徑中，以便 Python 可以找到我們的模組
+    if str(project_path) not in sys.path:
+        sys.path.insert(0, str(project_path))
+    print(f"✅ 工作目錄已成功切換至: {os.getcwd()}")
+
+    # --- 步驟 2: 執行主引導程序 ---
+    try:
+        # 從專案中導入主引導模組
+        import colab_run
+
+        # 將 Colab 表單中由使用者設定的值，傳遞給主程式的全域變數
+        colab_run.LOG_DISPLAY_LINES = LOG_DISPLAY_LINES
+        colab_run.STATUS_REFRESH_INTERVAL = STATUS_REFRESH_INTERVAL
+        colab_run.FASTAPI_PORT = FASTAPI_PORT
+        colab_run.PROJECT_FOLDER_NAME = PROJECT_FOLDER_NAME
+
+        # 打印啟動前的最終確認資訊
+        print(f"\n✅ 成功導入版本: {getattr(colab_run, 'APP_VERSION', 'N/A')}。準備執行主流程...")
+        print(f"   - 日誌顯示行數: {LOG_DISPLAY_LINES}")
+        print(f"   - 狀態刷新頻率: {STATUS_REFRESH_INTERVAL} 秒")
+        print(f"   - 後端服務埠號: {FASTAPI_PORT}")
+        print("-" * 50)
+
+        # 執行主作戰流程
+        colab_run.main()
+
+    except ImportError as e:
+        print(f"❌ 致命錯誤：無法導入主引導程序 `colab_run`。")
+        print(f"   請檢查檔案 `colab_run.py` 是否存在且無語法錯誤。")
+        print(f"   詳細錯誤: {e}")
+    except Exception as e:
+        print(f"💥 執行期間發生未預期的錯誤: {e}")
+        # 打印詳細的錯誤追蹤資訊，以便除錯
+        traceback.print_exc()
+
 ```
-*請將 `[您的專案 GitHub URL]` 和 `[您的專案目錄名稱]` 替換為實際的 URL 和目錄名。*
 
-### 步驟 2：執行啟動腳本
+</details>
 
-下載完成並進入專案目錄後，執行以下指令來啟動平台：
+## 如何使用
 
-```python
-# 導入 colab_run.py 將會自動觸發所有安裝和啟動流程
-import colab_run
-```
+1.  **準備專案**:
+    *   在您的 Google Drive 中建立一個資料夾，例如 `Colab Notebooks`。
+    *   將您的整個「鳳凰之心」專案（包含 `integrated_platform` 資料夾、`run.sh` 等）上傳到該資料夾下的一個子目錄，例如 `WEB`。
+    *   結構應如下：`/content/drive/MyDrive/Colab Notebooks/WEB/`。
 
-就是這麼簡單！`colab_run.py` 腳本會自動處理以下所有事情：
-1.  **顯示核心程式碼**：它會先打印出 `uv_manager.py` 和 `run.py` 的內容，讓您了解背後發生了什麼。
-2.  **安裝依賴**：自動調用 `uv_manager.py` 來安裝所有在 `requirements.txt` 中定義的 Python 套件。
-3.  **啟動伺服器**：依賴安裝成功後，自動調用 `run.py` 來啟動 FastAPI 伺服器。
-4.  **建立公開連結**：伺服器啟動後，它會自動建立一個 `ngrok` 或類似的公開訪問通道，並將連結顯示在儲存格的輸出中。
+2.  **掛載 Google Drive**:
+    *   在您的 Colab 筆記本中，執行以下程式碼來掛載您的 Google Drive：
+        ```python
+        from google.colab import drive
+        drive.mount('/content/drive')
+        ```
 
-## 如何訪問平台
+3.  **設定路徑**:
+    *   在「🚀 啟動鳳凰之心作戰平台」儲存格中，將 `PROJECT_FOLDER_NAME` 的值修改為您在 Google Drive 中的完整路徑，例如：`drive/MyDrive/Colab Notebooks/WEB`。
 
-當儲存格執行完畢並顯示 "Uvicorn running on..." 以及一個公開的 URL (通常結尾是 `.ngrok.io`) 時，您就可以點擊該連結，在新的瀏覽器分頁中看到平台的歡迎主頁。
-
-主頁上會以卡片形式顯示所有已成功加載的應用模組。
-
-## 停止伺服器
-
-要停止伺服器，只需點擊 Colab 中正在運行的儲存格旁邊的「■」(中斷執行) 按鈕即可。所有相關的進程都會被自動終止。
-
-## 總結
-
-新的架構極大地簡化了在 Colab 中的使用體驗。您不再需要關心複雜的環境設定和啟動細節，只需一個 `import` 即可啟動整個平台。
+4.  **執行**:
+    *   執行該儲存格。平台將開始安裝依賴、啟動服務，並顯示一個包含日誌和公開連結的儀表板。
