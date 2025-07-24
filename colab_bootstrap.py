@@ -201,7 +201,7 @@ class LogManager:
             return
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_filename = self.archive_folder / f"鳳凰之心_作戰日誌_{timestamp}.txt"
+        log_filename = self.archive_folder / f"phoenix_heart_combat_log_{timestamp}.txt"
 
         try:
             with open(log_filename, 'w', encoding='utf-8') as f:

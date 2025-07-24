@@ -4236,6 +4236,9 @@ integrated_platform/log_archive/
 .venv/share/jupyter/labextensions/@jupyter-widgets/jupyterlab-manager/static/style.js
 .venv/share/jupyter/labextensions/@jupyter-widgets/jupyterlab-manager/static/third-party-licenses.json
 .venv/share/jupyter/nbextensions/jupyter-js-widgets/extension.js
-.venv/share/jupyter/nbextensions/jupyter-js-widgets/extension.js.LICENSE.txt
+.venv/tshare/jupyter/nbextensions/jupyter-js-widgets/extension.js.LICENSE.txt
 .venv/share/jupyter/nbextensions/jupyter-js-widgets/extension.js.map
 .venv/share/man/man1/ipython.1
+
+# 忽略由 teste2e.py 產生的模擬 Colab 環境
+/content/

@@ -56,9 +56,20 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ 加載應用 '{app_name}' 失敗: {e}", exc_info=True)
 
     logger.info("所有應用加載完畢，伺服器準備就緒！")
+
+    # 建立一個測試檔案來驗證 startup 事件
+    with open("items.txt", "w") as f:
+        f.write("FastAPI startup event test file.")
+    logger.info("測試檔案 'items.txt' 已建立。")
+
     yield
     # --- 關閉時的清理工作 (如果有的話) ---
     logger.info("👋 伺服器正在關閉...")
+
+    # 刪除測試檔案來驗證 shutdown 事件
+    if os.path.exists("items.txt"):
+        os.remove("items.txt")
+        logger.info("測試檔案 'items.txt' 已刪除。")
 
 
 # --- FastAPI 應用實例 ---
