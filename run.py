@@ -1,24 +1,20 @@
 # -*- coding: utf-8 -*-
 import argparse
-import sys
+import uvicorn
+import logging
+from pathlib import Path
 
-import uv_manager
+# --- 設定日誌 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def main():
     """
-    主執行函數，協調安裝和伺服器啟動。
+    一個極簡的伺服器啟動器。
+    它只負責根據傳入的參數啟動 Uvicorn，不處理任何其他邏輯。
+    依賴安裝等任務由主引擎 (colab_bootstrap.py) 負責。
     """
-    parser = argparse.ArgumentParser(description="模組化平台啟動器。")
-    parser.add_argument(
-        "--install-only",
-        action="store_true",
-        help="僅執行依賴安裝，然後退出。"
-    )
-    parser.add_argument(
-        "--run-only",
-        action="store_true",
-        help="僅啟動伺服器，跳過依賴安裝。"
-    )
+    parser = argparse.ArgumentParser(description="核心應用伺服器啟動器。")
     parser.add_argument(
         "--port",
         type=int,
@@ -28,24 +24,33 @@ def main():
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
+        default="127.0.0.1", # 改為 127.0.0.1 以符合 Colab 埠號轉發的最佳實踐
         help="指定伺服器監聽的主機地址。"
     )
-    args, unknown = parser.parse_known_args()
+    parser.add_argument(
+        "--app-dir",
+        type=str,
+        default=".",
+        help="指定包含 main:app 的應用程式目錄的相對路徑。"
+    )
+    args = parser.parse_args()
 
-    if not args.run_only:
-        print("--- [run.py] 階段一：依賴安裝 ---")
-        if not uv_manager.install_dependencies():
-            sys.exit(1)
+    # FastAPI 應用的位置，例如 'main:app'
+    # 我們假設主應用程式檔案總是命名為 main.py
+    app_string = f"{Path(args.app_dir).name}.main:app"
 
-    if args.install_only:
-        print("--- [run.py] 僅安裝模式，任務完成。 ---")
-        sys.exit(0)
+    # 在 Colab 環境下，uvicorn 需要從 /content 目錄下執行
+    # 我們的啟動腳本 (colab_bootstrap.py) 已經在專案的根目錄了
+    # 所以這裡我們直接使用 uvicorn
 
-    print(f"\n--- [run.py] 階段二：在 {args.host}:{args.port} 啟動應用伺服器 ---")
-    import uvicorn
+    logger.info(f"準備在 {args.host}:{args.port} 上啟動應用...")
+    logger.info(f"目標應用: {app_string}")
+
+    # 這裡我們不再需要改變 sys.path，因為主引擎已經處理了
+    # 我們假設 colab_bootstrap.py 在啟動此腳本時，工作目錄是正確的
+
     uvicorn.run(
-        "main:app",
+        "main:app", # 主應用程式始終是根目錄下的 main.py
         host=args.host,
         port=args.port,
         log_level="info"
