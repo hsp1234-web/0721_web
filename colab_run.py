@@ -1,64 +1,156 @@
 # -*- coding: utf-8 -*-
 # 整合型應用平台 Colab 啟動器
-# 版本: 3.0.0
-# 此腳本的唯一目的是在 Colab 環境中準備並啟動主應用程式 `run.py`。
+# 版本: 6.0.0 (雙區域儀表板)
+# 此腳本使用 google.colab.html 建立一個包含日誌和應用程式的雙區域儀表板。
 
 import sys
+import threading
+import time
+import queue
+import logging
 from pathlib import Path
+from IPython.display import display, HTML
+from google.colab import output
+from google.colab.kernel import proxy_kernel_driver
 
-def display_source_code(*files: str):
-    """
-    在 Colab 輸出中顯示指定檔案的原始碼。
-    """
-    print("=" * 80)
-    print("📄 核心腳本原始碼預覽")
-    print("=" * 80)
-    for file_name in files:
+# --- 全域配置 (可由 Colab Notebook 修改) ---
+PORT = 8000
+HOST = "127.0.0.1"
+LOG_DISPLAY_LINES = 100
+STATUS_REFRESH_INTERVAL = 1.0
+APP_VERSION = "v6.0.0"
+
+# --- 內部配置 ---
+LOG_QUEUE = queue.Queue()
+STOP_EVENT = threading.Event()
+DASHBOARD_TEMPLATE_PATH = Path("static/colab_dashboard.html")
+
+# --- 日誌系統 ---
+class QueueHandler(logging.Handler):
+    """將日誌記錄發送到佇列的處理程序。"""
+    def __init__(self, log_queue):
+        super().__init__()
+        self.log_queue = log_queue
+
+    def emit(self, record):
+        self.log_queue.put(self.format(record))
+
+def setup_logging():
+    """設定全域日誌記錄器，將日誌同時輸出到控制台和佇列。"""
+    log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # 主記錄器
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # 控制台輸出
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(log_formatter)
+    logger.addHandler(stream_handler)
+
+    # 佇列輸出
+    queue_handler = QueueHandler(LOG_QUEUE)
+    queue_handler.setFormatter(log_formatter)
+    logger.addHandler(queue_handler)
+
+# --- 儀表板與日誌更新 ---
+def log_updater_thread():
+    """從佇列中獲取日誌並使用 JS 更新前端的執行緒。"""
+    logs = []
+    while not STOP_EVENT.is_set():
         try:
-            content = Path(file_name).read_text(encoding='utf-8')
-            print(f"\n--- 檔案: {file_name} ---\n")
-            print(content)
-            print(f"\n--- 結束: {file_name} ---")
-        except FileNotFoundError:
-            print(f"\n--- 警告: 找不到檔案 {file_name}，無法顯示。 ---\n")
+            log_record = LOG_QUEUE.get(timeout=1)
+            logs.append(log_record)
+
+            # 保持日誌列表只顯示指定的行數
+            if len(logs) > LOG_DISPLAY_LINES:
+                logs.pop(0)
+
+            # 清理日誌文字中的特殊字元，以安全地傳遞給 JS
+            log_text_for_js = "\\n".join(logs).replace("'", "\\'").replace('"', '\\"')
+
+            # 使用 eval_js 來呼叫一個 JS 函式更新日誌區域
+            output.eval_js(f"""
+                (function() {{
+                    const logDisplay = document.getElementById('log-display');
+                    if (logDisplay) {{
+                        logDisplay.textContent = '{log_text_for_js}';
+                        logDisplay.scrollTop = logDisplay.scrollHeight;
+                    }}
+                }})();
+            """)
+        except queue.Empty:
+            continue
         except Exception as e:
-            print(f"\n--- 錯誤: 讀取檔案 {file_name} 時發生錯誤: {e} ---\n")
-    print("=" * 80)
-    print("✅ 原始碼預覽結束")
-    print("=" * 80, "\n")
+            # 在主控台中打印更新執行緒的錯誤
+            print(f"Log updater thread error: {e}", file=sys.stderr)
 
+def display_dashboard(app_url: str):
+    """讀取 HTML 模板，注入 URL，並顯示儀表板。"""
+    if not DASHBOARD_TEMPLATE_PATH.exists():
+        logging.error(f"找不到儀表板模板檔案: {DASHBOARD_TEMPLATE_PATH}")
+        return
 
+    template = DASHBOARD_TEMPLATE_PATH.read_text(encoding='utf-8')
+    html_content = template.replace("{{APP_URL}}", app_url)
+
+    # 清除之前的任何輸出並顯示新的 HTML 儀表板
+    output.clear()
+    display(HTML(html_content))
+    logging.info("雙區域作戰儀表板已成功渲染。")
+
+# --- 主執行流程 ---
 def main():
-    """
-    Colab 環境的主執行流程。
-    1. 顯示核心腳本的源碼。
-    2. 導入並執行 `run.py` 的主函式。
-    """
-    # 顯示核心管理和執行腳本的內容
-    display_source_code("uv_manager.py", "run.py")
+    """Colab 環境的主執行流程。"""
+    setup_logging()
 
+    _print_header("階段一：啟動主應用程式")
     try:
-        # 導入主執行腳本。
-        # 假設 run.py 已經處理了所有路徑問題。
         import run
-
-        # 執行主程式，run.py 將處理安裝和啟動的所有邏輯。
-        # 我們不傳遞任何參數，讓 run.py 使用其預設行為 (安裝並運行)。
-        run.main()
-
-    except ImportError as e:
-        print(f"❌ [致命錯誤] 無法導入 'run.py'。請確保該檔案存在於專案根目錄。", file=sys.stderr)
-        print(f"詳細錯誤: {e}", file=sys.stderr)
-        sys.exit(1)
+        # 將 PORT 傳遞給 run 模組
+        run.PORT = PORT
+        app_thread = threading.Thread(target=run.main, daemon=True)
+        app_thread.start()
+        logging.info(f"主應用程式執行緒已在背景啟動，目標埠號 {PORT}。")
     except Exception as e:
-        print(f"❌ [致命錯誤] 執行 'run.py' 時發生未預期的嚴重錯誤。", file=sys.stderr)
-        import traceback
-        print(traceback.format_exc(), file=sys.stderr)
-        sys.exit(1)
+        logging.critical(f"啟動 'run.py' 時發生致命錯誤: {e}", exc_info=True)
+        return
 
-# 當此腳本被 Colab `import` 後，直接呼叫 main() 函式。
+    _print_header("階段二：建立 Colab 內部代理並渲染儀表板")
+    try:
+        # 獲取 Colab 為我們服務的代理 URL
+        app_url = proxy_kernel_driver.get_external_url(PORT)
+        logging.info(f"成功獲取應用程式代理 URL: {app_url}")
+
+        # 顯示儀表板
+        display_dashboard(app_url)
+
+        # 啟動日誌更新執行緒
+        log_thread = threading.Thread(target=log_updater_thread, daemon=True)
+        log_thread.start()
+        logging.info("日誌更新執行緒已啟動。")
+
+    except Exception as e:
+        logging.critical(f"建立儀表板時發生錯誤: {e}", exc_info=True)
+        return
+
+    # 保持主執行緒活躍，直到被使用者中斷
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("偵測到手動中斷，正在關閉服務...")
+        STOP_EVENT.set()
+
+def _print_header(title: str):
+    """使用 logging 印出帶有風格的標頭。"""
+    logging.info("="*80)
+    logging.info(f"🚀 {title}")
+    logging.info("="*80)
+
 if __name__ == "__main__":
     main()
 else:
-    # 為了確保在 Colab 中 "import colab_run" 就能執行
-    main()
+    # 允許 'import colab_run' 直接執行
+    # Colab Notebook 會先設定好 PORT 等變數，然後才呼叫 main()
+    pass

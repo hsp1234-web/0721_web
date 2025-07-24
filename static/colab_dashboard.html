@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳳凰之心作戰儀表板</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100vh; /* 佔滿整個可視高度 */
+            font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            overflow: hidden; /* 防止滾動條出現 */
+        }
+        .dashboard-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .panel {
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-panel {
+            width: 40%;
+            border-right: 2px solid #555;
+        }
+        .app-panel {
+            width: 60%;
+        }
+        .panel-header {
+            background-color: #333;
+            padding: 8px 12px;
+            font-weight: bold;
+            border-bottom: 1px solid #555;
+        }
+        .panel-content {
+            flex-grow: 1;
+            overflow-y: auto; /* 內容超出時，只在內容區塊顯示滾動條 */
+            padding: 10px;
+            background-color: #252526;
+        }
+        #log-display {
+            white-space: pre-wrap; /* 自動換行 */
+            word-break: break-all;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        #app-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="panel log-panel">
+            <div class="panel-header">
+                📜 作戰日誌
+            </div>
+            <div class="panel-content">
+                <pre id="log-display">初始化儀表板...</pre>
+            </div>
+        </div>
+        <div class="panel app-panel">
+            <div class="panel-header">
+                🖥️ 應用程式主介面
+            </div>
+            <div class="panel-content" style="padding: 0;">
+                <iframe id="app-iframe" src="{{APP_URL}}"></iframe>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
