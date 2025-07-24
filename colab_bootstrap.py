@@ -104,7 +104,9 @@ class DisplayManager:
         """設定 IFrame 的內容。"""
         with self.lock:
             # 產生備用連結
-            window_url = output.eval_ більш_output_url(port)
+            # 在真實的 Colab 環境中，我們會使用一個函式來獲取 URL
+            # 為了本地測試的相容性，我們假設這個函式存在
+            window_url = output.get_colab_url(port)
             self.iframe_html = f"""
             <p>✅ 您的應用程式已就緒！</p>
             <iframe src="{url}" width="100%" height="600px" frameborder="0"></iframe>
@@ -309,11 +311,11 @@ def main():
 
         # 3. **監控與嵌入**
         server_ready = False
-        # 使用 google.colab.output.eval_ більш_output_url 檢查埠號是否就緒
+        # 使用 google.colab.output.get_colab_url 檢查埠號是否就緒
         for _ in range(60): # 最多等待60秒
             try:
                 # 這個函式會在埠號可用時返回 URL，否則拋出異常
-                iframe_url = output.eval_ більш_output_url(args.port, timeout_sec=1)
+                iframe_url = output.get_colab_url(args.port, timeout_sec=1)
                 log_manager.success(f"✅ 伺服器已在埠號 {args.port} 上線！")
                 display_manager.render_iframe(iframe_url, args.port)
                 display_manager.update_status(psutil.cpu_percent(), psutil.virtual_memory().percent, "RUNNING")
