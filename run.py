@@ -31,7 +31,7 @@ def main():
         default="0.0.0.0",
         help="指定伺服器監聽的主機地址。"
     )
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     if not args.run_only:
         print("--- [run.py] 階段一：依賴安裝 ---")
