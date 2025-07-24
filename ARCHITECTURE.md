@@ -24,8 +24,6 @@
 | `run.py`            | **伺服器啟動器**：一個極簡腳本，其唯一任務是使用 uvicorn 啟動 FastAPI 應用。 | Uvicorn ASGI 伺服器。                                                |
 | `main.py`           | **應用主入口**：建立 FastAPI 實例，動態掃描並聚合所有 `apps` 的 API 路由。 | FastAPI 路由管理 (`include_router`)、動態模組匯入 (`importlib`)。     |
 | `apps/*`            | **業務邏輯單元**：包含所有具體應用功能（如量化、語音轉錄）的獨立模組。 | 業務邏輯、懶加載模式 (Lazy Loading)。                                |
-| `colab_run.py`      | **Colab 橋接器**：作為 Colab Notebook 與後端系統的唯一接口。           | 依賴注入模式、外觀模式 (Facade Pattern)。                            |
-| `colab_display.py`  | **Colab 顯示器**：包含所有與 Colab UI 互動的程式碼，渲染 HTML 狀態介面。 | `IPython.display`、HTML/CSS/JS。                                     |
 | `logger/main.py`    | **中央日誌中心**：由一個日誌消費者進程，負責將日誌批次寫入資料庫。     | 非同步佇列 (`multiprocessing.Queue`)、單一寫入者模式 (Single Writer)。 |
 | `database/`         | **日誌與指標資料庫**：儲存所有結構化的日誌與系統監控數據。             | DuckDB 分析型欄式資料庫 (OLAP)、高效批次寫入。                       |
 | `start.sh`          | **生產啟動腳本**：用於在伺服器環境中以後台模式啟動、停止和管理應用。   | Shell Scripting、守護進程管理。                                      |
@@ -38,7 +36,7 @@
 
 ```mermaid
 graph TD
-    A[使用者/啟動腳本 <br> e.g. start.sh or colab_run.py] --> B{core.py - 主進程};
+    A[使用者/啟動腳本 <br> e.g. start.sh] --> B{core.py - 主進程};
 
     subgraph 核心系統點火 (階段 1)
         B --> C(啟動日誌寫入進程 <br> logger_process);
@@ -72,7 +70,7 @@ graph TD
 **詳細說明**
 
 1.  **階段一：啟動器執行**
-    由使用者或自動化腳本 (`start.sh` 或 `colab_run.py`) 觸發。它的核心任務是準備環境，並以正確的參數呼叫 `core.py`。
+    由使用者或自動化腳本 (`start.sh`) 觸發。它的核心任務是準備環境，並以正確的參數呼叫 `core.py`。
 
 2.  **階段二：核心系統點火**
     `core.py` 作為總指揮官啟動。它首先建立後勤系統：啟動獨立的「日誌寫入進程」和「系統監控進程」。這兩個進程開始獨立工作後，`core.py` 才會以子進程的方式啟動主應用程式 `run.py`，並全面監控其運行。
@@ -92,7 +90,6 @@ graph TD
 | `.venv/`                  | **虛擬環境**：一個獨立、乾淨的 Python "氣泡"，用於隔離專案依賴。          | 在專案初始化時，使用 `python -m venv .venv` 建立一次。            |
 | `requirements/base.txt`   | **核心依賴**：應用程式在任何環境運行的必需品 (`fastapi`, `duckdb` 等)。    | 生產環境部署時 (`uv pip install -r requirements/base.txt`)。          |
 | `requirements/dev.txt`    | **開發依賴**：包含核心依賴，並額外增加測試、除錯與品質檢查工具。         | 開發者設定本地環境時 (`uv pip install -r requirements/dev.txt`)。   |
-| `requirements/colab.txt`  | **Colab 特定依賴**：包含核心依賴，並額外增加 Colab UI 互動套件。         | 在 Colab Notebook 啟動時 (`uv pip install -r requirements/colab.txt`)。 |
 
 ## 5. 結論
 
