@@ -40,12 +40,12 @@
 graph TD
     A[使用者/啟動腳本] --> B{core.py};
 
-    subgraph 階段 1：核心系統
+    subgraph 階段 1: 核心系統
         B --> C(日誌進程);
         B --> D(監控進程);
     end
 
-    subgraph 階段 2：Web 伺服器
+    subgraph 階段 2: Web 伺服器
         B -- 啟動 --> E{run.py};
         E -- 載入 --> F[main.py:app];
         F -- 掃描 --> G[註冊 apps 路由];
@@ -58,7 +58,7 @@ graph TD
         F -- 發送日誌 --> C;
     end
 
-    subgraph 階段 3：懶加載
+    subgraph 階段 3: 懶加載
         K[API 請求] --> H;
         H -- 觸發 --> L{對應 app};
         L -- 檢查模型 --> M{模型存在?};
