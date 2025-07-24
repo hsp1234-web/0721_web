@@ -1,94 +1,91 @@
-# 鳳凰之心作戰平台 v2.1.0 架構說明：單線程堡壘
+# 鳳凰之心作戰平台架構說明
 
 呈報對象： 指揮官
 報告日期： 2025 年 7 月 23 日
-版本號： v2.1.0
+版本號： v3.0.0 (Colab-Native)
 
-## I. 核心理念：絕對可靠的順序執行
+## I. 核心理念：Colab 原生，簡潔至上
 
-本專案採用「單線程堡壘」架構，旨在根除在 Colab 等資源受限環境中，由多進程或多線程引起的競爭條件和不確定性。其核心理念是回歸本源，採用最簡單、最可靠的單線程、順序執行流程，以確保 100% 的日誌可見性和部署成功率。
+本專案架構已演進為「Colab 引導層」模型。此模型專為在 Google Colab 環境中實現最大的穩定性、易用性和可維護性而設計。我們摒棄了複雜的腳本和多線程管理，回歸到由 Colab Notebook 直接驅動的、清晰的單一流程。
 
-## II. 啟動流程：單一入口，鐵序執行
+核心理念是：**讓 Colab Notebook 作為使用者互動的前端和參數設定的入口，同時讓 Python 腳本 (`colab_run.py`, `run.py`) 專注於核心的應用程式邏輯。**
 
-系統的唯一入口點是 `integrated_platform/src/colab_bootstrap.py`。其 `main()` 函式嚴格遵循以下順序執行，任何一步失敗都會導致流程終止，確保了執行的可預測性。
+## II. 組件與職責
 
-### 階段一：阻塞式前景安裝
+### 1. Colab Notebook (`.ipynb`) - 指揮中心
+*   **職責**:
+    1.  **使用者介面 (UI)**: 提供一個基於 `@param` 的表單，讓使用者可以直觀地設定關鍵參數（如專案路徑、埠號等）。
+    2.  **環境設定**: 負責設定正確的工作目錄 (`os.chdir`) 和 Python 的模組搜尋路徑 (`sys.path`)。
+    3.  **參數傳遞**: 將使用者在表單中設定的值，在執行階段直接賦予給 `colab_run.py` 模組中的全域變數。
+    4.  **啟動入口**: 呼叫 `colab_run.main()`，觸發整個應用程式的啟動流程。
+*   **定位**: 專案的**最高層引導器 (Top-Level Bootstrapper)**。
 
-*   **執行者**: 主線程
-*   **動作**: 直接呼叫並等待 `run.sh` 腳本執行完畢。`run.sh` 的唯一職責是使用 `pip install -r requirements.txt` 安裝所有依賴。
-*   **目的**: 確保在執行任何 Python 程式碼之前，執行環境是完全準備好的。此階段的任何輸出都會直接顯示在 Colab 的輸出欄位，提供完全透明的安裝過程。若安裝失敗，整個作戰流程將立即終止。
+### 2. `colab_run.py` - Colab 環境適配層
+*   **職責**:
+    1.  **接收參數**: 作為一個 Python 模組，從 Colab Notebook 接收設定值（如 `PORT`）。
+    2.  **背景化應用**: 在一個獨立的背景執行緒 (`daemon=True`) 中啟動主應用程式 (`run.main`)。這是必要的，因為主執行緒需要繼續執行以呼叫 Colab 的代理功能。
+    3.  **建立內部通道**: 呼叫 `google.colab.output.serve_kernel_port_as_iframe` 和 `serve_kernel_port_as_window`，生成只有使用者可見的、安全的應用程式訪問連結。
+    4.  **維持運行**: 讓主執行緒保持活躍，以確保背景的 FastAPI 服務和 Colab 的代理通道能持續運作。
+*   **定位**: **Colab 環境與核心應用的橋樑**。它處理所有 Colab 特有的 API 呼叫和執行緒管理。
 
-### 階段二：啟動日誌與儀表板
+### 3. `run.py` - 主應用邏輯層
+*   **職責**:
+    1.  **依賴管理**: 呼叫 `uv_manager.install_dependencies()` 來確保所有必要的 Python 套件都已安裝。
+    2.  **參數解析**: 使用 `argparse.parse_known_args()` 來處理命令列參數。這種方式可以安全地忽略由 Colab/Jupyter 傳入的未知參數，從而避免崩潰。
+    3.  **啟動 Web 伺服器**: 使用 `uvicorn.run()` 來啟動 FastAPI 應用 (`main:app`)。
+*   **定位**: **核心應用啟動器**。它的設計是環境無關的，理論上也可以在本地或其他非 Colab 環境中執行。
 
-*   **執行者**: 主線程初始化，儀表板在獨立的背景線程 (`DisplayManagerThread`) 運行。
-*   **動作**:
-    1.  在所有依賴都安全安裝後，才導入 `IPython`、`google.colab` 等可能需要安裝的模組。
-    2.  初始化 `LogManager`，負責將日誌寫入 `logs.sqlite`。
-    3.  啟動 `DisplayManager` 的背景線程，該線程會持續從資料庫讀取日誌，並更新 Colab UI。
-*   **目的**: 確保日誌系統在後端服務啟動前就緒，能夠捕捉到後續所有的啟動日誌。
+### 4. `uv_manager.py` - 依賴管理工具
+*   **職責**: 封裝了使用 `uv` 來安裝 `requirements.txt` 的所有邏輯。
+*   **定位**: **專用的套件安裝工具**。
 
-### 階段三：啟動後端核心引擎
+## III. 啟動流程與資料流
 
-*   **執行者**: 獨立的背景線程 (`BackendServerThread`)
-*   **動作**: 透過 `uvicorn` 啟動 FastAPI 應用。
-*   **目的**: 將長時間運行的後端服務與主線程分離，避免阻塞。
-
-### 階段四：主線程健康檢查
-
-*   **執行者**: 主線程
-*   **動作**: 循環向後端服務的 `/health` 端點發送請求，直到收到成功的響應或超時。
-*   **目的**: 確保只有在後端服務完全就緒後，才執行後續步驟。
-
-### 階段五：建立對外通訊
-
-*   **執行者**: 主線程
-*   **動作**: 呼叫 `google.colab.output.serve_kernel_port_as_iframe` 建立公開的訪問連結。
-*   **目的**: 將穩定的服務暴露給使用者。
-
-### 階段六：維持運行與優雅關閉
-
-*   **執行者**: 主線程
-*   **動作**: 主線程進入一個循環，監聽 `STOP_EVENT`。當使用者在 Colab 中斷儲存格執行時，`STOP_EVENT` 被設置，`finally` 塊會被觸發，從而優雅地清理所有背景線程。
-*   **目的**: 確保資源的正確釋放。
-
-## III. 流程圖與資料流
-
-### A. 流程圖
+### A. 啟動時序圖
 
 ```mermaid
-graph TD
-    A[Colab 儲存格執行] --> B{阶段一：執行 run.sh};
-    B -- 成功 --> C{阶段二：啟動日誌線程};
-    B -- 失敗 --> Terminate1[終止作戰];
-    C --> D{阶段三：啟動後端線程};
-    D --> E{阶段四：主線程健康檢查};
-    E -- 成功 --> F{阶段五：建立公開連結};
-    E -- 失敗 --> Terminate2[終止作戰];
-    F --> G[主線程維持運行];
-    G -- 使用者中斷 --> H{優雅關閉所有線程};
+sequenceDiagram
+    participant User as 使用者
+    participant ColabUI as Colab Notebook (UI)
+    participant ColabCode as Notebook (程式碼)
+    participant colab_run as colab_run.py
+    participant run_py as run.py
+    participant uvicorn as Uvicorn Server
 
-    subgraph "主線程"
-        B; E; F; G; H;
-    end
+    User->>ColabUI: 填寫表單參數 (埠號, 路徑)
+    User->>ColabUI: 點擊「執行」
+    ColabUI->>ColabCode: 執行儲存格程式碼
+    ColabCode->>colab_run: import colab_run
+    ColabCode->>colab_run: colab_run.PORT = 8000
+    ColabCode->>colab_run: main()
 
-    subgraph "背景線程"
-        C; D;
-    end
+    colab_run->>run_py: 在新執行緒中啟動 main()
+    activate run_py
+
+    run_py->>run_py: 呼叫 uv_manager 安裝依賴
+    run_py->>uvicorn: uvicorn.run("main:app", ...)
+    activate uvicorn
+    uvicorn-->>run_py: (伺服器在背景運行)
+
+    deactivate run_py
+
+    colab_run->>ColabUI: output.serve_kernel_port_as_iframe()
+    colab_run->>ColabUI: output.serve_kernel_port_as_window()
+
+    ColabUI-->>User: 顯示內嵌應用視窗和連結
 ```
 
 ### B. 資料流
 
-| 編號 | 來源組件         | 目標組件             | 傳遞的資料                               | 傳遞方式     | 說明                                                                 |
-| :--- | :--------------- | :------------------- | :--------------------------------------- | :----------- | :------------------------------------------------------------------- |
-| 1    | Colab 儲存格     | `colab_bootstrap.py` | `LOG_DISPLAY_LINES`, `FASTAPI_PORT` 等   | 全域變數     | Colab 儲存格在呼叫 `main()` 之前，直接設定 `colab_bootstrap` 模組中的全域變數。 |
-| 2    | 所有組件         | `LogManager`         | 日誌訊息 (level, message)                | 函式呼叫     | 系統各部分透過呼叫 `log_manager.log()` 來記錄事件。                    |
-| 3    | `LogManager`     | `logs.sqlite`        | 格式化的日誌記錄                         | SQLite 寫入  | `LogManager` 將日誌持久化到資料庫中。                                |
-| 4    | `logs.sqlite`    | `DisplayManager`     | 新的日誌記錄                             | SQLite 讀取  | `DisplayManager` 定期查詢資料庫以獲取新日誌，並更新 UI。             |
-| 5    | `colab_bootstrap.py` | FastAPI 應用 (`app`) | `log_manager` 實例                       | `app.state`  | 主引導程序將 `log_manager` 實例注入到 FastAPI 應用的狀態中，供其內部使用。 |
+| 編號 | 來源組件         | 目標組件         | 傳遞的資料     | 傳遞方式     | 說明                                                     |
+| :--- | :--------------- | :--------------- | :------------- | :----------- | :------------------------------------------------------- |
+| 1    | Colab Notebook   | `colab_run.py`   | `PORT` 等設定  | 模組全域變數 | Colab Notebook 在 `import` 後，直接對模組的變數進行賦值。 |
+| 2    | `colab_run.py`   | `run.py`         | (無直接傳遞)   | 函式呼叫     | `colab_run` 啟動 `run`，`run` 使用自己的預設參數。      |
+| 3    | `run.py`         | `main:app`       | `host`, `port` | Uvicorn 參數 | `run.py` 將解析後的參數傳遞給 `uvicorn.run`。          |
 
 ## IV. 核心優勢
 
-*   **穩定性**: 徹底消除了競爭條件。依賴安裝、日誌系統、後端服務的啟動順序是固定且可靠的。
-*   **透明度**: `pip install` 的日誌會直接、完整地顯示在 Colab 輸出中，便於診斷環境問題。
-*   **日誌完整性**: 日誌儀表板在後端啟動前就已運行，可以捕獲從啟動到運行的所有日誌，不會再出現日誌被清空或丟失的問題。
-*   **易於維護**: 單一、線性的啟動流程取代了複雜的多進程管理，使程式碼更容易理解和除錯。
+*   **易用性**: 使用者只需填寫一個簡單的表單即可啟動，無需理解底層程式碼。
+*   **穩定性**: `parse_known_args()` 的使用解決了在 Colab 環境中常見的參數衝突問題。啟動流程清晰，減少了出錯的可能性。
+*   **安全性**: 預設使用 Colab 的內部代理，服務不會暴露在公共網路上，只有筆記本的使用者可以訪問。
+*   **可維護性**: 職責劃分清晰。UI 和參數設定在 `.ipynb`，Colab 環境適配在 `colab_run.py`，核心應用邏輯在 `run.py`，使得各部分可以獨立修改和維護。
