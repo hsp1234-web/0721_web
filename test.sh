@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# 作戰藍圖 v2.0.3 - 適應性部署整合測試
+# 作戰藍圖 v3.0.2 - Poetry + UV 整合測試 (移除 sudo)
 #
 set -e
 
@@ -13,35 +13,16 @@ echof() {
 }
 
 # --- 環境準備 ---
-echof "Setup" "正在準備測試環境..."
-# 在極簡環境中，可能需要先安裝這些工具
-echof "Setup" "正在安裝必要的系統工具 (sqlite3)..."
-apt-get update > /dev/null && apt-get install -y sqlite3 > /dev/null
+echof "Setup" "正在準備測試環境 (跳過 apt-get)..."
 
 # --- 執行總指揮 ---
-echof "Execution" "準備執行 v2.1.0 堡壘架構..."
+echof "Execution" "準備執行 v3.0.2 堡壘架構..."
 export FASTAPI_PORT=8899
 export LOG_DISPLAY_LINES=100
 export PROJECT_FOLDER_NAME="WEB"
 
-# 模擬 Colab 環境，直接呼叫 colab_bootstrap.main
-# 我們需要一個 mock 來處理 colab/ipython 的導入
-# 我們將這個 mock 寫在一個臨時檔案中
-cat > mock_colab.py <<EOF
-import sys
-from unittest.mock import MagicMock
-sys.modules['IPython'] = MagicMock()
-sys.modules['IPython.display'] = MagicMock()
-sys.modules['google.colab'] = MagicMock()
-sys.modules['google.colab.output'] = MagicMock()
-sys.modules['psutil'] = MagicMock()
-
-import colab_run
-colab_run.FASTAPI_PORT = int(sys.argv[1])
-colab_run.main()
-EOF
-
-python3 mock_colab.py $FASTAPI_PORT &
+# 使用 poetry run 來確保在正確的虛擬環境中執行
+poetry run python3 colab_test.py $FASTAPI_PORT &
 START_PLATFORM_PID=$!
 echof "Execution" "堡壘架構已在背景啟動 (PID: $START_PLATFORM_PID)。開始監控..."
 
@@ -89,8 +70,12 @@ if [ "$SUCCESS" = "true" ]; then
     echof "Validation" "✅ 所有驗證均已通過！" "\e[1;32m"
 else
     echof "Validation" "❌ 部分驗證失敗，請檢查上述日誌。" "\e[1;31m"
-    echof "Diagnostics" "顯示 logs.sqlite 內容..."
-    sqlite3 "$LOG_DB_PATH" "SELECT * FROM logs ORDER BY id DESC LIMIT 20;" || echo "無法讀取 '$LOG_DB_PATH'"
+    if command -v sqlite3 &> /dev/null; then
+      echof "Diagnostics" "顯示 logs.sqlite 內容..."
+      sqlite3 "$LOG_DB_PATH" "SELECT * FROM logs ORDER BY id DESC LIMIT 20;" || echo "無法讀取 '$LOG_DB_PATH'"
+    else
+      echof "Diagnostics" "sqlite3 未安裝，跳過日誌傾印。"
+    fi
     kill $START_PLATFORM_PID || true
     exit 1
 fi
