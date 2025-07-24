@@ -1,0 +1,9 @@
+# 開發環境依賴
+-r base.txt
+
+# 測試工具
+pytest
+pytest-asyncio
+
+# 程式碼風格與檢查
+ruff

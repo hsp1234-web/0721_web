@@ -1,116 +1,69 @@
-# -*- coding: utf-8 -*-
+from fastapi import FastAPI
 import os
-import sys
 import importlib
-import logging
-from contextlib import asynccontextmanager
-from pathlib import Path
+import sys
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+# 將專案根目錄加入 sys.path，確保無論從哪裡啟動都能正確找到模組
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-# --- 設定日誌 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- App 註冊表 ---
-# 用於儲存加載的 App 資訊，以便在前端顯示
-APPS_REGISTER = []
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    應用程式生命週期管理。
-    在啟動時，動態掃描並加載所有 apps。
-    """
-    logger.info("🚀 伺服器啟動中...")
-
-    # 將專案根目錄加入 sys.path 以便導入 apps
-    project_root = Path(__file__).parent
-    sys.path.insert(0, str(project_root))
-
-    apps_dir = project_root / "apps"
-    if not apps_dir.is_dir():
-        logger.warning(f"找不到 'apps' 目錄，將不會加載任何應用。")
-        yield
-        return
-
-    logger.info(f"掃描 'apps' 目錄: {apps_dir}")
-    for app_dir in apps_dir.iterdir():
-        if app_dir.is_dir() and (app_dir / "main.py").exists():
-            app_name = app_dir.name
-            try:
-                # 動態導入 app 模組
-                module_name = f"apps.{app_name}.main"
-                module = importlib.import_module(module_name)
-
-                # 檢查模組中是否有 'router' 和 'app_info'
-                if hasattr(module, "router") and hasattr(module, "app_info"):
-                    app.include_router(module.router)
-                    APPS_REGISTER.append(module.app_info)
-                    logger.info(f"✅ 成功加載應用: '{module.app_info.get('name', app_name)}'")
-                else:
-                    logger.warning(f"🟡 在 '{module_name}' 中找不到 'router' 或 'app_info'，已跳過。")
-            except Exception as e:
-                logger.error(f"❌ 加載應用 '{app_name}' 失敗: {e}", exc_info=True)
-
-    logger.info("所有應用加載完畢，伺服器準備就緒！")
-    yield
-    # --- 關閉時的清理工作 (如果有的話) ---
-    logger.info("👋 伺服器正在關閉...")
-
-
-# --- FastAPI 應用實例 ---
+# --- 應用程式實例 ---
 app = FastAPI(
-    title="模組化非同步平台",
-    description="一個高度模組化、可擴展的平台，支持非同步應用懶加載。",
+    title="高效能 Web 應用程式",
+    description="一個現代化、可維護的後端架構，遵循模組化、依賴注入與懶啟動原則。",
     version="1.0.0",
-    lifespan=lifespan
 )
 
-# --- 核心 API 路由 ---
-@app.get("/api/apps")
-async def get_applications():
-    """返回所有已註冊應用的列表。"""
-    return APPS_REGISTER
+# --- 根路由 ---
+@app.get("/", tags=["系統"])
+def read_root():
+    """
+    根路由，提供一個簡單的歡迎訊息。
+    """
+    return {"message": "歡迎來到高效能 Web 應用程式架構！"}
 
-# --- 掛載靜態文件 ---
-# 為了提供 index.html 和未來的 CSS/JS 檔案
-static_dir = Path(__file__).parent / "static"
-static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# --- 動態路由掃描與聚合 ---
+APPS_DIR = "apps"
 
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    """提供平台的主歡迎頁面。"""
-    index_path = static_dir / "index.html"
-    if not index_path.exists():
-        # 提供一個預設的歡迎頁面，以防 index.html 不存在
-        return HTMLResponse(content="""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>平台正在初始化</title>
-        </head>
-        <body>
-            <h1>歡迎來到模組化平台</h1>
-            <p>找不到 'static/index.html'。請確保該檔案存在。</p>
-        </body>
-        </html>
-        """, status_code=200)
+print("[應用主入口] 開始掃描業務邏輯單元 (apps)...")
 
-    with open(index_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read(), status_code=200)
+for app_name in os.listdir(APPS_DIR):
+    app_path = os.path.join(APPS_DIR, app_name)
 
-if __name__ == "__main__":
-    import uvicorn
-    # 為了方便直接測試此文件
-    logger.info("以直接執行模式啟動 Uvicorn 伺服器...")
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True, # 在開發時啟用重載
-        reload_dirs=[str(Path(__file__).parent)]
-    )
+    # 確保它是一個目錄，並且不是 __pycache__ 之類的特殊目錄
+    if os.path.isdir(app_path) and not app_name.startswith('__'):
+        router_module_path = f"{APPS_DIR}.{app_name}.main"
+
+        try:
+            # 動態匯入模組
+            router_module = importlib.import_module(router_module_path)
+
+            # 檢查模組中是否有 'router' 物件，並且它是 APIRouter 的實例
+            if hasattr(router_module, 'router'):
+                print(f"  -> 發現並註冊路由: {app_name}")
+                # 引入子應用的路由
+                app.include_router(
+                    router_module.router,
+                    prefix=f"/{app_name}", # 給子應用的所有 API 加上前綴，例如 /transcriber
+                    tags=[app_name.capitalize()], # 在 OpenAPI 文件中為其建立分類
+                )
+            else:
+                 print(f"  -! 在 {router_module_path} 中找不到 'router' 物件。")
+
+        except ImportError as e:
+            # 如果 'main.py' 不存在或有匯入錯誤，則忽略
+            print(f"  -! 無法從 {app_name} 匯入路由: {e}")
+        except Exception as e:
+            print(f"  -! 處理 {app_name} 時發生未知錯誤: {e}")
+
+print("[應用主入口] 所有路由掃描完畢。")
+
+# --- 診斷資訊：打印所有已註冊的路由 ---
+print("[應用主入口] --- 已註冊的 API 路由 ---")
+for route in app.routes:
+    # 檢查路由是否是 APIRoute，以獲取更詳細的資訊
+    if hasattr(route, "methods"):
+        print(f"  - 路徑: {route.path}, 方法: {route.methods}, 名稱: {route.name}")
+    else:
+        # 對於像掛載的子應用等其他類型的路由
+        print(f"  - 掛載點/路由: {route}")
+print("[應用主入口] --- 路由列表結束 ---")
