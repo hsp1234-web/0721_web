@@ -1,79 +1,69 @@
-# -*- coding: utf-8 -*-
-# 整合型應用平台 Colab 啟動器
-# 版本: 5.0.0
-# 此腳本使用 Google Colab 的內建代理功能，提供一個安全、私有的方式來存取應用程式。
+# 檔案: colab_run.py
+# 說明: 此腳本為輕量點火器，僅負責傳遞參數並啟動主引擎。
 
 import sys
-import threading
-import time
+import subprocess
 from pathlib import Path
+import traceback
 
-# --- 配置 ---
-PORT = 8000
-HOST = "127.0.0.1"
-
-def _print_header(title: str):
-    """印出帶有風格的標頭。"""
-    print("\n" + "="*80)
-    print(f"🚀 {title}")
-    print("="*80)
+# --- 全域變數 ---
+# 說明: 這些變數將由 Colab Notebook 的 @param 表單直接賦值。
+#       它們是從駕駛艙到點火器的唯一通訊方式。
+LOG_DISPLAY_LINES = 50
+STATUS_REFRESH_INTERVAL = 0.2
+TARGET_FOLDER_NAME = "WEB"
+ARCHIVE_FOLDER_NAME = "作戰日誌歸檔"
+FASTAPI_PORT = 8000
 
 def main():
     """
-    Colab 環境的主執行流程。
-    1. 安裝依賴。
-    2. 在背景啟動主應用程式。
-    3. 使用 google.colab.output 產生內部代理連結。
+    此主函式負責：
+    1. 定位主引擎腳本。
+    2. 驗證其存在。
+    3. 將全域變數序列化為命令列參數。
+    4. 使用參數啟動主引擎。
     """
-    # 階段一: 啟動主應用程式
-    # run.py 會自動處理依賴安裝，所以我們直接啟動它即可。
-    _print_header(f"階段一：啟動主應用程式於 http://{HOST}:{PORT}")
-
-    # 我們需要在一個背景執行緒中啟動 uvicorn，
-    # 這樣主執行緒才能繼續執行並呼叫 Colab 的輸出功能。
     try:
-        import run
-        app_thread = threading.Thread(target=run.main, daemon=True)
-        app_thread.start()
-        print(f"✅ 主應用程式已在背景執行緒中啟動。")
-        time.sleep(5) # 給予伺服器一些啟動時間
+        # 1. 定位引擎
+        project_path = Path.cwd()
+        bootstrap_script = project_path / "colab_bootstrap.py"
+
+        # 2. 前置驗證
+        if not bootstrap_script.exists():
+            print(f"❌ 致命錯誤：找不到主引擎腳本 'colab_bootstrap.py'。", file=sys.stderr)
+            print(f"   請確認該檔案存在於 '{project_path}' 中。", file=sys.stderr)
+            sys.exit(1)
+
+        # 3. 構建指令
+        command = [
+            sys.executable,
+            str(bootstrap_script),
+            "--log-lines", str(LOG_DISPLAY_LINES),
+            "--refresh-interval", str(STATUS_REFRESH_INTERVAL),
+            "--target-folder", TARGET_FOLDER_NAME,
+            "--archive-folder", ARCHIVE_FOLDER_NAME,
+            "--port", str(FASTAPI_PORT),
+        ]
+
+        print("🚀 點火器已啟動，正在移交控制權給主引擎...")
+        print(f"傳遞參數: {' '.join(command[2:])}")
+        print("-" * 50)
+
+        # 5. 點火
+        # 使用 Popen 而不是 run，以避免阻塞，並允許主引擎完全接管輸出。
+        # 在 Colab 環境中，主腳本的輸出會自然顯示。
+        process = subprocess.Popen(command, stdout=sys.stdout, stderr=sys.stderr, text=True, encoding='utf-8')
+
+        # 等待主引擎進程結束。這使得 Colab cell 會保持執行狀態直到引擎關閉或被中斷。
+        process.wait()
+
+    except KeyboardInterrupt:
+        print("\n🟡 偵測到手動中斷指令。點火器已終止。")
+        # 主引擎的 atexit 清理應該會被觸發
     except Exception as e:
-        print(f"❌ [致命錯誤] 啟動 'run.py' 時發生嚴重錯誤。", file=sys.stderr)
-        import traceback
-        print(traceback.format_exc(), file=sys.stderr)
+        print(f"💥 點火器執行時發生未預期的錯誤: {e}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
 
-    # 階段二: 產生 Colab 代理連結
-    _print_header("階段二：產生 Colab 內部存取連結")
-    try:
-        from google.colab import output
-        # 選項 1: 預設在下方顯示內嵌視窗
-        print("👇 您的應用程式正在下方內嵌視窗中運行。")
-        output.serve_kernel_port_as_iframe(PORT, height=800) # 增加預設高度
-
-        # 選項 2: 提供一個可以在新分頁開啟的連結
-        output.serve_kernel_port_as_window(PORT, anchor_text="或者，點此在新分頁中全螢幕開啟")
-
-    except ImportError:
-        print("\n" + "-"*80, file=sys.stderr)
-        print("⚠️ 警告：無法導入 'google.colab' 模組。", file=sys.stderr)
-        print("這通常意味著您不是在 Google Colab 環境中執行此腳本。", file=sys.stderr)
-        print(f"如果這是在本地環境，請手動打開瀏覽器並訪問 http://{HOST}:{PORT}", file=sys.stderr)
-        print("-" * 80, file=sys.stderr)
-    except Exception as e:
-        print(f"❌ 產生 Colab 連結時發生錯誤: {e}", file=sys.stderr)
-
-    # 保持主執行緒活躍
-    print("\nℹ️ 服務正在運行中。若要停止，請在 Colab 中斷執行階段。")
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        print("\n🛑 偵測到手動中斷，正在關閉服務...")
-        sys.exit(0)
-
 if __name__ == "__main__":
-    main()
-else:
-    # 允許 'import colab_run' 直接執行
     main()
