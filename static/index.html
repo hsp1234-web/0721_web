@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模組化非同步平台</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            font-size: 1.1rem;
+            color: #b0b0b0;
+        }
+        #app-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+            width: 100%;
+            max-width: 1200px;
+        }
+        .app-card {
+            background-color: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            cursor: pointer;
+        }
+        .app-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5);
+        }
+        .app-card h2 {
+            margin-top: 0;
+            color: #bb86fc;
+            font-size: 1.4rem;
+        }
+        .app-card p {
+            color: #cfcfcf;
+            font-size: 1rem;
+        }
+        .app-card .version {
+            font-size: 0.8rem;
+            color: #777;
+            text-align: right;
+        }
+        #loading {
+            font-size: 1.2rem;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>模組化非同步平台</h1>
+        <p>一個高度模組化、可擴展的平台，支持非同步應用懶加載。</p>
+    </header>
+
+    <div id="app-container">
+        <div id="loading">正在加載應用列表...</div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/apps')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('網路回應錯誤');
+                    }
+                    return response.json();
+                })
+                .then(apps => {
+                    const container = document.getElementById('app-container');
+                    const loadingDiv = document.getElementById('loading');
+
+                    if (loadingDiv) {
+                        container.removeChild(loadingDiv);
+                    }
+
+                    if (apps.length === 0) {
+                        container.innerHTML = '<p>目前沒有可用的應用。</p>';
+                        return;
+                    }
+
+                    apps.forEach(app => {
+                        const card = document.createElement('div');
+                        card.className = 'app-card';
+                        card.innerHTML = `
+                            <h2>${app.name || '未命名應用'}</h2>
+                            <p>${app.description || '沒有描述。'}</p>
+                            <p class="version">版本: ${app.version || '未知'}</p>
+                        `;
+                        // 在此處可以添加點擊事件，例如：
+                        // card.onclick = () => { window.location.href = \`/apps/${app.id}\`; };
+                        container.appendChild(card);
+                    });
+                })
+                .catch(error => {
+                    console.error('獲取 App 列表失敗:', error);
+                    const container = document.getElementById('app-container');
+                    container.innerHTML = '<p style="color: #f44336;">加載應用列表失敗，請檢查伺服器日誌。</p>';
+                });
+        });
+    </script>
+</body>
+</html>
