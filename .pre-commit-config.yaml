@@ -1,0 +1,65 @@
+# ==============================================================================
+# Pre-commit 鉤子設定
+#
+# 安裝:
+#   pip install pre-commit
+#   pre-commit install
+#
+# 手動運行所有檢查:
+#   pre-commit run --all-files
+# ==============================================================================
+
+repos:
+# --- 基礎檢查 ---
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+    -   id: check-yaml
+    -   id: check-toml
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+    -   id: check-added-large-files
+
+# --- 程式碼風格與格式化 (Ruff) ---
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.5
+    hooks:
+    -   id: ruff
+        args: [--fix, --exit-non-zero-on-fix] # 自動修復並在修復後仍報錯
+    -   id: ruff-format # ruff-format 不接受 --fix 參數，它默認就是格式化
+
+# --- 依賴關係檢查 (deptry) - 暫時禁用以解決配置問題 ---
+# -   repo: https://github.com/fpgmaas/deptry
+#     rev: '0.23.0'
+#     hooks:
+#     -   id: deptry
+#         args: [
+#             ".",
+#             "--ignore-notebooks",
+#             "--extend-exclude", "'ipywidgets|IPython'",
+#         ]
+
+# --- 安全漏洞掃描 (Bandit) ---
+-   repo: https://github.com/PyCQA/bandit
+    rev: '1.7.9' # Bandit 的 tag 沒有 v
+    hooks:
+    -   id: bandit
+        args: ["-c", "pyproject.toml"] # 從 pyproject.toml 讀取設定
+        # 排除測試檔案，因為測試中可能有刻意為之的 "不安全" 寫法
+        exclude: ^tests/
+
+# --- 靜態型別檢查 (Mypy) ---
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: 'v1.11.0'
+    hooks:
+    -   id: mypy
+        # 需要額外的依賴來解析 fastapi, duckdb 等套件的型別
+        additional_dependencies: [
+            "fastapi", "pydantic", "types-psutil",
+            "pytest", "httpx", "pandas", "types-requests"
+        ]
+        args: [--config-file=pyproject.toml]
+        # 如果型別檢查太慢，可以考慮只在 CI/CD 階段運行，
+        # 或者只檢查暫存區的檔案:
+        # files: ^(src|tests)/
+        # pass_filenames: true

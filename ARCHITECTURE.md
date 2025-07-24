@@ -1,91 +1,99 @@
-# 鳳凰之心作戰平台架構說明
+# 系統架構設計報告
 
-呈報對象： 指揮官
-報告日期： 2025 年 7 月 23 日
-版本號： v3.0.0 (Colab-Native)
+**版本：1.0**
+**日期：2025年7月25日**
 
-## I. 核心理念：Colab 原生，簡潔至上
+## 1. 專案概述
 
-本專案架構已演進為「Colab 引導層」模型。此模型專為在 Google Colab 環境中實現最大的穩定性、易用性和可維護性而設計。我們摒棄了複雜的腳本和多線程管理，回歸到由 Colab Notebook 直接驅動的、清晰的單一流程。
+本報告旨在為一個高效能、可擴展的 Web 應用程式，設計一套現代化、可維護的後端架構。此架構的核心目標是實現模組化、環境解耦與高效能的資源管理，確保專案不僅能在 Colab 環境中便捷地展示與運行，也能無縫部署至標準的 Ubuntu 生產環境，同時提供極佳的開發與除錯體驗。
 
-核心理念是：**讓 Colab Notebook 作為使用者互動的前端和參數設定的入口，同時讓 Python 腳本 (`colab_run.py`, `run.py`) 專注於核心的應用程式邏輯。**
+設計遵循四大核心原則：
 
-## II. 組件與職責
+- **關注點分離 (Separation of Concerns)**：每個模組只做一件事，並把它做好。
+- **依賴注入 (Dependency Injection)**：核心邏輯與特定環境（如 Colab UI）解耦。
+- **非同步日誌系統 (Asynchronous Logging)**：高效能、無阻塞地記錄應用與系統狀態，避免寫入瓶頸。
+- **分階段懶啟動 (Phased/Lazy Startup)**：實現服務秒級啟動，並在需要時才載入重度資源。
 
-### 1. Colab Notebook (`.ipynb`) - 指揮中心
-*   **職責**:
-    1.  **使用者介面 (UI)**: 提供一個基於 `@param` 的表單，讓使用者可以直觀地設定關鍵參數（如專案路徑、埠號等）。
-    2.  **環境設定**: 負責設定正確的工作目錄 (`os.chdir`) 和 Python 的模組搜尋路徑 (`sys.path`)。
-    3.  **參數傳遞**: 將使用者在表單中設定的值，在執行階段直接賦予給 `colab_run.py` 模組中的全域變數。
-    4.  **啟動入口**: 呼叫 `colab_run.main()`，觸發整個應用程式的啟動流程。
-*   **定位**: 專案的**最高層引導器 (Top-Level Bootstrapper)**。
+## 2. 系統架構：模組化設計
 
-### 2. `colab_run.py` - Colab 環境適配層
-*   **職責**:
-    1.  **接收參數**: 作為一個 Python 模組，從 Colab Notebook 接收設定值（如 `PORT`）。
-    2.  **背景化應用**: 在一個獨立的背景執行緒 (`daemon=True`) 中啟動主應用程式 (`run.main`)。這是必要的，因為主執行緒需要繼續執行以呼叫 Colab 的代理功能。
-    3.  **建立內部通道**: 呼叫 `google.colab.output.serve_kernel_port_as_iframe` 和 `serve_kernel_port_as_window`，生成只有使用者可見的、安全的應用程式訪問連結。
-    4.  **維持運行**: 讓主執行緒保持活躍，以確保背景的 FastAPI 服務和 Colab 的代理通道能持續運作。
-*   **定位**: **Colab 環境與核心應用的橋樑**。它處理所有 Colab 特有的 API 呼叫和執行緒管理。
+本架構將系統拆分為一系列高內聚、低耦合的模組。各模組職責分明，如下表所示：
 
-### 3. `run.py` - 主應用邏輯層
-*   **職責**:
-    1.  **依賴管理**: 呼叫 `uv_manager.install_dependencies()` 來確保所有必要的 Python 套件都已安裝。
-    2.  **參數解析**: 使用 `argparse.parse_known_args()` 來處理命令列參數。這種方式可以安全地忽略由 Colab/Jupyter 傳入的未知參數，從而避免崩潰。
-    3.  **啟動 Web 伺服器**: 使用 `uvicorn.run()` 來啟動 FastAPI 應用 (`main:app`)。
-*   **定位**: **核心應用啟動器**。它的設計是環境無關的，理論上也可以在本地或其他非 Colab 環境中執行。
+| 模組名稱 (.py)      | 核心職責 (Core Responsibility)                                       | 關鍵技術與模式                                                       |
+| ------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `core.py`           | **進程指揮官**：啟動、監控並管理所有後端進程（Web伺服器、日誌、監控）。 | 多進程管理 (`multiprocessing`, `subprocess`)、進程生命週期控制。       |
+| `run.py`            | **伺服器啟動器**：一個極簡腳本，其唯一任務是使用 uvicorn 啟動 FastAPI 應用。 | Uvicorn ASGI 伺服器。                                                |
+| `main.py`           | **應用主入口**：建立 FastAPI 實例，動態掃描並聚合所有 `apps` 的 API 路由。 | FastAPI 路由管理 (`include_router`)、動態模組匯入 (`importlib`)。     |
+| `apps/*`            | **業務邏輯單元**：包含所有具體應用功能（如量化、語音轉錄）的獨立模組。 | 業務邏輯、懶加載模式 (Lazy Loading)。                                |
+| `colab_run.py`      | **Colab 橋接器**：作為 Colab Notebook 與後端系統的唯一接口。           | 依賴注入模式、外觀模式 (Facade Pattern)。                            |
+| `colab_display.py`  | **Colab 顯示器**：包含所有與 Colab UI 互動的程式碼，渲染 HTML 狀態介面。 | `IPython.display`、HTML/CSS/JS。                                     |
+| `logger/main.py`    | **中央日誌中心**：由一個日誌消費者進程，負責將日誌批次寫入資料庫。     | 非同步佇列 (`multiprocessing.Queue`)、單一寫入者模式 (Single Writer)。 |
+| `database/`         | **日誌與指標資料庫**：儲存所有結構化的日誌與系統監控數據。             | DuckDB 分析型欄式資料庫 (OLAP)、高效批次寫入。                       |
+| `start.sh`          | **生產啟動腳本**：用於在伺服器環境中以後台模式啟動、停止和管理應用。   | Shell Scripting、守護進程管理。                                      |
+| `tests/`            | **自動化測試**：包含單元測試與整合測試，確保程式碼品質。             | `pytest`, `httpx`, `pytest-cov`。                                    |
+| `pre-commit`        | **品質預檢系統**：在提交前自動執行風格、型別與安全檢查。               | `ruff`, `mypy`, `bandit`。                                           |
 
-### 4. `uv_manager.py` - 依賴管理工具
-*   **職責**: 封裝了使用 `uv` 來安裝 `requirements.txt` 的所有邏輯。
-*   **定位**: **專用的套件安裝工具**。
+## 3. 系統執行順序 (Master Boot Sequence)
 
-## III. 啟動流程與資料流
-
-### A. 啟動時序圖
+系統的啟動是一個精心設計的、分階段的過程，確保了穩定性與使用者體驗。
 
 ```mermaid
-sequenceDiagram
-    participant User as 使用者
-    participant ColabUI as Colab Notebook (UI)
-    participant ColabCode as Notebook (程式碼)
-    participant colab_run as colab_run.py
-    participant run_py as run.py
-    participant uvicorn as Uvicorn Server
+graph TD
+    A[使用者/啟動腳本 <br> e.g. start.sh or colab_run.py] --> B{core.py - 主進程};
 
-    User->>ColabUI: 填寫表單參數 (埠號, 路徑)
-    User->>ColabUI: 點擊「執行」
-    ColabUI->>ColabCode: 執行儲存格程式碼
-    ColabCode->>colab_run: import colab_run
-    ColabCode->>colab_run: colab_run.PORT = 8000
-    ColabCode->>colab_run: main()
+    subgraph 核心系統點火 (階段 1)
+        B --> C(啟動日誌寫入進程 <br> logger_process);
+        B --> D(啟動系統監控進程 <br> system_monitoring_process);
+    end
 
-    colab_run->>run_py: 在新執行緒中啟動 main()
-    activate run_py
+    subgraph Web 伺服器上線 (階段 2)
+        B -- subprocess.Popen --> E{run.py - 子進程};
+        E -- uvicorn.run --> F[main.py:app <br> FastAPI 應用];
+        F -- importlib.import_module --> G[掃描並註冊所有 apps/* API 路由];
+        G --> H((✅ 服務就緒 <br> **模型未載入**));
+    end
 
-    run_py->>run_py: 呼叫 uv_manager 安裝依賴
-    run_py->>uvicorn: uvicorn.run("main:app", ...)
-    activate uvicorn
-    uvicorn-->>run_py: (伺服器在背景運行)
+    subgraph 日誌與監控 (持續運行)
+        C -- 從佇列讀取 --> I{批次寫入};
+        D -- 定期收集狀態 --> C;
+        F -- 透過佇列發送日誌 --> C;
+        I -- INSERT INTO --> J[(DuckDB)];
+    end
 
-    deactivate run_py
-
-    colab_run->>ColabUI: output.serve_kernel_port_as_iframe()
-    colab_run->>ColabUI: output.serve_kernel_port_as_window()
-
-    ColabUI-->>User: 顯示內嵌應用視窗和連結
+    subgraph 懶加載觸發 (階段 3 - On-Demand)
+        K[使用者發出 API 請求 <br> e.g. /transcriber/upload] --> H;
+        H -- 觸發對應的 app --> L{apps/transcriber/logic.py};
+        L -- get_model() --> M{模型是否為 None?};
+        M -- Yes --> N[**載入大型模型至記憶體**];
+        N --> O[處理請求並回應];
+        M -- No --> O;
+    end
 ```
 
-### B. 資料流
+**詳細說明**
 
-| 編號 | 來源組件         | 目標組件         | 傳遞的資料     | 傳遞方式     | 說明                                                     |
-| :--- | :--------------- | :--------------- | :------------- | :----------- | :------------------------------------------------------- |
-| 1    | Colab Notebook   | `colab_run.py`   | `PORT` 等設定  | 模組全域變數 | Colab Notebook 在 `import` 後，直接對模組的變數進行賦值。 |
-| 2    | `colab_run.py`   | `run.py`         | (無直接傳遞)   | 函式呼叫     | `colab_run` 啟動 `run`，`run` 使用自己的預設參數。      |
-| 3    | `run.py`         | `main:app`       | `host`, `port` | Uvicorn 參數 | `run.py` 將解析後的參數傳遞給 `uvicorn.run`。          |
+1.  **階段一：啟動器執行**
+    由使用者或自動化腳本 (`start.sh` 或 `colab_run.py`) 觸發。它的核心任務是準備環境，並以正確的參數呼叫 `core.py`。
 
-## IV. 核心優勢
+2.  **階段二：核心系統點火**
+    `core.py` 作為總指揮官啟動。它首先建立後勤系統：啟動獨立的「日誌寫入進程」和「系統監控進程」。這兩個進程開始獨立工作後，`core.py` 才會以子進程的方式啟動主應用程式 `run.py`，並全面監控其運行。
 
-*   **易用性**: 使用者只需填寫一個簡單的表單即可啟動，無需理解底層程式碼。
-*   **穩定性**: `parse_known_args()` 的使用解決了在 Colab 環境中常見的參數衝突問題。啟動流程清晰，減少了出錯的可能性。
-*   **安全性**: 預設使用 Colab 的內部代理，服務不會暴露在公共網路上，只有筆記本的使用者可以訪問。
-*   **可維護性**: 職責劃分清晰。UI 和參數設定在 `.ipynb`，Colab 環境適配在 `colab_run.py`，核心應用邏輯在 `run.py`，使得各部分可以獨立修改和維護。
+3.  **階段三：Web 伺服器上線**
+    `run.py` 啟動 `uvicorn`，`uvicorn` 載入 `main.py`。FastAPI 應用程式實例被建立，並快速掃描所有 `apps/*` 目錄，將其 API 路由註冊完畢。此階段極快，完成後，伺服器即可接收請求，但記憶體佔用極低，因為任何大型資源（如 AI 模型）都尚未載入。
+
+4.  **階段四：懶加載觸發**
+    當第一個指向特定功能的 API 請求到達時（例如上傳一個音訊檔），對應的業務邏輯被觸發。此時，程式會檢查所需的大型模型是否已在記憶體中。如果是首次呼叫，則執行一次性的載入作業，並將模型儲存在全域變數中。後續所有請求都將直接使用這個已載入的模型，實現快速回應。
+
+## 4. 依賴與虛擬環境管理
+
+為了實現環境的隔離與可重現性，我們採用標準化的 `venv` 與分層的 `requirements` 管理策略。
+
+| 檔案名稱                  | 用途                                                                     | 安裝時機與方法                                                      |
+| ------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `.venv/`                  | **虛擬環境**：一個獨立、乾淨的 Python "氣泡"，用於隔離專案依賴。          | 在專案初始化時，使用 `python -m venv .venv` 建立一次。            |
+| `requirements/base.txt`   | **核心依賴**：應用程式在任何環境運行的必需品 (`fastapi`, `duckdb` 等)。    | 生產環境部署時 (`uv pip install -r requirements/base.txt`)。          |
+| `requirements/dev.txt`    | **開發依賴**：包含核心依賴，並額外增加測試、除錯與品質檢查工具。         | 開發者設定本地環境時 (`uv pip install -r requirements/dev.txt`)。   |
+| `requirements/colab.txt`  | **Colab 特定依賴**：包含核心依賴，並額外增加 Colab UI 互動套件。         | 在 Colab Notebook 啟動時 (`uv pip install -r requirements/colab.txt`)。 |
+
+## 5. 結論
+
+本架構設計方案透過模組化、進程隔離、非同步處理與懶加載等現代軟體工程實踐，構建了一個高效、穩定且高度可維護的系統。它不僅解決了日誌寫入的並發問題和重資源啟動慢的痛點，還透過清晰的依賴管理和啟動順序，確保了在不同環境下的一致性與可重現性，為專案的長期發展奠定了堅實的基礎。

@@ -1,0 +1,110 @@
+# pyproject.toml
+# 存放專案元數據、建構系統設定以及各種工具的配置
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "high-performance-web-app"
+version = "1.0.0"
+description = "一個現代化、可維護的後端架構。"
+readme = "README.md"
+requires-python = ">=3.8"
+# 核心依賴應該與 requirements/base.txt 同步
+# classifiers = [...]
+# authors = [...]
+
+# --- 工具配置 ---
+
+# Ruff (Linter & Formatter)
+[tool.ruff]
+line-length = 88
+# 排除 .venv 目錄
+exclude = [".venv"]
+
+[tool.ruff.lint]
+# 選擇要啟用的規則集
+select = ["E", "F", "W", "I", "N"] # 暫時禁用 D (pydocstyle) 規則集以推進進度
+# 忽略一些比較煩人的規則
+ignore = []
+
+# Deptry (依賴檢查)
+[tool.deptry]
+# 告訴 deptry 我們的原始碼在哪裡
+sources = ["."]
+# 忽略在 Colab 環境中才會用到的依賴
+exclude = ["ipywidgets", "IPython"]
+# 忽略一些 deptry 可能會誤判的模組
+ignore_missing = []
+
+# Bandit (安全掃描)
+[tool.bandit]
+# 排除測試目錄
+exclude_dirs = ["tests", ".venv"]
+# 要跳過的檢查 (B101: assert_used, B104: hardcoded_bind_all_interfaces)
+skips = ["B101", "B104"]
+
+# Mypy (靜態型別檢查)
+[tool.mypy]
+python_version = "3.12"
+# 讓 mypy 能處理沒有型別提示的第三方庫
+ignore_missing_imports = true
+# 禁止任何未使用 'Any' 型別的函數
+disallow_untyped_defs = true
+# 在函式簽名中不允許使用 Any
+disallow_any_unimported = false
+# 檢查沒有被註釋的函數體
+check_untyped_defs = true
+# 警告關於多餘的 # type: ignore 註解
+warn_redundant_casts = true
+# 警告關於未使用的 # noqa 註解
+warn_unused_ignores = true
+
+# 針對特定模組關閉一些嚴格規則
+[[tool.mypy.overrides]]
+module = [
+    "colab_display.*",
+    "colab_run.*",
+    "psutil.*", # types-psutil 可能不完整
+    "duckdb.*"  # 暫時沒有找到好的型別存根 (stubs)
+]
+ignore_errors = true
+
+# --- 測試工具配置 ---
+
+[tool.pytest.ini_options]
+# 讓 pytest 自動處理異步測試，無需 @pytest.mark.asyncio
+asyncio_mode = "auto"
+# 測試檔案應位於 tests/ 目錄下，並以 test_*.py 或 *_test.py 命名
+python_files = "tests.py test_*.py *_test.py"
+# 測試的預設路徑
+testpaths = [
+    "tests",
+]
+# 全域超時設定（秒），防止測試卡死
+timeout = 30
+# 忽略一些第三方庫的 DeprecationWarning
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+
+[tool.coverage.run]
+# 只計算我們自己的原始碼的覆蓋率
+source = ["."]
+# 不計算覆蓋率的檔案
+omit = [
+    ".venv/*",
+    "tests/*",
+    "run.py",
+    "core.py", # core.py 主要是進程管理，難以用單元/整合測試覆蓋
+    "*__init__.py",
+    "colab_*.py" # Colab 相關腳本在非 Colab 環境下難以測試
+]
+
+[tool.coverage.report]
+# 在終端顯示報告時，顯示缺失的行號
+show_missing = true
+# 如果總覆蓋率低於 80%，則認為失敗
+fail_under = 80

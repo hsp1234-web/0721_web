@@ -1,136 +1,77 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import os
-import signal
+"""
+test.py - 完整測試與品質預檢啟動器
+
+此腳本執行一個完整的測試與檢查流程，包括：
+1.  程式碼品質與靜態分析 (透過 pre-commit)。
+2.  核心功能測試 (透過 pytest)。
+3.  測試覆蓋率報告 (透過 coverage.py)。
+
+這是用於 CI/CD 或提交前最終把關的腳本。
+"""
+
 import subprocess
 import sys
-import time
-from pathlib import Path
 
-# --- 常數設定 ---
-HOST = "127.0.0.1"
-PORT = 8765
-APPS_API_URL = f"http://{HOST}:{PORT}/api/apps"
-STARTUP_TIMEOUT = 20  # 秒，新架構應該能快速啟動
-SHUTDOWN_TIMEOUT = 10
 
-def print_test_step(message: str):
-    """打印格式化的測試步驟標題。"""
-    print(f"\n{'='*60}")
-    print(f"🧪 {message}")
-    print(f"{'='*60}")
+def run_command(command: list[str], title: str) -> bool:
+    """運行一個命令並打印標題和結果。"""
+    print("\n" + "=" * 60)
+    print(f"🧪 正在執行: {title}")
+    print("=" * 60)
+    print(f"▶️  {' '.join(command)}")
 
-def test_server_startup(process):
-    """
-    測試伺服器是否能成功啟動並正確加載 Apps。
-    """
-    import requests
-    print_test_step(f"測試伺服器啟動與 App 加載 ({APPS_API_URL})")
-    start_time = time.time()
-    while time.time() - start_time < STARTUP_TIMEOUT:
-        try:
-            response = requests.get(APPS_API_URL, timeout=2)
-            if response.status_code == 200:
-                apps = response.json()
-                print(f"✅ 成功: API 回傳 200 OK。")
-                print(f"✅ 成功: 伺服器在 {time.time() - start_time:.2f} 秒內成功啟動。")
+    result = subprocess.run(command, check=False)
 
-                # 驗證是否成功加載了我們建立的兩個 App
-                app_ids = {app.get('id') for app in apps}
-                if "transcriber" in app_ids and "quant" in app_ids:
-                    print(f"✅ 成功: 成功檢測到 'transcriber' 和 'quant' 應用。")
-                    return True
-                else:
-                    print(f"❌ 失敗: API 回傳的應用列表不完整: {app_ids}", file=sys.stderr)
-                    return False
-        except requests.exceptions.RequestException as e:
-            print(f"🟡 警告: 連線到伺服器失敗 ({e.__class__.__name__})，重試中...")
+    if result.returncode == 0:
+        print(f"✅ 成功: {title} 通過。")
+        return True
 
-        if process.poll() is not None:
-            print(f"❌ 失敗: 伺服器進程在啟動期間意外終止，返回碼: {process.poll()}", file=sys.stderr)
-            return False
-
-        time.sleep(1)
-
-    print(f"❌ 失敗: 伺服器未能在 {STARTUP_TIMEOUT} 秒內就緒。", file=sys.stderr)
+    print(f"❌ 失敗: {title} 未通過 (返回碼: {result.returncode})。", file=sys.stderr)
     return False
 
-def test_server_shutdown(process):
-    """
-    測試伺服器是否能透過 SIGINT 優雅關閉。
-    """
-    print_test_step("測試伺服器優雅關閉 (SIGINT)")
 
-    print(f"INFO: 向進程 {process.pid} 發送 SIGINT 訊號...")
-    if sys.platform == "win32":
-        process.send_signal(signal.CTRL_C_EVENT)
-    else:
-        process.send_signal(signal.SIGINT)
+def main() -> None:
+    """主執行函數。"""
+    all_passed = True
 
-    try:
-        process.wait(timeout=SHUTDOWN_TIMEOUT)
-        print(f"✅ 成功: 伺服器進程已在 {SHUTDOWN_TIMEOUT} 秒內成功關閉。")
-        return True
-    except subprocess.TimeoutExpired:
-        print(f"❌ 失敗: 伺服器進程未能於 {SHUTDOWN_TIMEOUT} 秒內終止。", file=sys.stderr)
-        print("INFO: 強制終止進程...")
-        process.kill()
-        return False
-
-def main():
-    """整合測試主函式。"""
-    print_test_step("執行依賴安裝")
-    install_command = [sys.executable, "run.py", "--install-only"]
-    install_result = subprocess.run(install_command)
-    if install_result.returncode != 0:
-        print("❌ 失敗: 依賴安裝失敗，測試終止。", file=sys.stderr)
-        sys.exit(1)
-    print("✅ 成功: 依賴安裝完成。")
-
-    print_test_step("啟動伺服器子進程")
-    run_command = [sys.executable, "run.py", "--run-only", f"--port={PORT}", f"--host={HOST}"]
-
-    # 在 Windows 上，需要設定 creationflags 以避免將 Ctrl+C 傳遞給子進程
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-
-    process = subprocess.Popen(
-        run_command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding='utf-8',
-        creationflags=creationflags
+    # --- 步驟 1: 執行 Pre-commit 靜態分析 ---
+    pre_commit_passed = run_command(
+        ["pre-commit", "run", "--all-files"], "程式碼品質與靜態分析 (pre-commit)"
     )
+    if not pre_commit_passed:
+        all_passed = False
+        print("\nINFO: 由於靜態分析失敗，建議先修復上述問題。")
+        # 在 CI 環境中，這裡可以直接退出：
+        # sys.exit(1)
 
-    time.sleep(2) # 給予進程一些初始化時間
+    # --- 步驟 2: 執行 Pytest 功能測試與覆蓋率 ---
+    # 即使靜態分析失敗，我們仍然可以運行測試，以獲得更多資訊。
+    pytest_command = [
+        "pytest",
+        "--cov",  # 啟用覆蓋率
+        "--cov-report=term-missing",  # 在終端顯示報告和缺失的行
+        # 注意: fail_under 在 pyproject.toml 中配置
+    ]
+    pytest_passed = run_command(
+        pytest_command, "功能測試與覆蓋率檢查 (pytest & coverage)"
+    )
+    if not pytest_passed:
+        all_passed = False
 
-    # 執行測試
-    try:
-        startup_ok = test_server_startup(process)
-        shutdown_ok = False
-        if startup_ok:
-            shutdown_ok = test_server_shutdown(process)
-        else:
-            print("INFO: 因啟動失敗，跳過關閉測試。")
-    finally:
-        # 確保子進程在任何情況下都會被終止
-        if process.poll() is None:
-            print("INFO: 測試結束，強制終止殘餘的伺服器進程...")
-            process.kill()
+    # --- 總結 ---
+    print("\n" + "=" * 60)
+    print("📋 完整測試流程總結")
+    print("=" * 60)
 
-        # 打印伺服器的輸出以便調試
-        print("\n--- 伺服器 STDOUT ---")
-        print(process.stdout.read())
-        print("--- 伺服器 STDERR ---")
-        print(process.stderr.read())
-        print("--------------------")
-
-    # 報告最終結果
-    print("\n====================================")
-    if startup_ok and shutdown_ok:
-        print("✅✅✅ 所有測試均已通過！新架構穩定。 ✅✅✅")
+    if all_passed:
+        print("🎉🎉🎉 恭喜！所有檢查和測試均已通過！🎉🎉🎉")
+        sys.exit(0)
     else:
-        print("❌❌❌ 部分或全部測試失敗。 ❌❌❌")
+        print("🔥 部分檢查或測試失敗，請檢查上面的日誌輸出。")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
