@@ -139,12 +139,14 @@ class DisplayManager(threading.Thread):
                     f"<div class='grid-item' style='color: {level_color}; font-weight: bold;'>[{level_upper:<8}]</div>"
                     f"<div class='grid-item' style='color: #FFFFFF;'>[{version}] {html.escape(msg)}</div>"
                 )
+                # 將 replace 呼叫移出 f-string，以避免反斜線逸出問題
+                safe_log_html = log_html.replace('`', '\\`').replace('\\n', '<br>')
                 js_code = f"""
                 const panel = document.getElementById('log-panel');
                 if (panel) {{
                     const entry = document.createElement('div');
                     entry.style.display = 'contents';
-                    entry.innerHTML = `{log_html.replace('`', '\\`').replace('\\n', '<br>')}`;
+                    entry.innerHTML = `{safe_log_html}`;
                     Array.from(entry.children).reverse().forEach(c => panel.prepend(c));
                     while (panel.childElementCount > ({LOG_DISPLAY_LINES} * 3)) {{
                         for(let i=0; i<3; i++) panel.removeChild(panel.lastChild);
