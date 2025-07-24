@@ -1,54 +1,50 @@
 # 檔案: integrated_platform/tests/test_final_deployment.py
+# P8 架構下的新測試
 from unittest.mock import patch, MagicMock
-import colab_run
+import threading
+import time
 import pytest
 
-# 思路框架：這不再是端到端測試，而是一個 "啟動腳本健康度" 的煙霧測試。
+# 待測模組
+import colab_run
 
-@patch('colab_run.run_command')
+# 思路框架：
+# 驗證 Colab 啟動器 (colab_run.py) 與核心引擎 (core_run.py) 之間的協作是否正確。
+# 我們需要驗證 colab_run.main() 是否會：
+# 1. 在背景線程中啟動 core_run.main()。
+# 2. 啟動並運行 DisplayManager。
+# 3. 嘗試建立公開入口。
+
+@patch('colab_run.start_core_engine_in_background')
 @patch('colab_run.DisplayManager')
 @patch('colab_run.create_public_portal')
-@patch('colab_run.start_fastapi_server')
-@patch('colab_run.health_check', return_value=True)
-def test_orchestrated_startup_does_not_crash(
-    mock_health_check,
-    mock_start_fastapi,
-    mock_create_portal,
-    mock_display,
-    mock_run_command
-):
-    # 作法：我們只關心 colab_run.main 是否能在一個完全受控的環境下跑完。
+@patch('time.sleep') # Mock time.sleep to speed up the test
+def test_colab_launches_core_and_ui(mock_sleep, mock_create_portal, mock_display_manager, mock_start_core_engine):
+    """
+    測試 colab_run.main 是否能正確啟動核心引擎和 UI 管理器。
+    """
+    # --- 準備 ---
+    # 創建一個 mock 的 thread 對象，並讓 is_alive() 在幾次調用後返回 False，以終止 main() 中的循環
+    mock_thread = MagicMock()
+    mock_thread.is_alive.side_effect = [True, True, False]
+    mock_start_core_engine.return_value = mock_thread
 
+    # --- 執行 ---
     try:
-        # 執行主函式
-        # We need to run main in a thread because it has an infinite loop
-        import threading
-        main_thread = threading.Thread(target=colab_run.main)
-        main_thread.daemon = True
-        main_thread.start()
-        # Give the thread a moment to run and hit the mocks
-        main_thread.join(timeout=2)
+        colab_run.main()
 
-        # Signal the main loop to stop
-        colab_run.STOP_EVENT.set()
-        main_thread.join(timeout=2)
+        # --- 驗證 ---
+        # 1. 斷言核心引擎的啟動函式被呼叫了一次
+        mock_start_core_engine.assert_called_once()
 
-        execution_successful = not main_thread.is_alive()
+        # 2. 斷言 DisplayManager 被實例化並啟動
+        mock_display_manager.assert_called_once()
+        mock_display_manager.return_value.setup_ui.assert_called_once()
+        mock_display_manager.return_value.start.assert_called_once()
 
-    except Exception as e:
-        print(f"Test failed with exception: {e}")
-        execution_successful = False
+        # 3. 斷言建立公開入口的函式被呼叫
+        mock_create_portal.assert_called_once()
 
-    # 斷言：
-    # 1. 整個過程沒有崩潰。
-    assert execution_successful is True
-    # 2. 依賴安裝的函式被呼叫了。
-    assert mock_run_command.called
-    # 3. 儀表板被啟動了。
-    assert mock_display.return_value.start.called
-    # 4. FastAPI 伺服器被啟動了。
-    assert mock_start_fastapi.called
-    # 5. 健康檢查被呼叫了。
-    assert mock_health_check.called
-    # 6. 公開入口被建立了。
-    assert mock_create_portal.called
+    finally:
+        # 確保在測試結束時重置 STOP_EVENT
+        colab_run.STOP_EVENT.clear()
