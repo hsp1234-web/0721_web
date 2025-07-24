@@ -38,34 +38,33 @@
 
 ```mermaid
 graph TD
-    A[使用者/啟動腳本 <br> e.g. start.sh or colab_run.py] --> B{core.py - 主進程};
+    A[使用者/啟動腳本] --> B{core.py};
 
-    subgraph 核心系統點火 (階段 1)
-        B --> C(啟動日誌寫入進程 <br> logger_process);
-        B --> D(啟動系統監控進程 <br> system_monitoring_process);
+    subgraph 階段 1：核心系統
+        B --> C(日誌進程);
+        B --> D(監控進程);
     end
 
-    subgraph Web 伺服器上線 (階段 2)
-        B -- subprocess.Popen --> E{run.py - 子進程};
-        E -- uvicorn.run --> F[main.py:app <br> FastAPI 應用];
-        F -- importlib.import_module --> G[掃描並註冊所有 apps/* API 路由];
-        G --> H((✅ 服務就緒 <br> **模型未載入**));
+    subgraph 階段 2：Web 伺服器
+        B -- 啟動 --> E{run.py};
+        E -- 載入 --> F[main.py:app];
+        F -- 掃描 --> G[註冊 apps 路由];
+        G --> H((服務就緒));
     end
 
-    subgraph 日誌與監控 (持續運行)
-        C -- 從佇列讀取 --> I{批次寫入};
-        D -- 定期收集狀態 --> C;
-        F -- 透過佇列發送日誌 --> C;
-        I -- INSERT INTO --> J[(DuckDB)];
+    subgraph 持續運行
+        C -- 寫入 --> J[(DuckDB)];
+        D -- 收集狀態 --> C;
+        F -- 發送日誌 --> C;
     end
 
-    subgraph 懶加載觸發 (階段 3 - On-Demand)
-        K[使用者發出 API 請求 <br> e.g. /transcriber/upload] --> H;
-        H -- 觸發對應的 app --> L{apps/transcriber/logic.py};
-        L -- get_model() --> M{模型是否為 None?};
-        M -- Yes --> N[**載入大型模型至記憶體**];
-        N --> O[處理請求並回應];
-        M -- No --> O;
+    subgraph 階段 3：懶加載
+        K[API 請求] --> H;
+        H -- 觸發 --> L{對應 app};
+        L -- 檢查模型 --> M{模型存在?};
+        M -- 否 --> N[載入模型];
+        N --> O[處理請求];
+        M -- 是 --> O;
     end
 ```
 

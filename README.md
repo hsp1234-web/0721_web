@@ -104,6 +104,8 @@ curl -X POST -F "file=@fake_audio.mp3;type=audio/mpeg" http://127.0.0.1:8000/tra
 │   ├── transcriber/    # 語音轉錄 App 範例
 │   └── ...             # 其他 App
 ├── core.py             # 系統總指揮官，管理所有進程
+├── colab_run.py        # Colab 環境啟動器
+├── colab_display.py    # Colab 環境顯示介面
 ├── database/           # DuckDB 資料庫檔案存放處
 ├── logger/             # 非同步日誌系統模組
 ├── main.py             # FastAPI 應用主入口，負責路由聚合
@@ -113,11 +115,13 @@ curl -X POST -F "file=@fake_audio.mp3;type=audio/mpeg" http://127.0.0.1:8000/tra
 │   └── dev.txt
 ├── run.py              # Uvicorn 伺服器啟動器
 ├── start.sh            # 生產環境啟動腳本
+├── static/             # 靜態檔案目錄
 ├── tests/              # 自動化測試目錄
 │   ├── test_app_transcriber.py
 │   └── test_logger.py
 ├── test.py             # 完整測試啟動器
 ├── testq.py            # 快速測試啟動器
+├── uv_manager.py       # uv 套件管理器
 ├── .pre-commit-config.yaml # Pre-commit 品質預檢設定
 └── pyproject.toml      # 專案元數據與工具配置
 ```
