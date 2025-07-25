@@ -27,28 +27,70 @@ FASTAPI_PORT = 8000 #@param {type:"integer"}
 #@markdown > **準備就緒後，點擊此儲存格左側的「執行」按鈕。**
 #@markdown ---
 
-# ==============================================================================
-# SECTION 0: 環境初始化與核心模組導入
-# ==============================================================================
 import os
 import sys
 import subprocess
 import time
+import logging
 from pathlib import Path
+from datetime import datetime
+import pytz
 from IPython.display import display, HTML, Javascript
 
 # ==============================================================================
-# SECTION 1: 核心啟動流程
+# SECTION 1: 全域變數與日誌設定
 # ==============================================================================
 server_process = None
+log_buffer = []
 
+def setup_colab_logging(archive_dir, log_filename):
+    """設定一個專用於 Colab 啟動腳本的日誌記錄器。"""
+    log_path = Path(archive_dir) / log_filename
+    log_path.parent.mkdir(exist_ok=True)
+
+    # 清除此 logger 可能存在的舊 handlers
+    logger = logging.getLogger("colab_launcher")
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    logger.setLevel(logging.INFO)
+
+    # 檔案 handler
+    fh = logging.FileHandler(log_path, encoding='utf-8')
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+
+    # 控制台 handler
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+
+    return logger, str(log_path)
+
+# 產生唯一的日誌檔名
+tz = pytz.timezone('Asia/Taipei')
+timestamp = datetime.now(tz).strftime('%Y-%m-%dT%H-%M-%S')
+colab_log_filename = f"Colab啟動日誌_{timestamp}.txt"
+
+# 在腳本開始時就設定日誌
+colab_logger, colab_log_path = setup_colab_logging(ARCHIVE_FOLDER_NAME, colab_log_filename)
+
+# ==============================================================================
+# SECTION 2: 核心啟動流程
+# ==============================================================================
 try:
+    colab_logger.info("="*50)
+    colab_logger.info("💎 鳳凰之心整合式指揮中心 v14.0 - 啟動程序開始")
+    colab_logger.info("="*50)
+
     # --- 步驟 1: 清理並準備顯示區域 ---
-    # 使用 JavaScript 清理先前可能存在的輸出，確保介面乾淨
+    colab_logger.info("步驟 1/7: 清理 Colab 輸出區域...")
     display(Javascript("document.querySelectorAll('.phoenix-launcher-output').forEach(el => el.remove());"))
     time.sleep(0.2)
 
-    # 建立一個唯一的容器 ID，用於嵌入 iframe
     container_id = f"phoenix-container-{int(time.time())}"
     display(HTML(f"""
         <div id="{container_id}" class="phoenix-launcher-output" style="height: 95vh; border: 1px solid #444; border-radius: 8px; overflow: hidden;">
@@ -57,63 +99,65 @@ try:
             </p>
         </div>
     """))
+    colab_logger.info(f"   - 成功建立顯示容器 (ID: {container_id})")
 
-    # --- 步驟 2: 將 Colab 表單參數設定為環境變數 ---
-    # 這是將您的設定傳遞給後端的核心機制
-    print("✅ 正在設定環境變數...")
+    # --- 步驟 2: 設定環境變數 ---
+    colab_logger.info("步驟 2/7: 設定環境變數...")
     os.environ['LOG_DISPLAY_LINES'] = str(LOG_DISPLAY_LINES)
     os.environ['STATUS_REFRESH_INTERVAL'] = str(STATUS_REFRESH_INTERVAL)
     os.environ['ARCHIVE_FOLDER_NAME'] = str(ARCHIVE_FOLDER_NAME)
     os.environ['FASTAPI_PORT'] = str(FASTAPI_PORT)
-    print(f"   - 日誌行數: {LOG_DISPLAY_LINES}")
-    print(f"   - 刷新頻率: {STATUS_REFRESH_INTERVAL}s")
-    print(f"   - 歸檔目錄: {ARCHIVE_FOLDER_NAME}")
-    print(f"   - 服務埠號: {FASTAPI_PORT}")
+    colab_logger.info(f"   - 日誌行數: {LOG_DISPLAY_LINES}")
+    colab_logger.info(f"   - 刷新頻率: {STATUS_REFRESH_INTERVAL}s")
+    colab_logger.info(f"   - 歸檔目錄: {ARCHIVE_FOLDER_NAME}")
+    colab_logger.info(f"   - 服務埠號: {FASTAPI_PORT}")
 
     # --- 步驟 3: 驗證並進入專案目錄 ---
-    project_path = Path("/content") / TARGET_FOLDER_NAME
+    colab_logger.info("步驟 3/7: 驗證並進入專案目錄...")
+    # 注意：在Colab中，所有內容通常都在 /content/ 下
+    # 我們假設這個 notebook 和 TARGET_FOLDER_NAME 都在 /content/
+    base_path = Path("/content")
+    project_path = base_path / TARGET_FOLDER_NAME
+
     if not project_path.is_dir() or not (project_path / "main.py").exists():
         raise FileNotFoundError(f"指定的專案資料夾 '{project_path}' 不存在或缺少 'main.py' 核心檔案。")
 
-    print(f"📂 已成功定位專案目錄: {project_path}")
     os.chdir(project_path)
+    colab_logger.info(f"   - 已成功切換至專案目錄: {os.getcwd()}")
 
-    # --- 步驟 4: 安裝/驗證專案依賴 (阻塞式) ---
-    print("\n🚀 正在配置專案環境，請稍候...")
-    # 執行依賴安裝腳本，並等待其完成
+    # --- 步驟 4: 安裝/驗證專案依賴 ---
+    colab_logger.info("步驟 4/7: 配置專案環境...")
     install_result = subprocess.run(
         ["python3", "uv_manager.py"],
         capture_output=True, text=True, encoding='utf-8'
     )
     if install_result.returncode != 0:
-        print("❌ 依賴配置失敗，終止作戰。")
-        print("--- STDERR ---")
-        print(install_result.stderr)
+        colab_logger.error("❌ 依賴配置失敗，終止作戰。")
+        colab_logger.error(f"--- STDERR ---\n{install_result.stderr}")
         raise RuntimeError("依賴安裝失敗。")
 
-    print("✅ 專案環境配置成功。")
-    print(install_result.stdout)
+    colab_logger.info("   - ✅ 專案環境配置成功。")
+    colab_logger.info(f"--- uv_manager.py STDOUT ---\n{install_result.stdout}")
 
-    # --- 步驟 5: 在背景啟動 FastAPI 伺服器 ---
-    print("\n🔥 正在點燃後端引擎...")
+    # --- 步驟 5: 啟動 FastAPI 伺服器 ---
+    colab_logger.info("步驟 5/7: 點燃後端引擎...")
+    # 這裡我們傳遞日誌檔名給後端
     server_process = subprocess.Popen(
-        ["python3", "run.py"],
+        ["python3", "run.py", "--log-file", colab_log_filename],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True, encoding='utf-8'
     )
-    print(f"   - 後端伺服器程序已啟動 (PID: {server_process.pid})。")
+    colab_logger.info(f"   - 後端伺服器程序已啟動 (PID: {server_process.pid})。")
 
     # --- 步驟 6: 等待伺服器就緒並嵌入駕駛艙 ---
-    print("📡 正在等待伺服器響應...")
-    time.sleep(10) # 給予伺服器足夠的啟動時間
+    colab_logger.info("步驟 6/7: 等待伺服器響應並嵌入駕駛艙...")
+    time.sleep(10)
 
-    print(f"🌍 正在將駕駛艙嵌入至容器 (ID: {container_id})...")
-    # 使用 JavaScript 將 iframe 嵌入到我們之前建立的 div 中
     js_code = f"""
         const container = document.getElementById('{container_id}');
         if (container) {{
-            container.innerHTML = ''; // 清空 "正在初始化" 的訊息
+            container.innerHTML = '';
             const iframe = document.createElement('iframe');
             iframe.src = `https://localhost:{FASTAPI_PORT}`;
             iframe.style.width = '100%';
@@ -123,31 +167,41 @@ try:
         }}
     """
     display(Javascript(js_code))
-    print("\n✅ 鳳凰之心駕駛艙已上線！")
-    print("ℹ️ 要停止所有服務，請點擊此儲存格左側的「中斷執行」(■) 按鈕。")
+    colab_logger.info("   - ✅ 鳳凰之心駕駛艙已上線！")
 
-    # --- 步驟 7: 監控後端日誌並保持 Colab 活躍 ---
-    # 為了方便除錯，我們可以選擇性地打印後端日誌
+    # --- 步驟 7: 監控後端日誌 ---
+    colab_logger.info("步驟 7/7: 進入後端日誌監控模式...")
+    print("\n--- 後端日誌 (僅顯示部分關鍵訊息) ---")
     for line in iter(server_process.stdout.readline, ''):
-        if "Uvicorn running on" in line: # 捕捉關鍵啟動訊息
+        if "Uvicorn running on" in line:
             print(f"   - [後端引擎]: {line.strip()}")
+            colab_logger.info(f"[後端引擎]: {line.strip()}")
 
-    server_process.wait() # 等待進程結束
+    server_process.wait()
 
 except KeyboardInterrupt:
-    print("\n\n🛑 [偵測到使用者手動中斷請求...]")
+    colab_logger.warning("\n🛑 [偵測到使用者手動中斷請求...]")
 except Exception as e:
-    print(f"\n\n💥 作戰流程發生未預期的嚴重錯誤: {e}", file=sys.stderr)
+    colab_logger.error(f"\n💥 作戰流程發生未預期的嚴重錯誤: {e}", exc_info=True)
 finally:
-    # --- 終端清理程序 ---
+    colab_logger.info("="*50)
+    colab_logger.info("Σ 終端清理程序開始")
+    colab_logger.info("="*50)
     if server_process and server_process.poll() is None:
-        print(" shutting down the backend server...")
+        colab_logger.info("   - 正在關閉後端伺服器...")
         server_process.terminate()
         try:
             server_process.wait(timeout=5)
-            print("✅ 後端伺服器已成功終止。")
+            colab_logger.info("   - ✅ 後端伺服器已成功終止。")
         except subprocess.TimeoutExpired:
-            print("⚠️ 伺服器未能溫和終止，將強制結束。")
+            colab_logger.warning("   - ⚠️ 伺服器未能溫和終止，將強制結束。")
             server_process.kill()
 
-    print("\n--- 系統已安全關閉 ---")
+    colab_logger.info(f"詳細執行日誌已儲存至: {colab_log_path}")
+    colab_logger.info("--- 系統已安全關閉 ---")
+
+    # 關閉 logger 的 file handler，確保所有內容都寫入檔案
+    for handler in colab_logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            colab_logger.removeHandler(handler)

@@ -1,24 +1,26 @@
 import argparse
-
 import uvicorn
+from main import app
+from logger.main import setup_logging
+from core.config import settings
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Uvicorn 伺服器啟動器")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="綁定的主機地址")
-    parser.add_argument("--port", type=int, default=8000, help="監聽的埠號")
+    parser = argparse.ArgumentParser(description="啟動鳳凰之心後端伺服器。")
     parser.add_argument(
-        "--reload", action="store_true", help="啟用熱重載模式 (僅供開發使用)"
+        "--log-file",
+        type=str,
+        default=None,
+        help="指定日誌檔案的名稱。"
     )
     args = parser.parse_args()
 
-    print("[伺服器啟動器] 準備以 Uvicorn 啟動 'main:app'...")
-    print(f"[伺服器啟動器] 地址: {args.host}:{args.port}")
-    print(f"[伺服器啟動器] 熱重載: {'啟用' if args.reload else '關閉'}")
+    # 在啟動 uvicorn 之前先設定好日誌
+    # 這樣 uvicorn 的啟動訊息也會被記錄下來
+    setup_logging(log_filename=args.log_file)
 
     uvicorn.run(
-        "main:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        log_level="info",
+        app,
+        host="0.0.0.0",
+        port=settings.FASTAPI_PORT,
+        log_level="info"
     )
