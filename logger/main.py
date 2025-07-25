@@ -1,3 +1,6 @@
+import asyncio
+import json
+import logging
 import os
 import time
 from multiprocessing import Queue
@@ -6,6 +9,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import duckdb
 import pandas as pd
+
+# 循環導入，但對於這種架構是必要的
+# 在主應用程式中，main 會先被加載
+from main import manager
 
 # --- 常數設定 ---
 DB_PATH = os.path.join(
@@ -45,125 +52,58 @@ def initialize_database() -> None:
         con.execute(MONITOR_SCHEMA)
 
 
-def logger_process(
-    log_queue: "Queue[Optional[Dict[str, Any]]]", stop_event: Event
-) -> None:
-    """日誌消費者進程。
+# --- WebSocket 日誌處理程序 ---
+class WebSocketLogHandler(logging.Handler):
+    """一個自訂的日誌處理程序，可將日誌轉發到 WebSocket 連線。"""
 
-    從佇列中讀取日誌和監控數據，並批次寫入 DuckDB。
-    """
-    print("[日誌進程] 啟動。")
-    initialize_database()
-    con = duckdb.connect(DB_PATH)
-
-    log_batch: List[Tuple[Any, ...]] = []
-    monitor_batch: List[Tuple[Any, ...]] = []
-    last_write_time = time.time()
-
-    def write_to_db() -> None:
-        nonlocal last_write_time
-        if not log_batch and not monitor_batch:
-            return
-
+    def emit(self, record: logging.LogRecord) -> None:
+        """將日誌記錄格式化並透過 WebSocket 管理器廣播。"""
         try:
-            if log_batch:
-                df_log = pd.DataFrame(
-                    log_batch, columns=["timestamp", "level", "process_name", "message"]
-                )
-                con.register("log_batch_df", df_log)
-                con.execute(
-                    f"INSERT INTO {LOG_TABLE_NAME} SELECT * FROM log_batch_df"  # nosec B608
-                )
-                con.unregister("log_batch_df")
-                log_batch.clear()
-
-            if monitor_batch:
-                df_monitor = pd.DataFrame(
-                    monitor_batch,
-                    columns=["timestamp", "cpu_usage", "memory_usage", "disk_usage"],
-                )
-                con.register("monitor_batch_df", df_monitor)
-                con.execute(
-                    f"INSERT INTO {MONITOR_TABLE_NAME} SELECT * FROM monitor_batch_df"  # nosec B608
-                )
-                con.unregister("monitor_batch_df")
-                monitor_batch.clear()
-        except Exception as e:
-            print(f"[日誌進程] 寫入資料庫時發生錯誤: {e}")
-        finally:
-            last_write_time = time.time()
-
-    while not stop_event.is_set():
-        try:
-            item = log_queue.get(timeout=1)
-            if item is None:
-                break
-            data = item.get("data")
-            if data:
-                if item.get("type", "log") == "log":
-                    log_batch.append(data)
-                else:
-                    monitor_batch.append(data)
-
-            if len(log_batch) >= BATCH_SIZE or len(monitor_batch) >= BATCH_SIZE:
-                write_to_db()
-        except Exception:  # Queue.empty or other errors
-            if time.time() - last_write_time > BATCH_TIMEOUT:
-                write_to_db()
-
-    print("[日誌進程] 收到停止信號，正在寫入剩餘日誌...")
-    write_to_db()
-    con.close()
-    print("[日誌進程] 已關閉。")
-
-
-if __name__ == "__main__":
-    print("正在以獨立模式測試日誌系統...")
-    test_log_queue: "Queue[Optional[Dict[str, Any]]]" = Queue()
-    test_stop_event = Event()
-
-    logger_thread = Thread(
-        target=logger_process, args=(test_log_queue, test_stop_event)
-    )
-    logger_thread.start()
-
-    test_log_queue.put(
-        {
-            "type": "log",
-            "data": (
-                time.strftime("%Y-%m-%d %H:%M:%S"),
-                "INFO",
-                "MainApp",
-                "應用程式啟動",
-            ),
-        }
-    )
-    test_log_queue.put(
-        {
-            "type": "monitor",
-            "data": (time.strftime("%Y-%m-%d %H:%M:%S"), 10.5, 25.2, 50.1),
-        }
-    )
-    time.sleep(2)
-
-    for i in range(60):
-        test_log_queue.put(
-            {
-                "type": "log",
-                "data": (
-                    time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "DEBUG",
-                    "Worker",
-                    f"處理任務 #{i}",
-                ),
+            # 將 LogRecord 轉換為字典
+            log_data = {
+                "timestamp": record.created,
+                "level": record.levelname,
+                "message": self.format(record),
             }
-        )
-        time.sleep(0.05)
 
-    print("等待 6 秒讓超時寫入觸發...")
-    time.sleep(6)
+            # 根據附錄 A 協議構建訊息
+            protocol_message = {"event_type": "LOG_MESSAGE", "payload": log_data}
 
-    print("正在停止日誌進程...")
-    test_stop_event.set()
-    logger_thread.join()
-    print("測試完成。請檢查 'database/system_logs.duckdb' 檔案。")
+            # 廣播 JSON 訊息
+            # 因為這是從不同的執行緒呼叫，我們需要一個事件迴圈
+            # FastAPI 的 `manager.broadcast` 是非同步的
+            asyncio.run(manager.broadcast(json.dumps(protocol_message)))
+        except Exception as e:
+            # 在日誌處理程序中打印錯誤可能很棘手，避免無限循環
+            print(f"在 WebSocketLogHandler 中發生錯誤: {e}")
+
+
+def setup_logging() -> None:
+    """設定全域日誌記錄，將日誌同時輸出到控制台和 WebSocket。"""
+    # 建立 WebSocket 處理程序
+    websocket_handler = WebSocketLogHandler()
+    websocket_handler.setLevel(logging.INFO)
+
+    # 設定日誌格式
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    websocket_handler.setFormatter(formatter)
+
+    # 獲取根 logger 並添加我們的處理程序
+    # 這將捕獲來自 FastAPI、Uvicorn 和我們自己應用程式的日誌
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(websocket_handler)
+
+    # (可選) 如果你還想在伺服器控制台中看到日誌
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    logging.info("日誌系統已初始化，WebSocket 處理程序已掛載。")
+
+
+# 移除舊的基於進程的日誌記錄器和測試代碼
+# initialize_database 和相關的 DuckDB 邏輯如果不再需要，也可以考慮移除
+# 但為了保留數據持久化能力，我們暫時保留它，儘管它目前未被 setup_logging 使用

@@ -16,3 +16,5 @@ bandit         # 程式碼安全掃描
 radon          # 程式碼複雜度分析
 coverage       # 測試覆蓋率
 pre-commit     # Git 提交鉤子管理
+pytest-asyncio
+duckdb
