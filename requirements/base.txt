@@ -9,3 +9,5 @@ psutil
 aiofiles
 # 用於資料處理
 pandas
+# 用於整合測試
+httpx
