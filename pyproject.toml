@@ -31,10 +31,12 @@ ignore = []
 
 # Deptry (依賴檢查)
 [tool.deptry]
+# 明確指定 requirements 檔案的位置，避免自動偵測錯誤
+requirements_files = ["requirements.txt", "requirements/dev.txt"]
 # 要排除掃描的目錄或檔案
 exclude = ["ipywidgets", "IPython", "tests", ".venv", ".git"]
 # 針對特定規則忽略特定的模組
-per_rule_ignores = { "DEP003" = ["fastapi", "websockets", "psutil", "pydantic-settings"] }
+# per_rule_ignores = { "DEP003" = ["fastapi", "websockets", "psutil", "pydantic-settings"] } # <--- 暫時註解掉此規則，似乎在新版 deptry 中行為異常
 
 # Bandit (安全掃描)
 [tool.bandit]

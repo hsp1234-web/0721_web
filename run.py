@@ -176,17 +176,26 @@ def main():
     if not server_process:
         sys.exit(1)
 
+    # 等待伺服器完全啟動
     time.sleep(4)
-    Thread(target=open_browser).start()
+    # 在背景線程中打開瀏覽器，避免阻塞主流程
+    Thread(target=open_browser, daemon=True).start()
 
     broadcaster = BootstrapBroadcaster(BOOT_WEBSOCKET_URL)
 
     async def main_async():
-        """將所有異步操作包裹在一起。"""
-        await broadcaster.connect()
-        await run_boot_sequence(broadcaster)
+        """將所有異步操作包裹在同一個事件循環中管理。"""
+        try:
+            await broadcaster.connect()
+            await run_boot_sequence(broadcaster)
+        except Exception as e:
+            print_error(f"執行異步任務時發生錯誤: {e}")
+        finally:
+            # 確保 close 操作在同一個事件循環中執行
+            await broadcaster.close()
 
     try:
+        # 執行主要的異步邏輯
         asyncio.run(main_async())
 
         print_header("操作完成")
@@ -194,13 +203,16 @@ def main():
         print_info("引導伺服器將在 5 秒後自動關閉。")
         time.sleep(5)
 
+    except KeyboardInterrupt:
+        print_warning("\n偵測到手動中斷，正在清理資源...")
     except Exception as e:
-        print_error(f"執行啟動序列時發生錯誤: {e}")
+        print_error(f"執行主函式時發生未知錯誤: {e}")
     finally:
-        asyncio.run(broadcaster.close())
-        server_process.terminate()
-        server_process.wait()
-        print_success("引導伺服器已關閉。")
+        # 在所有操作完成後，終止背景伺服器進程
+        if server_process.poll() is None: # 檢查進程是否仍在執行
+            server_process.terminate()
+            server_process.wait()
+            print_success("引導伺服器已關閉。")
 
 
 if __name__ == "__main__":
