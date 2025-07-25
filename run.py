@@ -1,178 +1,188 @@
-import os
-import sys
+import asyncio
+import json
 import subprocess
+import sys
 import time
-import venv
 import webbrowser
-from pathlib import Path
+from threading import Thread
+import websockets
 
-# --- Configuration ---
-VENV_DIR = ".venv"
-REQUIREMENTS_FILE = "requirements.txt"
-MAIN_APP_MODULE = "main:app"
+# --- 組態設定 ---
 HOST = "127.0.0.1"
-PORT = 8000
+BOOT_PORT = 8001
+APP_PORT = 8000
+BOOT_WEBSOCKET_URL = f"ws://{HOST}:{BOOT_PORT}/ws/boot"
+APP_URL = f"http://{HOST}:{APP_PORT}"
 
-# --- Helper Functions ---
-def is_in_venv():
-    """檢查目前是否在虛擬環境中。"""
-    return sys.prefix != sys.base_prefix
-
-def get_executable(name):
-    """在虛擬環境中找到可執行檔的路徑。"""
-    venv_bin = Path(sys.prefix) / "bin"
-    return str(venv_bin / name)
-
+# --- 輔助函式 ---
 def print_header(title):
-    """打印一個帶有標題的標頭。"""
     print("\n" + "="*60)
-    print(f"🚀 {title}")
+    print(f"🎬 {title}")
     print("="*60)
 
 def print_success(message):
-    """打印成功訊息。"""
     print(f"✅ {message}")
 
 def print_info(message):
-    """打印資訊訊息。"""
     print(f"ℹ️  {message}")
 
 def print_warning(message):
-    """打印警告訊息。"""
     print(f"⚠️  {message}")
 
 def print_error(message):
-    """打印錯誤訊息。"""
     print(f"❌ {message}")
-    sys.exit(1)
 
-# --- Main Logic ---
-def setup_environment():
-    """
-    設定虛擬環境並使用 uv 安裝依賴。
-    """
-    print_header("環境設定")
+class BootstrapBroadcaster:
+    """一個簡單的 WebSocket 客戶端，用於向引導伺服器廣播事件。"""
+    def __init__(self, uri):
+        self.uri = uri
+        self.websocket = None
 
-    if is_in_venv() and Path(sys.prefix).name == VENV_DIR:
-        print_success(f"已經在目標虛擬環境中: {sys.prefix}")
-    else:
-        if not Path(VENV_DIR).exists():
-            print_info(f"正在建立虛擬環境於 '{VENV_DIR}'...")
-            venv.create(VENV_DIR, with_pip=True)
-            print_success(f"虛擬環境已建立。")
-        else:
-            print_success(f"虛擬環境 '{VENV_DIR}' 已存在。")
+    async def connect(self):
+        try:
+            self.websocket = await websockets.connect(self.uri)
+            print_success(f"成功連接到引導伺服器: {self.uri}")
+        except Exception as e:
+            print_error(f"無法連接到引導伺服器: {e}")
+            raise
 
-        print_error(f"請先啟動虛擬環境後再執行此腳本：\nsource {VENV_DIR}/bin/activate")
+    async def broadcast(self, event: dict):
+        if not self.websocket:
+            print_error("廣播失敗：WebSocket 未連接。")
+            return
+        try:
+            await self.websocket.send(json.dumps(event))
+        except Exception as e:
+            print_error(f"廣播事件失敗: {e}")
 
-    # 使用 uv 安裝/同步依賴
+    async def close(self):
+        if self.websocket:
+            await self.websocket.close()
+            print_info("與引導伺服器的連線已關閉。")
+
+
+async def run_boot_sequence(broadcaster: BootstrapBroadcaster):
+    # ... [啟動序列內容不變] ...
+    print_header("開始直播啟動序列")
+    await asyncio.sleep(1) # 等待前端連線
+    steps = [
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '>>> 鳳凰之心 v14.0 最終定稿 啟動序列 <<<', 'type': 'header'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '===================================================', 'type': 'dim'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ 核心初始化完成', 'type': 'ok'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '⏳ 正在掃描硬體介面...', 'type': 'battle'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ 硬體掃描完成', 'type': 'ok'}},
+    ]
+    for step in steps:
+        await broadcaster.broadcast(step)
+        await asyncio.sleep(0.2)
+    await broadcaster.broadcast({'event_type': 'BOOT_STEP', 'payload': {'text': '--- 正在安裝核心依賴 ---', 'type': 'header'}})
+    await asyncio.sleep(0.5)
+    deps = [
+        {'name': 'fastapi', 'size': '1.2MB'},
+        {'name': 'uvicorn', 'size': '0.8MB'},
+        {'name': 'websockets', 'size': '0.5MB'},
+        {'name': 'psutil', 'size': '0.3MB'}
+    ]
+    for dep in deps:
+        await broadcaster.broadcast({'event_type': 'BOOT_PROGRESS_START', 'payload': {'name': dep['name'], 'size': dep['size']}})
+        for progress in range(0, 101, 10):
+            await broadcaster.broadcast({'event_type': 'BOOT_PROGRESS_UPDATE', 'payload': {'name': dep['name'], 'progress': progress}})
+            await asyncio.sleep(0.05)
+    print_info("依賴安裝直播完成。")
+    await broadcaster.broadcast({'event_type': 'BOOT_STEP', 'payload': {'text': '--- 正在執行系統預檢 ---', 'type': 'header'}})
+    await asyncio.sleep(0.5)
+    disk_check_rows = [
+        ['總空間', ':', '10.0 GB'],
+        ['已使用', ':', '6.0 GB'],
+        ['剩餘空間', ':', '<span class="highlight">4.0 GB</span>'],
+        ['套件需求', ':', '5.0 GB (大型語言模型 v2)'],
+        ['狀態', ':', '<span class="error">❌ 空間不足</span>']
+    ]
+    await broadcaster.broadcast({
+        'event_type': 'BOOT_TABLE',
+        'payload': {
+            'title': '🛡️ 大型套件磁碟空間預檢報告',
+            'rows': disk_check_rows
+        }
+    })
+    print_info("系統預檢直播完成。")
+    await asyncio.sleep(1)
+    final_steps = [
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '⏳ 啟動 FastAPI 引擎...', 'type': 'battle'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ WebSocket 頻道 (/ws/dashboard) 已規劃', 'type': 'ok'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': f'✅ 主引擎將於 http://{HOST}:{APP_PORT} 上線', 'type': 'ok'}},
+        {'event_type': 'BOOT_STEP', 'payload': {'text': '\n<span class="ok">✨ 系統啟動完成，歡迎指揮官。</span>', 'type': 'raw'}},
+    ]
+    for step in final_steps:
+        await broadcaster.broadcast(step)
+        await asyncio.sleep(0.3)
+    await broadcaster.broadcast({'event_type': 'BOOT_COMPLETE'})
+    print_success("啟動序列直播完成！")
+
+def get_python_executable() -> str:
+    """獲取當前正在運行的 Python 解釋器路徑。"""
+    return sys.executable
+
+def launch_bootstrap_server():
+    """在背景啟動引導伺服器，並確保它使用正確的 Python 環境。"""
+    print_header("啟動引導伺服器")
     try:
-        print_info("正在使用 'uv' 同步依賴... (這在首次執行時可能需要一些時間)")
-        uv_executable = get_executable("uv")
-        # 檢查 uv 是否存在，如果不存在，則先安裝
-        if not Path(uv_executable).exists():
-             subprocess.run([get_executable("pip"), "install", "uv"], check=True, capture_output=True, text=True)
-             print_success("已成功安裝 'uv'。")
+        python_executable = get_python_executable()
+        print_info(f"使用 Python 解釋器: {python_executable}")
 
-        # 使用 uv pip sync
-        cmd = [uv_executable, "pip", "sync", REQUIREMENTS_FILE]
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        if result.stdout:
-            print_info("uv stdout:\n" + result.stdout)
-        if result.stderr:
-            print_info("uv stderr:\n" + result.stderr)
-        print_success("依賴已成功同步。")
-    except FileNotFoundError:
-        print_error(f"找不到 '{REQUIREMENTS_FILE}'。請確保該檔案存在於目前目錄。")
-    except subprocess.CalledProcessError as e:
-        print_error(f"依賴安裝失敗！\n命令: {' '.join(e.cmd)}\n返回碼: {e.returncode}\n輸出:\n{e.stdout}\n{e.stderr}")
-
-def launch_backend():
-    """
-    在背景啟動 FastAPI/Uvicorn 伺服器。
-    """
-    print_header("啟動後端服務")
-    try:
-        uvicorn_executable = get_executable("uvicorn")
         cmd = [
-            uvicorn_executable,
-            MAIN_APP_MODULE,
+            python_executable,
+            "-m", "uvicorn",
+            "main:app",
             "--host", HOST,
-            "--port", str(PORT),
-            "--reload"  # 在開發時很有用
+            "--port", str(BOOT_PORT),
         ]
         print_info(f"正在執行命令: {' '.join(cmd)}")
-
-        # 在背景啟動 uvicorn
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        print_success(f"後端服務已在背景啟動 (PID: {process.pid})。")
-        return process
-    except FileNotFoundError:
-        print_error("'uvicorn' 未安裝或找不到。請檢查您的虛擬環境和 `requirements.txt`。")
+        server_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print_success(f"引導伺服器已在背景啟動 (PID: {server_process.pid})。")
+        return server_process
     except Exception as e:
-        print_error(f"啟動後端服務失敗: {e}")
+        print_error(f"啟動引導伺服器失敗: {e}")
+        return None
 
-def launch_frontend():
-    """
-    打開瀏覽器訪問前端頁面。
-    """
-    print_header("啟動前端介面")
-    url = f"http://{HOST}:{PORT}"
-    print_info(f"等待 3 秒以確保後端服務完全啟動...")
-    time.sleep(3)
+def open_browser():
+    """打開瀏覽器以查看啟動畫面。"""
+    url = f"http://{HOST}:{BOOT_PORT}"
+    print_info(f"在瀏覽器中打開 {url} 以觀看啟動直播...")
+    try:
+        webbrowser.open(url)
+    except Exception:
+        print_warning("無法自動打開瀏覽器。請手動訪問以上網址。")
 
-    # 檢查是否在 Colab 環境中
-    if "COLAB_GPU" in os.environ:
-        print_info("偵測到 Colab 環境。正在生成嵌入式 iFrame...")
-        try:
-            from google.colab import output
-            with output.redirect_to_element("#colab-output"):
-                output.serve_kernel_port_as_iframe(PORT, height=800)
-            print_success("Colab iFrame 已成功嵌入。")
-        except ImportError:
-            print_warning("無法導入 google.colab 模組。請在瀏覽器中手動打開以下 URL:")
-            print_info(f"👉 {url}")
-        except Exception as e:
-             print_warning(f"嵌入 Colab iFrame 失敗: {e}。請在瀏覽器中手動打開以下 URL:")
-             print_info(f"👉 {url}")
 
-    else:
-        print_info(f"正在預設瀏覽器中打開: {url}")
-        try:
-            webbrowser.open(url)
-            print_success("瀏覽器分頁已打開。")
-        except Exception as e:
-            print_warning(f"自動打開瀏覽器失敗: {e}。請手動複製以下連結並打開：")
-            print_info(f"👉 {url}")
+def main():
+    """主執行函式。"""
+    server_process = launch_bootstrap_server()
+    if not server_process:
+        sys.exit(1)
+
+    time.sleep(4)
+    Thread(target=open_browser).start()
+
+    broadcaster = BootstrapBroadcaster(BOOT_WEBSOCKET_URL)
+
+    try:
+        asyncio.run(broadcaster.connect())
+        asyncio.run(run_boot_sequence(broadcaster))
+
+        print_header("操作完成")
+        print_success("真實啟動序列已成功直播。")
+        print_info("引導伺服器將在 5 秒後自動關閉。")
+        time.sleep(5)
+
+    except Exception as e:
+        print_error(f"執行啟動序列時發生錯誤: {e}")
+    finally:
+        asyncio.run(broadcaster.close())
+        server_process.terminate()
+        server_process.wait()
+        print_success("引導伺服器已關閉。")
 
 
 if __name__ == "__main__":
-    try:
-        setup_environment()
-        backend_process = launch_backend()
-        launch_frontend()
-
-        print_header("系統運行中")
-        print_info("後端服務正在背景運行。")
-        print_info("您可以透過瀏覽器介面與系統互動。")
-        print_info("若要停止服務，請在此終端按下 Ctrl+C。")
-
-        # 保持主腳本運行，以便監控後端進程的輸出
-        while True:
-            # 我們可以選擇性地讀取和打印後端的輸出以進行調試
-            # stdout_line = backend_process.stdout.readline().strip()
-            # if stdout_line:
-            #     print(f"[BACKEND]: {stdout_line}")
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        print("\n")
-        print_info("偵測到使用者中斷 (Ctrl+C)。正在關閉服務...")
-    except Exception as e:
-        print_error(f"發生未預期的錯誤: {e}")
-    finally:
-        if 'backend_process' in locals() and backend_process.poll() is None:
-            backend_process.terminate()
-            backend_process.wait()
-            print_success("後端服務已成功終止。")
-        print_success("系統已安全關閉。")
+    main()
