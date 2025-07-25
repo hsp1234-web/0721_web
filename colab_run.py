@@ -143,7 +143,8 @@ class PrecisionIndicator:
         self.stop_event.set()
         self.render_thread.join()
 
-    KEY_LOG_LEVELS = {"SUCCESS", "ERROR", "CRITICAL", "BATTLE", "WARNING"}
+    # 將 INFO 也視為關鍵日誌，以便在儀表板上顯示啟動過程
+    KEY_LOG_LEVELS = {"SUCCESS", "ERROR", "CRITICAL", "BATTLE", "WARNING", "INFO"}
 
     def log(self, level, message):
         """
