@@ -24,7 +24,7 @@
 | `run.py`                  | **本地伺服器啟動器**：一個極簡腳本，其唯一任務是使用 uvicorn 啟動本地開發/測試伺服器。 | Uvicorn ASGI 伺服器、WebSocket 模擬啟動動畫。                          |
 | `main.py`                 | **應用主入口**：建立 FastAPI 實例，動態掃描並聚合所有 `apps` 的 API 路由。 | FastAPI 路由管理 (`include_router`)、動態模組匯入 (`importlib`)。     |
 | `apps/*`                  | **業務邏輯單元**：包含所有具體應用功能（如量化、語音轉錄）的獨立模組。 | 業務邏輯、懶加載模式 (Lazy Loading)。                                |
-| `colab_run.py`            | **Colab 橋接器**：作為 Colab Notebook 與後端系統的唯一接口，封裝所有 Colab 端執行邏輯。 | 依賴注入、`IPython.display`、動態路徑管理 (`pathlib`)。              |
+| `colab_run.py`            | **Colab 橋接器與儀表板**：作為 Colab 的唯一接口，不僅負責啟動流程，還內建一個強大的純文字儀表板 (`PrecisionIndicator`)，用於即時監控。 | `PrecisionIndicator`、ANSI 跳脫碼、`IPython.display`、多執行緒渲染。 |
 | `logger/main.py`          | **中央日誌中心**：由一個日誌消費者進程，負責將日誌批次寫入資料庫。     | 非同步佇列 (`multiprocessing.Queue`)、單一寫入者模式 (Single Writer)。 |
 | `database/`               | **日誌與指標資料庫**：儲存所有結構化的日誌與系統監控數據。             | DuckDB (或 SQLite)，高效批次寫入。                                    |
 | `templates/dashboard.html`| **本地啟動儀表板**：由 `run.py` 使用的 HTML 範本，用於展示啟動動畫。     | HTML/CSS/JS、WebSocket 客戶端。                                      |
@@ -86,7 +86,18 @@ graph TD
     當第一個指向特定功能的 API 請求到達時（例如上傳一個音訊檔），對應的業務邏輯被觸發。此時，程式會檢查所需的大型模型是否已在記憶體中。如果是首次呼叫，則執行一次性的載入作業，並將模型儲存在全域變數中。後續所有請求都將直接使用這個已載入的模型，實現快速回應。
 
 5.  **Colab 環境下的特殊流程**
-    在 Colab 中，啟動流程由 `Colab_Guide.md` 中的儲存格觸發。該儲存格呼叫 `colab_run.py`。`colab_run.py` **自身會模擬一個微型的指揮官**，直接啟動主應用進程，並在 Colab 前端渲染一個即時的日誌和狀態監控介面，同時將應用程式本身嵌入 `iframe` 中，提供一站式的操作體驗。
+    在 Colab 中，啟動流程由 `Colab_Guide.md` 中的儲存格觸發。該儲存格呼叫 `colab_run.py`，此腳本包含一個特殊設計的 `PrecisionIndicator` 類別，作為一個純文字、多區塊的儀表板渲染引擎。
+
+    其運作流程如下：
+    - **模擬指揮官**：`colab_run.py` 自身會模擬一個微型的指揮官，直接啟動主應用進程。
+    - **啟動渲染執行緒**：`PrecisionIndicator` 會在一個獨立的背景執行緒中運行。
+    - **持續重繪**：該執行緒以固定頻率（約 0.2 秒）執行一個渲染迴圈。在每次迴圈中，它會：
+        1.  使用 `clear_output()` 清空 Colab 儲存格的輸出。
+        2.  從共享的狀態字典中讀取最新的 CPU、RAM 和核心服務狀態。
+        3.  從一個 `deque` 中讀取最新的關鍵日誌。
+        4.  使用 ANSI 跳脫碼和偽圖形字元，繪製出一個包含頂部面板、日誌區和底部狀態欄的完整儀表板畫面。
+        5.  將繪製好的多行字串一次性 `print` 到儲存格。
+    - **資訊高度整合**：這種方法取代了過去將應用程式嵌入 `iframe` 的方式，提供了一個資訊密度更高、反應更迅速、視覺上更統一的作戰駕駛艙。
 
 ## 4. 依賴與虛擬環境管理
 
