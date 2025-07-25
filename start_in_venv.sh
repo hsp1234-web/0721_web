@@ -1,46 +1,54 @@
 #!/bin/bash
 
-# --- 標準化的鳳凰之心引擎啟動腳本 ---
-
-# 設置顏色以便輸出
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-VENV_DIR=".venv"
-
-echo -e "${YELLOW}=== 鳳凰之心引擎啟動程序 ===${NC}"
-
-# 步驟 1: 檢查並創建虛擬環境
-if [ ! -d "$VENV_DIR" ]; then
-    echo "-> 虛擬環境不存在，正在創建於 '$VENV_DIR'..."
-    python3 -m venv $VENV_DIR
+echo "--- [階段 1] 檢查並安裝 uv ---"
+if ! command -v uv &> /dev/null
+then
+    echo "uv 未安裝，正在安裝..."
+    python3 -m pip install uv
     if [ $? -ne 0 ]; then
-        echo "錯誤：無法創建虛擬環境。請確保 'python3' 和 'venv' 模組已安裝。"
-        exit 1
+        echo "錯誤：安裝 uv 失敗。"
+    else
+        echo "uv 已安裝完成。"
     fi
 else
-    echo "-> 虛擬環境已存在。"
+    echo "uv 已安裝。"
 fi
 
-# 步驟 2: 激活虛擬環境並安裝/更新依賴
-echo -e "\n${YELLOW}--- 正在安裝/更新依賴... ---${NC}"
-source $VENV_DIR/bin/activate
-pip install -r requirements.txt --upgrade
-if [ $? -ne 0 ]; then
-    echo "錯誤：依賴安裝失敗。"
-    deactivate
-    exit 1
+echo "--- [階段 2] 建立或啟用虛擬環境 ---"
+VENV_PATH="./.venv"
+if [ ! -d "$VENV_PATH" ]; then
+    echo "虛擬環境未找到，正在建立 $VENV_PATH..."
+    python3 -m venv "$VENV_PATH"
+    if [ $? -ne 0 ]; then
+        echo "錯誤：建立虛擬環境失敗。"
+    else
+        echo "虛擬環境建立完成。"
+    fi
+else
+    echo "虛擬環境已存在，將重新啟用。"
 fi
-echo -e "${GREEN}✅ 依賴已是最新狀態。${NC}"
 
-# 步驟 3: 啟動 Uvicorn 伺服器
-echo -e "\n${YELLOW}--- 正在啟動後端引擎... ---${NC}"
-echo "日誌將會輸出到此終端機。使用 Ctrl+C 來關閉伺服器。"
+echo "--- [階段 3] 啟用虛擬環境 ---"
+source "$VENV_PATH/bin/activate"
+echo "虛擬環境已啟用: $(which python)"
 
-# 使用 uvicorn 啟動，並傳遞 --reload 參數以方便開發
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+echo "--- [階段 4] 使用 uv 安裝專案依賴 ---"
+if [ -f "requirements.txt" ]; then
+    echo "偵測到 requirements.txt。正在使用 uv 安裝依賴..."
+    uv pip install -r requirements.txt --system-site-packages
+    if [ $? -ne 0 ]; then
+        echo "錯誤：使用 uv 同步依賴失敗。"
+    else
+        echo "依賴安裝完成。"
+    fi
+else
+    echo "錯誤：未找到 requirements.txt 檔案。請確保其存在於專案根目錄。"
+fi
 
-# 停用虛擬環境
-deactivate
-echo -e "\n${YELLOW}=== 鳳凰之心引擎已關閉 ===${NC}"
+echo "--- [階段 5] 啟動後端服務 ---"
+if [ -f "run.py" ]; then
+    echo "正在啟動 run.py 後端服務..."
+    exec python3 run.py
+else
+    echo "錯誤：未找到 run.py 檔案。請確保其存在於專案根目錄。"
+fi
