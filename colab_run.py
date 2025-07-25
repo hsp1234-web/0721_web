@@ -225,19 +225,15 @@ def create_public_portal(port, log_manager, ui_instance_id):
     except Exception as e:
         log_manager.log("CRITICAL", f"嵌入互動指揮中心失敗: {e}")
 
-def archive_final_log(db_path, archive_folder_name, log_manager):
+def archive_final_log(db_path, archive_dir, log_manager):
     log_manager.log("INFO", "正在生成最終作戰報告...")
     if not db_path or not db_path.is_file():
         log_manager.log("WARNING", f"找不到日誌資料庫 ({db_path})，無法歸檔。")
         return
     try:
-        # 由於我們已確保在 /content 目錄下呼叫此函式，此處可安全使用相對路徑
-        archive_dir = Path(archive_folder_name)
         archive_dir.mkdir(parents=True, exist_ok=True)
-
         archive_filename = f"作戰日誌_{datetime.now(TAIPEI_TZ).strftime('%Y-%m-%d_%H-%M-%S')}.txt"
         archive_filepath = archive_dir / archive_filename
-
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
             logs = conn.execute("SELECT timestamp, level, message FROM logs ORDER BY id ASC").fetchall()
         with open(archive_filepath, 'w', encoding='utf-8') as f:
@@ -247,6 +243,18 @@ def archive_final_log(db_path, archive_folder_name, log_manager):
             for ts, lvl, msg in logs:
                 f.write(f"[{ts}] [{lvl.upper():<8}] {msg}\n")
         log_manager.log("SUCCESS", f"完整日誌已歸檔至: {archive_filepath}")
+
+        # --- 新增的複製步驟 ---
+        try:
+            import shutil
+            destination_dir = Path("/content") / archive_dir.name
+            if destination_dir.exists():
+                shutil.rmtree(destination_dir)
+            shutil.copytree(archive_dir, destination_dir)
+            log_manager.log("SUCCESS", f"日誌副本已成功建立於根目錄: {destination_dir}")
+        except Exception as copy_e:
+            log_manager.log("ERROR", f"複製日誌到根目錄時失敗: {copy_e}")
+
     except Exception as e:
         log_manager.log("ERROR", f"歸檔日誌時發生錯誤: {e}")
         log_manager.log("ERROR", traceback.format_exc())
@@ -362,13 +370,8 @@ def main(config: dict):
             display_thread.join(timeout=2)
 
         if log_manager and sqlite_db_path:
-            try:
-                # 關鍵步驟：在歸檔前，將工作目錄切換回根目錄
-                os.chdir("/content")
-                log_manager.log("INFO", f"工作目錄已切換至: {os.getcwd()}，準備歸檔。")
-                archive_final_log(sqlite_db_path, archive_folder_name, log_manager)
-            except Exception as e:
-                log_manager.log("CRITICAL", f"切換目錄或歸檔時發生最終錯誤: {e}")
+            archive_dir = PROJECT_ROOT / archive_folder_name
+            archive_final_log(sqlite_db_path, archive_dir, log_manager)
         else:
             if log_manager:
                 log_manager.log("ERROR", "無法歸檔日誌，因為最終資料庫路徑未能成功設定。")
