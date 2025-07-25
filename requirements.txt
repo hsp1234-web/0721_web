@@ -37,3 +37,6 @@ typing-extensions
 typing-inspection
 wcwidth
 widgetsnbextension
+pytest-asyncio
+duckdb
+websockets

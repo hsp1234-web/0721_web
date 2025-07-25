@@ -34,21 +34,15 @@
     *   如果您將專案放在 Google Drive 的 `MyDrive/MyProject` 中，並已掛載 Drive，那這裡就填 `drive/MyDrive/MyProject`。
 *   `FASTAPI_PORT`: 您的後端 FastAPI 應用程式將在此埠號上運行。`colab_run.py` 會將這個埠號暴露給 Colab 的代理。預設值為 `8000`。
 
-### 啟動儲存格程式碼
+### 啟動儲存格程式碼 (v4.0)
 
 <details>
-<summary>點此展開/收合 🚀 啟動鳳凰之心作戰平台 的程式碼</summary>
+<summary>點此展開/收合 🚀 啟動鳳凰之心引擎 的程式碼</summary>
 
 ```python
-#@title 🚀 啟動鳳凰之心作戰平台 (v2.1.0)
+#@title 🚀 啟動鳳凰之心引擎 (v4.0)
 #@markdown ---
-#@markdown ### **1. 顯示偏好設定**
-#@markdown > **在啟動前，設定您的戰情室顯示偏好。**
-LOG_DISPLAY_LINES = 100 #@param {type:"integer"}
-STATUS_REFRESH_INTERVAL = 1.0 #@param {type:"number"}
-
-#@markdown ---
-#@markdown ### **2. 專案與伺服器設定**
+#@markdown ### **1. 專案與伺服器設定**
 #@markdown > **`PROJECT_FOLDER_NAME` 是您在 `/content/` 下的專案資料夾名稱。**
 PROJECT_FOLDER_NAME = "WEB" #@param {type:"string"}
 #@markdown > **`FASTAPI_PORT` 是您的後端服務運行的埠號。**
@@ -59,51 +53,65 @@ FASTAPI_PORT = 8000 #@param {type:"integer"}
 # ==============================================================================
 import os
 import sys
+import time
 from pathlib import Path
 import traceback
 
 # --- 步驟 1: 設定工作目錄 ---
-# 確保我們的執行環境在專案的根目錄下
 project_path = Path(f"/content/{PROJECT_FOLDER_NAME}")
 if not project_path.is_dir():
     print(f"❌ 致命錯誤：找不到專案資料夾 '{project_path}'。")
     print("   請確認您已將專案上傳或 clone 到正確的位置，並且 PROJECT_FOLDER_NAME 設定正確。")
 else:
     os.chdir(project_path)
-    # 將專案路徑添加到系統路徑中，以便 Python 可以找到我們的模組
     if str(project_path) not in sys.path:
         sys.path.insert(0, str(project_path))
     print(f"✅ 工作目錄已成功切換至: {os.getcwd()}")
 
-    # --- 步驟 2: 執行主引導程序 ---
+    # --- 步驟 2: 安裝依賴 ---
+    # 使用 uv 來加速安裝
+    print("\n--- 正在安裝依賴... ---")
+    os.system("pip install uv")
+    os.system("uv pip install -r requirements.txt")
+    print("✅ 依賴安裝完畢。")
+
+    # --- 步驟 3: 啟動後端引擎並嵌入駕駛艙 ---
     try:
-        # 從專案中導入主引導模組
-        # 我們在這裡重新命名導入，以避免與內建的 'run' 衝突
-        import colab_run as PlatformLauncher
+        from colab_run import start_backend, stop_backend
+        from google.colab import output
 
-        # 將 Colab 表單中由使用者設定的值，傳遞給主程式的全域變數
-        # 注意：這需要在 colab_run.py 中預先定義這些變數
-        PlatformLauncher.PORT = FASTAPI_PORT
-        # PlatformLauncher.LOG_DISPLAY_LINES = LOG_DISPLAY_LINES (待實作)
-        # PlatformLauncher.STATUS_REFRESH_INTERVAL = STATUS_REFRESH_INTERVAL (待實作)
+        print("\n--- 正在啟動後端引擎... ---")
+        # 在背景啟動 FastAPI 伺服器
+        start_backend(port=FASTAPI_PORT)
 
-        # 打印啟動前的最終確認資訊
-        print(f"\n✅ 成功導入啟動器。準備執行主流程...")
-        print(f"   - 專案資料夾: {PROJECT_FOLDER_NAME}")
-        print(f"   - 後端服務埠號: {FASTAPI_PORT}")
-        print("-" * 50)
+        print("\n--- 引擎預熱中，請稍候 (15秒)... ---")
+        time.sleep(15)
 
-        # 執行主作戰流程
-        PlatformLauncher.main()
+        print("\n--- 正在嵌入前端駕駛艙... ---")
+        # 將由後端託管的前端介面嵌入到 Colab 輸出中
+        output.serve_kernel_port_as_iframe(
+            port=FASTAPI_PORT,
+            height=600  # 您可以調整內嵌視窗的高度
+        )
+        print("✅ 駕駛艙已成功嵌入。所有遙測數據將顯示在下方視窗中。")
+        print("   如果視窗未顯示，請檢查上方的日誌輸出是否有錯誤。")
+
+        # 保持主執行緒運行，以便 atexit 可以正常工作
+        print("\n--- 引擎正在運行。關閉此 Colab 執行環境將自動終止後端服務。 ---")
+        while True:
+            time.sleep(3600)
 
     except ImportError as e:
-        print(f"❌ 致命錯誤：無法導入主引導程序 `colab_run`。")
+        print(f"❌ 致命錯誤：無法導入 `colab_run` 模組。")
         print(f"   請檢查檔案 `colab_run.py` 是否存在且無語法錯誤。")
         print(f"   詳細錯誤: {e}")
     except Exception as e:
         print(f"💥 執行期間發生未預期的錯誤: {e}")
-        # 打印詳細的錯誤追蹤資訊，以便除錯
         traceback.print_exc()
+    finally:
+        # 確保在任何情況下退出時都能嘗試關閉後端
+        print("\n--- 正在執行清理程序... ---")
+        stop_backend()
 
 ```
 </details>
