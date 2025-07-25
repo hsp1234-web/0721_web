@@ -14,7 +14,7 @@
   - 使用 `pytest-cov` 生成測試覆蓋率報告。
   - 透過 `pre-commit` 框架整合了 `ruff`, `mypy`, `bandit` 等工具，在程式碼提交前自動進行風格檢查、靜態型別分析和安全掃描。
 - **生產級啟動腳本**：提供了 `start.sh`，支持以後台守護進程模式啟動、停止、重啟和查看日誌，簡化了部署流程。
-- **Colab/Jupyter 整合**：包含了 `colab_run.py` 和 `colab_display.py`，作為在 Notebook 環境中啟動和監控後端服務的橋樑。
+- **Colab/Jupyter 整合**：包含一個強大的 `colab_run.py`，它不僅是 Colab 的啟動橋樑，更內建了一個純文字、多區塊的儀表板 (`PrecisionIndicator`)，可在 Colab 儲存格中即時渲染系統狀態、資源使用率和日誌，提供卓越的監控體驗。
 
 ## 🚀 如何開始
 
@@ -104,8 +104,7 @@ curl -X POST -F "file=@fake_audio.mp3;type=audio/mpeg" http://127.0.0.1:8000/tra
 │   ├── transcriber/    # 語音轉錄 App 範例
 │   └── ...             # 其他 App
 ├── core.py             # 系統總指揮官，管理所有進程
-├── colab_run.py        # Colab 環境啟動器
-├── colab_display.py    # Colab 環境顯示介面
+├── colab_run.py        # Colab 環境啟動器與儀表板渲染引擎
 ├── database/           # DuckDB 資料庫檔案存放處
 ├── logger/             # 非同步日誌系統模組
 ├── main.py             # FastAPI 應用主入口，負責路由聚合
@@ -113,7 +112,8 @@ curl -X POST -F "file=@fake_audio.mp3;type=audio/mpeg" http://127.0.0.1:8000/tra
 │   ├── base.txt
 │   ├── colab.txt
 │   └── dev.txt
-├── run.py              # Uvicorn 伺服器啟動器
+├── run.py              # 本地開發啟動動畫播放器
+├── server_main.py      # 核心服務啟動器 (生產/Colab)
 ├── start.sh            # 生產環境啟動腳本
 ├── static/             # 靜態檔案目錄
 ├── tests/              # 自動化測試目錄
