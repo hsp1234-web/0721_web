@@ -2,9 +2,7 @@
 // 全域變數與 DOM 元素快取
 // ==================================================================
 let mainSocket;
-let bootstrapSocket;
 let appConfig = {};
-const progressBars = {}; // 儲存進度條的 DOM 元素
 
 const bootScreen = document.getElementById('boot-screen');
 const dashboard = document.getElementById('dashboard');
@@ -14,98 +12,6 @@ const topPanel = {
 };
 const mainStreamContainer = document.getElementById('main-stream-container');
 const statusBar = document.getElementById('status-bar');
-
-// ==================================================================
-// 啟動畫面 (Boot Screen) 渲染函式
-// ==================================================================
-
-/**
- * 在啟動畫面中渲染一個文字步驟。
- * @param {object} payload - { text: string, type: string }
- */
-function renderBootStep(payload) {
-    const line = document.createElement('pre');
-    line.innerHTML = `<span class="${payload.type || ''}">${payload.text}</span>`;
-    bootScreen.appendChild(line);
-    bootScreen.scrollTop = bootScreen.scrollHeight;
-}
-
-/**
- * 開始渲染一個進度條。
- * @param {object} payload - { name: string, size: string }
- */
-function renderProgressBarStart(payload) {
-    const line = document.createElement('div');
-    line.className = 'progress-bar-container';
-
-    const text = document.createElement('span');
-    text.className = 'label';
-    text.textContent = `⏳ 安裝中: ${payload.name.padEnd(12, ' ')}`;
-
-    const progressBar = document.createElement('pre');
-    progressBar.className = 'dim';
-    progressBar.textContent = `[${'░'.repeat(10)}] 0% (${payload.size})`;
-
-    line.appendChild(text);
-    line.appendChild(progressBar);
-    bootScreen.appendChild(line);
-
-    // 儲存對 DOM 元素的引用，以便後續更新
-    progressBars[payload.name] = { text, progressBar };
-    bootScreen.scrollTop = bootScreen.scrollHeight;
-}
-
-/**
- * 更新一個已存在的進度條。
- * @param {object} payload - { name: string, progress: number }
- */
-function renderProgressBarUpdate(payload) {
-    const bar = progressBars[payload.name];
-    if (!bar) return;
-
-    const p = payload.progress;
-    const filled = '█'.repeat(Math.round(p / 10));
-    const empty = '░'.repeat(10 - Math.round(p / 10));
-    bar.progressBar.textContent = `[${filled}] ${p}%`;
-
-    if (p >= 100) {
-        bar.text.innerHTML = `✅ <span class="ok">已安裝: ${payload.name.padEnd(12, ' ')}</span>`;
-    }
-}
-
-/**
- * 渲染一個數據表格。
- * @param {object} payload - { title: string, rows: array }
- */
-function renderBootTable(payload) {
-    const table = document.createElement('div');
-    table.className = 'data-stream-table';
-    let content = `<div class="ds-row ds-header"><div class="ds-cell">${payload.title}</div></div>`;
-    content += `<div class="ds-row ds-separator"><div class="ds-cell"></div></div>`;
-    payload.rows.forEach(rowData => {
-        content += `<div class="ds-row">`;
-        rowData.forEach(cellData => {
-            content += `<div class="ds-cell">${cellData}</div>`;
-        });
-        content += `</div>`;
-    });
-    table.innerHTML = content;
-    bootScreen.appendChild(table);
-    bootScreen.scrollTop = bootScreen.scrollHeight;
-}
-
-/**
- * 從啟動畫面過渡到主儀表板。
- */
-function transitionToMainDashboard() {
-    renderBootStep({ text: "正在切換至主駕駛艙...", type: "info" });
-    setTimeout(() => {
-        bootScreen.classList.add('hidden');
-        dashboard.classList.remove('hidden');
-        if (bootstrapSocket) bootstrapSocket.close();
-        connectMainApp();
-    }, 1500); // 延遲 1.5 秒以顯示最後的訊息
-}
 
 // ==================================================================
 // 主儀表板 (Dashboard) 渲染函式
@@ -163,9 +69,13 @@ function addMainStreamLog(log) {
         textContentDiv.innerHTML = `<span>${message}</span>`;
         streamItem.appendChild(textContentDiv);
     } else { // 假設是表格
+        // 為了簡化，我們可以在這裡添加一個渲染表格的邏輯
+        // 或者確保後端只發送字串格式的日誌
         const blockContentDiv = document.createElement('div');
         blockContentDiv.className = 'stream-block-content';
-        blockContentDiv.appendChild(renderBootTable(message.title, message.rows));
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(message, null, 2);
+        blockContentDiv.appendChild(pre);
         streamItem.appendChild(blockContentDiv);
     }
 
@@ -180,42 +90,10 @@ function addMainStreamLog(log) {
 // WebSocket 連線管理
 // ==================================================================
 
-function connectBootstrap(port) {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const bootstrapUrl = `${wsProtocol}//${window.location.hostname}:${port}/ws/bootstrap`;
-
-    bootstrapSocket = new WebSocket(bootstrapUrl);
-
-    bootstrapSocket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        switch (data.event_type) {
-            case 'BOOT_STEP':
-                renderBootStep(data.payload);
-                break;
-            case 'BOOT_PROGRESS_START':
-                renderProgressBarStart(data.payload);
-                break;
-            case 'BOOT_PROGRESS_UPDATE':
-                renderProgressBarUpdate(data.payload);
-                break;
-            case 'BOOT_TABLE':
-                renderBootTable(data.payload);
-                break;
-            case 'BOOT_COMPLETE':
-                transitionToMainDashboard();
-                break;
-        }
-    };
-
-    bootstrapSocket.onerror = (error) => {
-        console.error("Bootstrap WebSocket Error:", error);
-        renderBootStep({ text: "❌ 引導伺服器連線錯誤", type: "error" });
-    };
-}
-
 function connectMainApp() {
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const mainAppUrl = `${wsProtocol}//${window.location.hostname}:${appConfig.mainPort}/ws`; // 主應用的 port 需要從某處獲取
+    // 在 Colab/iframe 環境中，主機和埠號與頁面相同
+    const mainAppUrl = `${wsProtocol}//${window.location.host}/ws/logs`;
 
     mainSocket = new WebSocket(mainAppUrl);
 
@@ -243,20 +121,29 @@ function connectMainApp() {
 
     mainSocket.onerror = (error) => {
         console.error("Main WebSocket Error:", error);
+        addMainStreamLog({
+            icon: '❌', level: 'ERROR', levelClass: 'error',
+            message: '與主引擎的 WebSocket 連線中斷。請檢查後端日誌。', timestamp: Date.now()/1000
+        });
+    };
+
+    mainSocket.onclose = () => {
+        addMainStreamLog({
+            icon: '⚠️', level: 'WARN', levelClass: 'warn',
+            message: '與主引擎的連線已關閉。', timestamp: Date.now()/1000
+        });
     };
 }
 
 // ==================================================================
 // 腳本初始執行
 // ==================================================================
-document.addEventListener("DOMContentLoaded", () => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const bootstrapPort = urlParams.get('bootstrapPort');
+function initializeDashboard() {
+    // 直接顯示儀表板，隱藏啟動畫面
+    bootScreen.classList.add('hidden');
+    dashboard.classList.remove('hidden');
+    // 連接到主應用 WebSocket
+    connectMainApp();
+}
 
-    if (bootstrapPort) {
-        connectBootstrap(bootstrapPort);
-    } else {
-        // Fallback for direct testing or if bootstrap fails
-        bootScreen.innerHTML = '<pre class="error">錯誤：未找到引導伺服器埠號。\n無法啟動真實啟動序列。</pre>';
-    }
-});
+document.addEventListener("DOMContentLoaded", initializeDashboard);

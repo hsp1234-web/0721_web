@@ -40,3 +40,4 @@ widgetsnbextension
 pytest-asyncio
 duckdb
 websockets
+pydantic-settings
