@@ -41,3 +41,5 @@ pytest-asyncio
 duckdb
 websockets
 pydantic-settings
+psutil
+pytz

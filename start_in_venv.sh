@@ -35,7 +35,7 @@ echo "虛擬環境已啟用: $(which python)"
 echo "--- [階段 4] 使用 uv 安裝專案依賴 ---"
 if [ -f "requirements.txt" ]; then
     echo "偵測到 requirements.txt。正在使用 uv 安裝依賴..."
-    uv pip install -r requirements.txt --system-site-packages
+    uv pip install -r requirements.txt --break-system-packages
     if [ $? -ne 0 ]; then
         echo "錯誤：使用 uv 同步依賴失敗。"
     else
