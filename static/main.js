@@ -1,78 +1,54 @@
-document.addEventListener("DOMContentLoaded", () => {
-    const logPanel = document.getElementById("log-panel");
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/logs`);
+let appConfig = {};
+const logPanel = document.getElementById("log-panel");
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
-    const createLogEntry = (log) => {
-        const entry = document.createElement("div");
-        entry.className = "log-entry";
+const addStreamItem = (message, level = 'INFO') => {
+    const timestamp = new Date().toLocaleTimeString();
+    const newLogEntry = document.createElement('div');
+    newLogEntry.innerHTML = `<span class="log-timestamp">${timestamp}</span> <span class="log-level-${level}">[${level}]</span> ${message}`;
+    logPanel.appendChild(newLogEntry);
 
-        const timestampSpan = document.createElement("span");
-        timestampSpan.className = "log-timestamp";
-        timestampSpan.textContent = new Date(log.timestamp * 1000).toLocaleTimeString();
+    // 根據 appConfig 中的設定來限制日誌行數
+    if (appConfig.LOG_DISPLAY_LINES && logPanel.children.length > appConfig.LOG_DISPLAY_LINES) {
+        logPanel.removeChild(logPanel.firstChild);
+    }
+    logPanel.scrollTop = logPanel.scrollHeight;
+};
 
-        const levelSpan = document.createElement("span");
-        levelSpan.className = `log-level-${log.level}`;
-        levelSpan.textContent = `[${log.level}]`;
+socket.onopen = () => {
+    addStreamItem("成功連接到鳳凰之心後端。正在等待配置指令...", "INFO");
+};
 
-        const messageSpan = document.createElement("span");
-        messageSpan.className = "log-message";
-        messageSpan.textContent = log.message;
+socket.onmessage = (event) => {
+    const parsedData = JSON.parse(event.data);
 
-        entry.appendChild(timestampSpan);
-        entry.appendChild(levelSpan);
-        entry.appendChild(document.createTextNode(" ")); // for spacing
-        entry.appendChild(messageSpan);
+    switch (parsedData.event_type) {
+        case 'CONFIG_UPDATE':
+            appConfig = parsedData.payload;
+            addStreamItem("後端配置已接收並應用。", "INFO");
+            // 可以在此處根據新配置觸發一些前端行為
+            break;
+        case 'PERFORMANCE_UPDATE':
+            // 這裡可以將性能數據顯示在儀表板的其他部分
+            // 為了簡化，我們暫時仍在日誌流中顯示
+            const perf = parsedData.payload;
+            addStreamItem(`CPU: ${perf.cpu_usage.toFixed(1)}% | RAM: ${(perf.ram_usage / 1024 / 1024).toFixed(0)}MB`, "DEBUG");
+            break;
+        case 'LOG_MESSAGE':
+            const log = parsedData.payload;
+            addStreamItem(log.message, log.level);
+            break;
+        default:
+            addStreamItem(`收到未知的事件類型: ${parsedData.event_type}`, "WARNING");
+    }
+};
 
-        return entry;
-    };
+socket.onclose = () => {
+    addStreamItem("與後端的連線已中斷。", "WARNING");
+};
 
-    socket.onopen = () => {
-        const entry = createLogEntry({
-            timestamp: Date.now() / 1000,
-            level: "INFO",
-            message: "成功連接到引擎遙測數據通道。"
-        });
-        logPanel.appendChild(entry);
-    };
-
-    socket.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            if (data.event_type === "LOG_MESSAGE") {
-                const log = data.payload;
-                const entry = createLogEntry(log);
-                logPanel.appendChild(entry);
-                // 自動滾動到底部
-                logPanel.scrollTop = logPanel.scrollHeight;
-            }
-        } catch (e) {
-            console.error("無法解析收到的日誌訊息:", e);
-            const entry = createLogEntry({
-                timestamp: Date.now() / 1000,
-                level: "ERROR",
-                message: "收到一個無效的日誌格式。"
-            });
-            logPanel.appendChild(entry);
-        }
-    };
-
-    socket.onclose = () => {
-        const entry = createLogEntry({
-            timestamp: Date.now() / 1000,
-            level: "WARNING",
-            message: "與引擎的遙測數據通道已斷開。"
-        });
-        logPanel.appendChild(entry);
-    };
-
-    socket.onerror = (error) => {
-        console.error("WebSocket 錯誤:", error);
-        const entry = createLogEntry({
-            timestamp: Date.now() / 1000,
-            level: "ERROR",
-            message: "與遙測通道的連線發生錯誤。"
-        });
-        logPanel.appendChild(entry);
-    };
-});
+socket.onerror = (error) => {
+    console.error("WebSocket Error:", error);
+    addStreamItem("WebSocket 連線出現錯誤。", "ERROR");
+};

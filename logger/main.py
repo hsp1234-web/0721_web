@@ -1,60 +1,69 @@
-import asyncio
-import json
 import logging
-from core import manager
+import os
+import asyncio
+from logging.handlers import RotatingFileHandler
+from core.config import settings
 
-# --- WebSocket 日誌處理程序 ---
+# 這個全域變數用來儲存 WebSocket 管理器的實例
+# 這是一種簡化的依賴注入，適用於這個專案規模
+websocket_manager = None
+
+def set_websocket_manager(manager):
+    """設定 WebSocket 管理器實例。"""
+    global websocket_manager
+    websocket_manager = manager
+
 class WebSocketLogHandler(logging.Handler):
     """一個自訂的日誌處理程序，可將日誌轉發到 WebSocket 連線。"""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        """將日誌記錄格式化並透過 WebSocket 管理器廣播。"""
-        try:
-            # 將 LogRecord 轉換為字典
-            log_data = {
-                "timestamp": record.created,
-                "level": record.levelname,
-                "message": self.format(record),
+    def emit(self, record):
+        if websocket_manager:
+            log_entry = {
+                "event_type": "LOG_MESSAGE",
+                "payload": {
+                    "timestamp": record.created,
+                    "level": record.levelname,
+                    "message": self.format(record)
+                }
             }
+            # 使用 asyncio.create_task 在背景廣播，避免阻塞
+            asyncio.create_task(websocket_manager.broadcast(log_entry))
 
-            # 根據附錄 A 協議構建訊息
-            protocol_message = {"event_type": "LOG_MESSAGE", "payload": log_data}
-
-            # 廣播 JSON 訊息
-            # 我們需要獲取或創建一個事件循環在當前執行緒
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:  # 'RuntimeError: There is no current event loop...'
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            loop.run_until_complete(manager.broadcast(json.dumps(protocol_message)))
-        except Exception:
-            # 在日誌處理程序中應避免引發異常
-            pass
-
-def setup_logging() -> None:
-    """設定全域日誌記錄，將日誌同時輸出到控制台和 WebSocket。"""
-    websocket_handler = WebSocketLogHandler()
-    websocket_handler.setLevel(logging.INFO)
-
-    formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+def setup_logging():
+    """設定全域日誌記錄，將日誌同時輸出到控制台、檔案和 WebSocket。"""
+    log_formatter = logging.Formatter(
+        "%(asctime)s - [%(levelname)s] - %(name)s - %(message)s"
     )
-    websocket_handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.INFO) # 設定根日誌級別
 
-    # 清除任何可能已存在的處理程序，以避免日誌重複
+    # 清除任何現有的處理程序
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
+    # 1. 控制台處理程序
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    root_logger.addHandler(console_handler)
+
+    # 2. 檔案處理程序 (可配置路徑)
+    archive_dir = settings.ARCHIVE_FOLDER_NAME
+    if not os.path.exists(archive_dir):
+        os.makedirs(archive_dir)
+
+    log_file_path = os.path.join(archive_dir, "system_runtime.log")
+
+    # 使用 RotatingFileHandler 避免日誌檔案無限增大
+    file_handler = RotatingFileHandler(
+        log_file_path, maxBytes=5*1024*1024, backupCount=2
+    )
+    file_handler.setFormatter(log_formatter)
+    root_logger.addHandler(file_handler)
+
+    # 3. WebSocket 處理程序
+    websocket_handler = WebSocketLogHandler()
+    websocket_handler.setLevel(logging.INFO) # 我們只希望將 INFO 級別及以上的日誌發送到前端
+    websocket_handler.setFormatter(logging.Formatter("%(message)s")) # 前端有自己的格式
     root_logger.addHandler(websocket_handler)
 
-    # 添加控制台輸出，以便在伺服器端也能看到日誌
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    root_logger.addHandler(stream_handler)
-
-    logging.info("日誌系統已初始化，WebSocket 處理程序已掛載。")
+    logging.info(f"日誌系統初始化完畢。日誌檔案將儲存於 '{os.path.abspath(log_file_path)}'")
