@@ -123,6 +123,12 @@ def get_python_executable() -> str:
     """獲取當前正在運行的 Python 解釋器路徑。"""
     return sys.executable
 
+def stream_reader(stream, prefix):
+    """讀取並印出流的內容。"""
+    for line in iter(stream.readline, b''):
+        print(f"[{prefix}] {line.decode().strip()}")
+    stream.close()
+
 def launch_bootstrap_server():
     """在背景啟動引導伺服器，並確保它使用正確的 Python 環境。"""
     print_header("啟動引導伺服器")
@@ -138,8 +144,17 @@ def launch_bootstrap_server():
             "--port", str(BOOT_PORT),
         ]
         print_info(f"正在執行命令: {' '.join(cmd)}")
-        server_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        server_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         print_success(f"引導伺服器已在背景啟動 (PID: {server_process.pid})。")
+
+        # 啟動線程來讀取輸出
+        Thread(target=stream_reader, args=(server_process.stdout, "UVICORN_OUT"), daemon=True).start()
+        Thread(target=stream_reader, args=(server_process.stderr, "UVICORN_ERR"), daemon=True).start()
+
         return server_process
     except Exception as e:
         print_error(f"啟動引導伺服器失敗: {e}")
@@ -166,9 +181,13 @@ def main():
 
     broadcaster = BootstrapBroadcaster(BOOT_WEBSOCKET_URL)
 
+    async def main_async():
+        """將所有異步操作包裹在一起。"""
+        await broadcaster.connect()
+        await run_boot_sequence(broadcaster)
+
     try:
-        asyncio.run(broadcaster.connect())
-        asyncio.run(run_boot_sequence(broadcaster))
+        asyncio.run(main_async())
 
         print_header("操作完成")
         print_success("真實啟動序列已成功直播。")

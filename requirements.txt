@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
-psutil
 websockets
+psutil
+pydantic-settings
 uv
 python-dotenv

@@ -31,12 +31,10 @@ ignore = []
 
 # Deptry (依賴檢查)
 [tool.deptry]
-# 告訴 deptry 我們的原始碼在哪裡
-sources = ["."]
-# 忽略在 Colab 環境中才會用到的依賴
-exclude = ["ipywidgets", "IPython"]
-# 忽略一些 deptry 可能會誤判的模組
-ignore_missing = []
+# 要排除掃描的目錄或檔案
+exclude = ["ipywidgets", "IPython", "tests", ".venv", ".git"]
+# 針對特定規則忽略特定的模組
+per_rule_ignores = { "DEP003" = ["fastapi", "websockets", "psutil", "pydantic-settings"] }
 
 # Bandit (安全掃描)
 [tool.bandit]

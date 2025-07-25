@@ -1,5 +1,5 @@
 # 開發環境依賴 (包含核心依賴)
--r base.txt
+-r ../requirements.txt
 
 # --- 測試框架 ---
 pytest         # 核心測試框架
