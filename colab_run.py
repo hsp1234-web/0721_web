@@ -231,8 +231,8 @@ def archive_final_log(db_path, archive_folder_name, log_manager):
         log_manager.log("WARNING", f"找不到日誌資料庫 ({db_path})，無法歸檔。")
         return
     try:
-        # 在函式內部直接定義絕對路徑，消除任何外部狀態影響
-        archive_dir = Path("/content") / archive_folder_name
+        # 由於我們已確保在 /content 目錄下呼叫此函式，此處可安全使用相對路徑
+        archive_dir = Path(archive_folder_name)
         archive_dir.mkdir(parents=True, exist_ok=True)
 
         archive_filename = f"作戰日誌_{datetime.now(TAIPEI_TZ).strftime('%Y-%m-%d_%H-%M-%S')}.txt"
@@ -362,8 +362,13 @@ def main(config: dict):
             display_thread.join(timeout=2)
 
         if log_manager and sqlite_db_path:
-            # 呼叫更新後的函式，直接傳遞資料夾名稱
-            archive_final_log(sqlite_db_path, archive_folder_name, log_manager)
+            try:
+                # 關鍵步驟：在歸檔前，將工作目錄切換回根目錄
+                os.chdir("/content")
+                log_manager.log("INFO", f"工作目錄已切換至: {os.getcwd()}，準備歸檔。")
+                archive_final_log(sqlite_db_path, archive_folder_name, log_manager)
+            except Exception as e:
+                log_manager.log("CRITICAL", f"切換目錄或歸檔時發生最終錯誤: {e}")
         else:
             if log_manager:
                 log_manager.log("ERROR", "無法歸檔日誌，因為最終資料庫路徑未能成功設定。")
