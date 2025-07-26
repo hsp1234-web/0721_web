@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   核心檔案：colab_run.py (v2.1 台北時區強化版)                     ║
+# ║   核心檔案：colab_run.py (v2.2 參數接收版)                         ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
@@ -8,9 +8,10 @@
 # ║       專案在 Colab 環境中的「啟動協調器」。它負責以正確的順序，      ║
 # ║       初始化並啟動所有核心模組。                                     ║
 # ║                                                                      ║
-# ║   v2.1 更新：                                                        ║
-# ║       在程式結束時的「日誌歸檔」邏輯中，導入 `pytz` 與 `datetime`   ║
-# ║       函式庫，確保歸檔檔案的命名和尋找，都基於 `Asia/Taipei` 時區。 ║
+# ║   v2.2 更新：                                                        ║
+# ║       修正了 `run_phoenix_heart` 函數的定義，使其能夠正確接收並     ║
+# ║       處理從 Colab 儲存格傳遞過來的參數 (如 log_lines, timezone     ║
+# ║       等)，解決了 `TypeError` 的問題。                              ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -21,15 +22,14 @@ from pathlib import Path
 import pytz
 from datetime import datetime
 
-# 假設其他 import 語句已存在
+# 確保專案根目錄在系統路徑中
+project_root = Path(__file__).parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from core.presentation_manager import PresentationManager
 from core.monitor import HardwareMonitor
 from logger.main import Logger
-
-# --- 參數設定 (可移至 Colab form) ---
-LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔"
-PROJECT_FOLDER_NAME = "WEB"
-TIMEZONE = "Asia/Taipei"
 
 def main_execution_logic(logger, pm):
     """
@@ -57,15 +57,14 @@ def main_execution_logic(logger, pm):
         pm.update_task_status(f"核心狀態：發生致命錯誤！")
 
 
-def run_phoenix_heart():
+# === 關鍵修正：更新函數定義以接收所有參數 ===
+def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path):
     """
-    專案啟動主函數。
+    專案啟動主函數，現在可以接收來自 Colab 的設定。
     """
     pm = None
     monitor = None
     logger = None
-    base_path = Path("/content")
-    project_path = base_path / PROJECT_FOLDER_NAME
 
     try:
         # --- 1. 初始化視覺指揮官 ---
@@ -79,11 +78,11 @@ def run_phoenix_heart():
             </p>
         </div>
         """
-        pm = PresentationManager(log_lines=20)
+        pm = PresentationManager(log_lines=log_lines)
         pm.setup_layout(button_html)
 
         # --- 2. 初始化其他模組 ---
-        logger = Logger(presentation_manager=pm, timezone=TIMEZONE)
+        logger = Logger(presentation_manager=pm, timezone=timezone)
         monitor = HardwareMonitor(presentation_manager=pm, interval=1.0)
 
         # --- 3. 啟動所有服務 ---
@@ -100,35 +99,29 @@ def run_phoenix_heart():
 
     except KeyboardInterrupt:
         if logger:
-            logger.warning("系統在啟動過程中被手動中斷！")
+            logger.warning("系統在運行中被手動中斷！")
         if pm:
-            pm.update_task_status("核心狀態：系統啟動被中斷")
+            pm.update_task_status("核心狀態：系統已被中斷")
 
     finally:
         # --- 5. 優雅關閉 ---
         if monitor:
             monitor.stop()
 
-        # --- 6. 執行日誌歸檔 (台北時區強化版) ---
-        if LOG_ARCHIVE_FOLDER_NAME and LOG_ARCHIVE_FOLDER_NAME.strip():
+        # --- 6. 執行日誌歸檔 ---
+        if archive_folder_name and archive_folder_name.strip():
             print("\n--- 執行日誌歸檔 (台北時區) ---")
             try:
-                # 建立時區物件
-                tz = pytz.timezone(TIMEZONE)
+                tz = pytz.timezone(timezone)
                 now_in_tz = datetime.now(tz)
-
-                # 使用台北時區的「今天」日期來尋找來源日誌檔
                 today_str = now_in_tz.strftime('%Y-%m-%d')
                 source_log_path = project_path / "logs" / f"日誌-{today_str}.md"
-                
-                archive_folder_path = base_path / LOG_ARCHIVE_FOLDER_NAME.strip()
+                archive_folder_path = base_path / archive_folder_name.strip()
 
                 if source_log_path.exists():
                     archive_folder_path.mkdir(exist_ok=True)
-                    # 使用台北時區的「現在」時間來命名歸檔檔案
                     timestamp_str = now_in_tz.strftime("%Y%m%d_%H%M%S")
                     destination_log_path = archive_folder_path / f"日誌_{timestamp_str}.md"
-                    
                     shutil.copy2(source_log_path, destination_log_path)
                     print(f"✅ 日誌已成功歸檔至: {destination_log_path}")
                 else:
@@ -139,9 +132,3 @@ def run_phoenix_heart():
         if pm:
             pm.stop()
         print("--- 鳳凰之心指揮中心程序已結束 ---")
-
-
-# if __name__ == '__main__':
-#     # 在 Colab 中，我們會直接呼叫 run_phoenix_heart()
-#     # 而不是透過 if __name__ == '__main__'
-#     pass
