@@ -4,8 +4,8 @@
 """
 import pandas as pd
 import numpy as np
-from prometheus.core.db.db_manager import DBManager
-from prometheus.models.strategy_models import Strategy, PerformanceReport
+from ..core.db.db_manager import DBManager
+from ..models.strategy_models import Strategy, PerformanceReport
 
 class BacktestingService:
     """

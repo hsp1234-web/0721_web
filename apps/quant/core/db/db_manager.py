@@ -1,7 +1,7 @@
 import duckdb
 import os
 import pandas as pd
-from prometheus.core.logging.log_manager import LogManager
+from ..logging.log_manager import LogManager
 
 class DBManager:
     def __init__(self, db_path: str = "data/analytics_warehouse/factors.duckdb"):

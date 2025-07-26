@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import yaml
 
-from prometheus.core.logging.log_manager import LogManager
+from .logging.log_manager import LogManager
 
 logger = LogManager.get_instance().get_logger("ConfigManager")
 

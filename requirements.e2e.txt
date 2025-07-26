@@ -1,0 +1,12 @@
+# 端對端 (E2E) 測試所需的最小依賴集
+# 這將避免安裝大型的、僅在生產或完整功能中需要的套件
+fastapi
+uvicorn
+python-multipart
+pandas
+aiosqlite
+pydantic
+requests
+requests-cache
+fredapi
+yfinance

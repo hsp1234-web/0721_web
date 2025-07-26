@@ -1,35 +1,22 @@
-from typing import Any, Dict
+# apps/quant/main.py
+from fastapi import APIRouter, HTTPException
+from .logic import run_backtest, BacktestRequest
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
-
-from . import logic
-
-router = APIRouter()
-
+# 建立一個新的 API 路由器，並為其所有路由設定統一的前綴
+# FastAPI 主應用會自動偵測並包含這個路由器
+router = APIRouter(prefix="/api/quant", tags=["量化分析"])
 
 @router.post("/backtest")
-async def run_backtest(background_tasks: BackgroundTasks) -> Dict[str, str]:
-    """觸發一個模擬的背景回測任務。"""
-    task_id = await logic.start_backtest_task()
-    background_tasks.add_task(logic.run_mock_backtest, task_id)
-    return {"message": "Backtest task started.", "task_id": task_id}
+async def backtest_endpoint(request: BacktestRequest):
+    """
+    執行策略回測的 API 端點。
 
-
-@router.get("/status/{task_id}")
-async def get_backtest_status(task_id: str) -> Dict[str, Any]:
-    """查詢回測任務的狀態。"""
-    status = await logic.get_backtest_status(task_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return status
-
-
-@router.get("/data")
-async def get_quant_data() -> Dict[str, Any]:
-    """提供一些模擬的量化數據。"""
-    return {
-        "symbol": "BTC/USDT",
-        "timestamp": "2025-07-26T10:00:00Z",
-        "price": 100000.0,
-        "volume": 123.456,
-    }
+    接收一個包含策略參數的 JSON 物件，返回回測的績效結果。
+    """
+    try:
+        # 調用核心業務邏輯
+        result = run_backtest(request)
+        return result
+    except Exception as e:
+        # 處理潛在的錯誤
+        raise HTTPException(status_code=500, detail=f"執行回測時發生錯誤: {e}")

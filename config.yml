@@ -1,0 +1,5 @@
+# 統一指揮中心 - 最小化設定檔
+# 這個檔案是為了滿足 apps/quant 模組在啟動時的最低需求
+
+api_keys:
+  fred: "MOCK_API_KEY_FOR_TESTING" # 使用一個模擬的、非空的 API 金鑰

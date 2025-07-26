@@ -1,36 +1,37 @@
-from typing import Any, Dict
+# apps/transcriber/main.py
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from .logic import create_transcription_task, get_task_status
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+# 建立一個新的 API 路由器，並為其所有路由設定統一的前綴
+router = APIRouter(prefix="/api/transcriber", tags=["語音轉錄"])
 
-from . import logic
-
-router = APIRouter()
-
-
-@router.get("/", summary="服務健康檢查")
-def transcriber_root() -> Dict[str, str]:
-    """提供一個簡單的 API 端點，用於確認 Transcriber 服務是否正常運行。"""
-    return {"message": "這裡是語音轉錄 (Transcriber) 服務，已準備好接收上傳。"}
-
-
-@router.post("/upload", summary="上傳音訊檔案進行轉錄")
-def upload_and_transcribe(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """上傳一個音訊檔案，系統將對其進行模擬的語音轉錄。
-
-    - **注意**: 首次調用此 API 時，後端會需要幾秒鐘來加載 AI 模型，
-      因此第一次的回應時間會比較長。後續的調用將會非常快。
+@router.post("/upload")
+async def upload_audio_file(file: UploadFile = File(...)):
     """
-    if not file:
-        raise HTTPException(status_code=400, detail="沒有提供上傳檔案。")
+    上傳音檔以進行轉錄。
 
-    if not file.content_type or not file.content_type.startswith("audio/"):
-        raise HTTPException(
-            status_code=415,
-            detail=f"不支援的檔案類型: '{file.content_type}'。請上傳音訊檔案。",
-        )
+    接收一個音檔，將其儲存並為其創建一個背景轉錄任務。
+    """
+    # 限制檔案類型，這是一個好的實踐
+    if not file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="無效的檔案類型，請上傳音檔。")
 
     try:
-        result = logic.transcribe_audio(file)
-        return result
+        task_id = await create_transcription_task(file)
+        return {"message": "任務已成功創建", "task_id": task_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"處理檔案時發生內部錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"創建任務時發生錯誤: {e}")
+
+@router.get("/status/{task_id}")
+async def get_transcription_status(task_id: str):
+    """
+    查詢轉錄任務的狀態。
+
+    使用任務 ID 輪詢此端點，以獲取任務的當前狀態和（如果已完成）結果。
+    """
+    status_info = get_task_status(task_id)
+
+    if status_info["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="找不到指定的任務 ID。")
+
+    return status_info

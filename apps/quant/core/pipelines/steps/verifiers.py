@@ -5,8 +5,8 @@
 # 一個用於在管線中驗證 DataFrame 完整性的步驟。
 
 import pandas as pd
-from prometheus.core.pipelines.base_step import BaseETLStep
-from prometheus.core.logging.log_manager import LogManager
+from ..base_step import BaseETLStep
+from ..logging.log_manager import LogManager
 
 class VerifyDataFrameNotEmptyStep(BaseETLStep):
     def __init__(self):

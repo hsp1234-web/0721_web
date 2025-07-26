@@ -5,7 +5,7 @@ import logging
 from typing import List, Any
 import pandas as pd
 
-from prometheus.core.pipelines.base_step import BaseETLStep, BaseStep
+from .base_step import BaseETLStep, BaseStep
 
 
 class DataPipeline:

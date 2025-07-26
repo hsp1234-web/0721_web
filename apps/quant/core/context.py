@@ -3,7 +3,7 @@ import os
 
 import aiosqlite
 
-from prometheus.core.events.event_store import PersistentEventStream
+from ..events.event_store import PersistentEventStream
 
 
 class AppContext:
@@ -11,7 +11,7 @@ class AppContext:
 
     def __init__(self, db_path: str = "output/results.sqlite", config_path: str = "config.yml"):
         self.db_path = db_path
-        from prometheus.core.config import ConfigManager
+        from ..config import ConfigManager
         self.config = ConfigManager(config_path=config_path)._config
         self.conn = None
         self.event_stream: PersistentEventStream | None = None

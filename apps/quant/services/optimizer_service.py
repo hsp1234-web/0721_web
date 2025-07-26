@@ -1,8 +1,8 @@
 import json
 import duckdb
-from prometheus.core.logging.log_manager import LogManager
-from prometheus.core.db import get_db_connection
-from prometheus.core.config import config
+from ..core.logging.log_manager import LogManager
+from ..core.db import get_db_connection
+from ..core.config import config
 
 class OptimizerService:
     def __init__(self, db_path=None, table_name="optimized_strategies"):

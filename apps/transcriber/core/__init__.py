@@ -18,10 +18,6 @@ from typing import Type
 class BaseConfig:
     """基礎設定, 所有配置都應繼承自此類別."""
 
-    # 資料庫與上傳路徑
-    DATABASE_FILE = "transcription_tasks.db"
-    UPLOAD_DIR = Path("uploads")
-
     # WebSocket 伺服器設定
     WEBSOCKET_HOST = "127.0.0.1"
     WEBSOCKET_PORT = 8000
@@ -94,16 +90,18 @@ def get_config(profile_name: str = "testing") -> BaseConfig:
 
 
 # --- 常數 ---
+DATABASE_FILE = "transcription_tasks.db"
+UPLOAD_DIR = Path("uploads")
 logger = logging.getLogger(__name__)
 
 
-async def initialize_database(config: BaseConfig) -> None:
+async def initialize_database() -> None:
     """初始化資料庫和上傳目錄, 如果資料表不存在, 則建立它."""
     try:
         # 建立上傳目錄
-        config.UPLOAD_DIR.mkdir(exist_ok=True)
+        UPLOAD_DIR.mkdir(exist_ok=True)
 
-        async with aiosqlite.connect(config.DATABASE_FILE) as db:
+        async with aiosqlite.connect(DATABASE_FILE) as db:
             await db.execute(
                 """
             CREATE TABLE IF NOT EXISTS transcription_tasks (

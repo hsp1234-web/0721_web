@@ -6,8 +6,8 @@ from typing import Any, Dict
 import duckdb
 import pandas as pd
 
-from prometheus.core.clients.client_factory import ClientFactory
-from prometheus.core.logging.log_manager import LogManager
+from ..clients.client_factory import ClientFactory
+from ..logging.log_manager import LogManager
 
 logger = LogManager.get_instance().get_logger("DataEngine")
 

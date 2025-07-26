@@ -8,8 +8,8 @@ import numpy as np
 
 from deap import base, creator, tools
 
-from prometheus.services.backtesting_service import BacktestingService
-from prometheus.models.strategy_models import Strategy
+from .backtesting_service import BacktestingService
+from ..models.strategy_models import Strategy
 
 class EvolutionChamber:
     """

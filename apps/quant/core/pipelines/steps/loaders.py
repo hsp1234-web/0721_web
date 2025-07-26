@@ -10,8 +10,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
-from prometheus.core.pipelines.base_step import BaseETLStep, BaseStep
-from src.prometheus.core.clients.client_factory import ClientFactory
+from ..base_step import BaseETLStep, BaseStep
+from ...clients.client_factory import ClientFactory
 
 # --- 依賴管理的說明 ---
 # 理想情況下，`DatabaseManager` 和 `TaifexTick` 應該是 `core` 的一部分，

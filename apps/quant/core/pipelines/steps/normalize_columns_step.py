@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Dict, Any
 import logging
 
-from prometheus.core.pipelines.base_step import BaseStep
+from ..base_step import BaseStep
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
-from prometheus.core.clients.fred import FredClient
-from prometheus.core.config import ConfigManager
+from ..clients.fred import FredClient
+from ..config import ConfigManager
 
 import logging
 

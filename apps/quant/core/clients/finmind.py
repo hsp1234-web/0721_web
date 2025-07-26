@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 
 from .base import BaseAPIClient
-from prometheus.core.logging.log_manager import LogManager
+from ..logging.log_manager import LogManager
 
 logger = LogManager.get_instance().get_logger("FinMindClient")
 

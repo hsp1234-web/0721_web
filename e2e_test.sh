@@ -37,12 +37,13 @@ function cleanup() {
 # 設置 trap，確保在腳本退出時（無論成功或失敗）都會執行 cleanup 函式
 trap cleanup EXIT
 
-print_header "步驟 1: 安裝依賴套件"
-if [ -f "requirements.txt" ]; then
-    pip install --quiet -r requirements.txt
-    echo "依賴套件已安裝。"
+print_header "步驟 1: 安裝 E2E 測試依賴套件"
+if [ -f "requirements.e2e.txt" ]; then
+    pip install --quiet -r requirements.e2e.txt
+    echo "E2E 依賴套件已安裝。"
 else
-    echo "警告: 找不到 requirements.txt，跳過安裝步驟。"
+    echo "錯誤: 找不到 requirements.e2e.txt！"
+    exit 1
 fi
 
 print_header "步驟 2: 在背景啟動主應用程式"
@@ -66,14 +67,13 @@ echo "伺服器已成功啟動。"
 
 # --- 語音轉錄服務測試 ---
 print_header "步驟 2: 測試語音轉錄服務"
-# 檢查 fake_audio.mp3 是否存在
-if [ ! -f "fake_audio.mp3" ]; then
-    echo "錯誤: 找不到測試音檔 'fake_audio.mp3'。"
-    exit 1
-fi
+# --- 生成有效的測試音檔 ---
+TEST_AUDIO_FILE="test_audio.wav"
+echo "正在使用 ffmpeg 生成一個有效的測試音檔 ($TEST_AUDIO_FILE)..."
+ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t 1 -c:a pcm_s16le $TEST_AUDIO_FILE -y &> /dev/null
 
-echo "正在上傳測試音檔..."
-UPLOAD_RESPONSE=$(curl -s -X POST -F "file=@fake_audio.mp3" "$API_BASE_URL/api/transcriber/upload")
+echo "正在上傳測試音檔 ($TEST_AUDIO_FILE)..."
+UPLOAD_RESPONSE=$(curl -s -X POST -F "file=@$TEST_AUDIO_FILE;type=audio/wav" "$API_BASE_URL/api/transcriber/upload")
 
 if ! echo "$UPLOAD_RESPONSE" | grep -q "task_id"; then
     echo "錯誤: 上傳失敗！"

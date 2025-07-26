@@ -1,10 +1,10 @@
 import pandas as pd
-from prometheus.core.pipelines.base_step import BaseETLStep, BaseStep
-from prometheus.core.logging.log_manager import LogManager
+from ..base_step import BaseETLStep, BaseStep
+from ..logging.log_manager import LogManager
 import duckdb
 import os
 from typing import Dict, Any
-from src.prometheus.core.db.db_manager import DBManager
+from ..db.db_manager import DBManager
 
 
 class SaveFactorsToWarehouseStep(BaseETLStep):

@@ -2,12 +2,12 @@ import logging
 from datetime import datetime, timedelta
 
 import numpy as np
-from prometheus.core.logging.log_manager import LogManager
+from ..logging.log_manager import LogManager
 import pandas as pd
 import plotly.graph_objects as go
 
-from prometheus.core.clients.fred import FredClient
-from prometheus.core.clients.nyfed import NYFedClient
+from ..clients.fred import FredClient
+from ..clients.nyfed import NYFedClient
 
 logger = LogManager.get_instance().get_logger("StressIndexCalculator")
 

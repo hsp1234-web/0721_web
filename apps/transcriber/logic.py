@@ -1,98 +1,100 @@
-# 繁體中文: apps/transcriber/logic.py - 語音轉錄核心邏輯封裝
-
+# apps/transcriber/logic.py
 import uuid
-import aiofiles
-import aiosqlite
+import asyncio
+import multiprocessing
 from pathlib import Path
-from typing import Any, Dict, Optional
+from .queues import (
+    get_task_queue,
+    get_result_queue,
+    get_task_store,
+    get_result_store
+)
+from .transcriber_worker import run_transcription_worker_process
 
-from fastapi import UploadFile, HTTPException
+# --- 變數 ---
+# 使用 multiprocessing.Manager 來在不同進程間共享狀態
+# 這對於追蹤任務狀態至關重要
+_manager = multiprocessing.Manager()
+_task_store = get_task_store(_manager)
+_result_store = get_result_store(_manager)
 
-# 調整導入路徑
-from .core import BaseConfig, get_logger
-from .queues import add_task_to_queue
+# --- 背景工作者管理 ---
+worker_process = None
 
-logger = get_logger(__name__)
+def start_worker():
+    """在背景啟動轉錄工作者進程。"""
+    global worker_process
+    if worker_process is None or not worker_process.is_alive():
+        print("正在啟動語音轉錄背景工作者...")
+        task_queue = get_task_queue()
+        result_queue = get_result_queue()
+        # 注意：我們傳遞的是由 Manager 管理的共享字典
+        worker_process = multiprocessing.Process(
+            target=run_transcription_worker_process,
+            args=(task_queue, result_queue, _task_store, _result_store)
+        )
+        worker_process.start()
+        print(f"背景工作者已啟動，PID: {worker_process.pid}")
 
+def stop_worker():
+    """停止轉錄工作者進程。"""
+    global worker_process
+    if worker_process and worker_process.is_alive():
+        print("正在停止語音轉錄背景工作者...")
+        worker_process.terminate()
+        worker_process.join()
+        print("背景工作者已停止。")
+    _manager.shutdown()
 
-async def submit_transcription_task(file: UploadFile, config: BaseConfig) -> Dict[str, str]:
+# --- 任務管理 ---
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+async def create_transcription_task(file) -> str:
     """
-    處理檔案上傳，儲存檔案，並在資料庫中創建一個新的轉錄任務。
+    創建一個新的轉錄任務。
 
     Args:
-        file (UploadFile): 從 FastAPI 端點接收的上傳檔案。
-        config (BaseConfig): 當前的應用設定。
+        file: 上傳的檔案物件 (來自 FastAPI)。
 
     Returns:
-        Dict[str, str]: 包含新任務 ID 的字典。
-
-    Raises:
-        HTTPException: 如果檔案或資料庫操作失敗。
+        新任務的 ID。
     """
     task_id = str(uuid.uuid4())
+    # 安全地儲存上傳的檔案
+    file_path = UPLOAD_DIR / f"{task_id}_{file.filename}"
 
-    # 使用 pathlib 確保路徑操作的穩健性
-    filename = file.filename if file.filename else "unknown_file"
-    filepath = config.UPLOAD_DIR / f"{task_id}_{filename}"
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
 
-    try:
-        # 確保上傳目錄存在
-        config.UPLOAD_DIR.mkdir(exist_ok=True)
+    task_queue = get_task_queue()
+    task_data = {"task_id": task_id, "file_path": str(file_path)}
 
-        # 非同步寫入檔案
-        async with aiofiles.open(filepath, "wb") as out_file:
-            while content := await file.read(1024 * 1024):  # 1MB 區塊
-                await out_file.write(content)
-        logger.info("檔案 '%s' 已上傳至 '%s'", filename, filepath)
+    # 將任務加入佇列
+    task_queue.put(task_data)
 
-        # 在資料庫中記錄任務
-        async with aiosqlite.connect(config.DATABASE_FILE) as db:
-            await db.execute(
-                "INSERT INTO transcription_tasks (id, original_filepath) VALUES (?, ?)",
-                (task_id, str(filepath)),
-            )
-            await db.commit()
+    # 在共享的任務儲存中記錄任務狀態
+    _task_store[task_id] = {"status": "pending", "file_path": str(file_path)}
 
-        # 將任務加入處理佇列
-        await add_task_to_queue(task_id, config)
-        logger.info("任務已在資料庫中創建，ID: %s", task_id)
+    print(f"已創建轉錄任務: {task_id}")
+    return task_id
 
-    except IOError as e:
-        logger.exception("檔案操作失敗: %s", e)
-        raise HTTPException(status_code=500, detail="檔案操作失敗。") from e
-    except aiosqlite.Error as e:
-        logger.exception("資料庫操作失敗: %s", e)
-        raise HTTPException(status_code=500, detail="資料庫操作失敗。") from e
-
-    return {"task_id": task_id}
-
-
-async def get_task_status(task_id: str, config: BaseConfig) -> Optional[Dict[str, Any]]:
+def get_task_status(task_id: str) -> dict:
     """
-    根據任務 ID 查詢並返回任務的狀態和結果。
+    查詢轉錄任務的狀態和結果。
 
     Args:
-        task_id (str): 要查詢的任務 ID。
-        config (BaseConfig): 當前的應用設定。
+        task_id: 要查詢的任務 ID。
 
     Returns:
-        Optional[Dict[str, Any]]: 如果找到任務，返回包含任務詳情的字典，否則返回 None。
-
-    Raises:
-        HTTPException: 如果資料庫查詢失敗。
+        一個包含任務狀態和結果的字典。
     """
-    try:
-        async with aiosqlite.connect(config.DATABASE_FILE) as db:
-            db.row_factory = aiosqlite.Row  # 以字典形式返回結果
-            async with db.execute(
-                "SELECT * FROM transcription_tasks WHERE id = ?", (task_id,)
-            ) as cursor:
-                task_data = await cursor.fetchone()
+    # 檢查結果儲存區
+    if task_id in _result_store:
+        return _result_store[task_id]
 
-        if task_data:
-            return dict(task_data)
-        return None
+    # 如果還沒有結果，檢查原始任務儲存區
+    if task_id in _task_store:
+        return _task_store[task_id]
 
-    except aiosqlite.Error as e:
-        logger.exception("查詢任務狀態時出錯 (ID: %s): %s", task_id, e)
-        raise HTTPException(status_code=500, detail="查詢狀態時出錯。") from e
+    return {"status": "not_found"}

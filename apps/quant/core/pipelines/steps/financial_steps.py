@@ -1,5 +1,5 @@
-from prometheus.core.pipelines.base_step import BaseETLStep
-from prometheus.core.analysis.stress_index import StressIndexCalculator
+from ..base_step import BaseETLStep
+from ..analysis.stress_index import StressIndexCalculator
 import pandas as pd
 import logging
 from typing import Dict, Any
