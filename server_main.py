@@ -2,71 +2,66 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
-import sys
+import logging
+
+# --- 關鍵修改 v2.0 ---
+# 導入我們自己的日誌設定函式
+from logger.main import setup_markdown_logger
+
+# 從環境變數讀取由指揮中心注入的日誌路徑和檔名
+LOG_DIR = Path(os.environ.get('LOG_ARCHIVE_DIR', '/content/作戰日誌歸檔'))
+LOG_FILENAME = os.environ.get('LOG_FILENAME', 'fallback-log.md')
+
+# 在應用程式啟動前，立刻設定好我們的日誌系統
+setup_markdown_logger(log_dir=LOG_DIR, filename=LOG_FILENAME)
 
 # 建立 FastAPI 應用程式實例
 app = FastAPI(
     title="鳳凰之心-後端引擎",
     description="提供儀表板介面與核心 API 服務",
-    version="1.4.0"
+    version="2.0.0"
 )
 
-# --- 路徑解析與偵錯日誌 (維持不變) ---
-print("="*50, file=sys.stderr)
-print("🚀 伺服器路徑解析偵錯資訊 (v1.4)", file=sys.stderr)
+# 使用 logging 模組來記錄事件
+logger = logging.getLogger(__name__)
 
-BASE_DIR = None
-injected_path = os.environ.get('PHOENIX_HEART_ROOT')
-
-if injected_path:
-    print("   - ✅ 偵測到指揮中心注入的路徑。", file=sys.stderr)
-    BASE_DIR = Path(injected_path)
-else:
-    print("   - ⚠️ 未偵測到指揮中心注入的路徑，嘗試備用方案...", file=sys.stderr)
-    try:
-        BASE_DIR = Path(__file__).resolve().parent
-        print("   - ✅ 備用方案 1: 使用 __file__ 成功。", file=sys.stderr)
-    except NameError:
-        BASE_DIR = Path.cwd()
-        print("   - ✅ 備用方案 2: 使用 cwd() 成功。", file=sys.stderr)
-
-print(f"   - 計算出的基準目錄 (BASE_DIR): {BASE_DIR}", file=sys.stderr)
+# --- 路徑解析 ---
+BASE_DIR = Path(os.environ.get('PHOENIX_HEART_ROOT', Path.cwd()))
 templates_dir = BASE_DIR / "templates"
-print(f"   - 目標模板目錄: {templates_dir}", file=sys.stderr)
+logger.info(f"伺服器基準目錄 (BASE_DIR) 設定為: {BASE_DIR}")
+logger.info(f"正在從 {templates_dir} 載入模板...")
 
 if not templates_dir.is_dir():
-    print(f"   - ❌ 錯誤：在上述路徑找不到 'templates' 資料夾！", file=sys.stderr)
-else:
-    print(f"   - ✅ 成功找到 'templates' 資料夾。", file=sys.stderr)
-print("="*50, file=sys.stderr)
-# --- 偵錯日誌結束 ---
+    logger.critical(f"致命錯誤：在 {BASE_DIR} 中找不到 'templates' 資料夾！")
 
-
-# 設定模板引擎
 templates = Jinja2Templates(directory=str(templates_dir))
 
-# 掛載靜態檔案目錄
-static_path = BASE_DIR / "static"
-if static_path.is_dir():
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
+@app.on_event("startup")
+async def startup_event():
+    """應用程式啟動時執行的事件。"""
+    logger.info("FastAPI 應用程式啟動完成。")
+    logger.info("儀表板介面已準備就緒。")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """應用程式關閉時執行的事件。"""
+    logging.info("伺服器正在關閉...日誌歸檔結束。")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     """
     根路徑端點，回傳儀表板 HTML。
     """
+    logger.info(f"接收到來自 {request.client.host} 的儀表板請求。")
     return templates.TemplateResponse(
         "dashboard.html", {"request": request}
     )
 
 if __name__ == "__main__":
     port = int(os.environ.get("FASTAPI_PORT", 8000))
+    logger.info(f"準備在 http://0.0.0.0:{port} 上啟動 Uvicorn 伺服器。")
     
-    # --- 關鍵修正 v1.4 ---
-    # 將 reload=True 移除 (或設為 False)。
-    # reload 功能是開發模式專用，在 Colab 的生產/部署環境中會引起衝突。
-    # 移除後，Uvicorn 會以穩定、單一程序的方式啟動。
+    # 關鍵修正：移除 reload=True，使用穩定的生產模式啟動
     uvicorn.run("server_main:app", host="0.0.0.0", port=port)
