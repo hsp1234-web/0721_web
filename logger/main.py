@@ -1,108 +1,58 @@
 import logging
 import sys
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from pathlib import Path
 
-# 嘗試從 core.monitor 導入中央佇列。
-# 這樣做可以讓日誌系統與核心系統解耦，即使在沒有佇列的環境下也能獨立運作。
-try:
-    from core.monitor import SYSTEM_EVENTS_QUEUE
-except ImportError:
-    SYSTEM_EVENTS_QUEUE = None
+# 建立一個自訂的 Markdown 格式器
+class MarkdownFormatter(logging.Formatter):
+    """一個將日誌記錄格式化為 Markdown 的自訂格式器。"""
 
-class QueueHandler(logging.Handler):
+    # 為不同等級的日誌定義 Markdown 格式
+    FORMATS = {
+        logging.DEBUG: "- **DEBUG**: {message}",
+        logging.INFO: "- **INFO**: {message}",
+        logging.WARNING: "### ⚠️ 系統警告\n- **WARN**: {message}",
+        logging.ERROR: "### ❌ 嚴重錯誤\n- **ERROR**: {message}",
+        logging.CRITICAL: "### 🔥 致命錯誤\n- **CRITICAL**: {message}"
+    }
+
+    def format(self, record):
+        # 根據日誌等級選擇對應的格式
+        log_fmt = self.FORMATS.get(record.levelno, self._fmt)
+        formatter = logging.Formatter(log_fmt, style='{')
+        return formatter.format(record)
+
+def setup_markdown_logger(log_dir: Path, filename: str):
     """
-    一個自定義的日誌處理程序，它將日誌記錄放入 asyncio.Queue 中。
+    設定一個全域日誌器，將日誌以 Markdown 格式寫入指定檔案。
+
+    Args:
+        log_dir (Path): 存放日誌檔案的資料夾路徑。
+        filename (str): 日誌檔案的名稱 (例如 'log-2025-07-26.md')。
     """
-    def __init__(self, queue):
-        super().__init__()
-        self.queue = queue
+    log_dir.mkdir(exist_ok=True)
+    log_file_path = log_dir / filename
 
-    def emit(self, record: logging.LogRecord):
-        # 格式化日誌訊息
-        log_entry = self.format(record)
-
-        # 建立標準的事件負載 (payload)
-        log_payload = {
-            "type": "LOG_MESSAGE",
-            "timestamp": datetime.fromtimestamp(record.created, tz=ZoneInfo("Asia/Taipei")).isoformat(),
-            "data": {
-                "level": record.levelname.lower(),
-                "message": log_entry,
-                "source": record.name,
-            }
-        }
-
-        # 由於 logging 不是 async-native，我們不能在這裡 await
-        # 我們使用 thread-safe 的 put_nowait 方法
-        try:
-            self.queue.put_nowait(log_payload)
-        except Exception as e:
-            # 如果佇列已滿或發生其他錯誤，打印到 stderr
-            print(f"Failed to queue log message: {e}", file=sys.stderr)
-
-
-def setup_logger():
-    """
-    設定全域日誌記錄器。
-    它會將日誌同時輸出到控制台和中央事件佇列（如果可用）。
-    """
-    # 獲取根記錄器
+    # 取得根日誌器，並設定最低記錄等級
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    # 如果已經有處理程序，就先清除，防止重複設定
+    # 清除任何可能已存在的舊處理器，確保日誌不會重複輸出
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
-    # 1. 設定控制台輸出 (StreamHandler)
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    stream_handler.setFormatter(stream_formatter)
-    root_logger.addHandler(stream_handler)
+    # --- 檔案處理器：寫入到 .md 檔案 ---
+    file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
+    file_handler.setFormatter(MarkdownFormatter())
+    root_logger.addHandler(file_handler)
 
-    # 2. 設定中央佇列輸出 (QueueHandler)
-    if SYSTEM_EVENTS_QUEUE:
-        queue_handler = QueueHandler(SYSTEM_EVENTS_QUEUE)
-        # 我們可以為佇列設定更簡潔的格式，因為大部分元數據已經在 payload 中
-        queue_formatter = logging.Formatter('%(message)s')
-        queue_handler.setFormatter(queue_formatter)
-        root_logger.addHandler(queue_handler)
-        logging.info("Logger setup with Console and Queue handlers.")
-    else:
-        logging.info("Logger setup with Console handler only (Queue not available).")
+    # --- 主控台處理器：同時在終端機顯示日誌 (可選，方便即時偵錯) ---
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    root_logger.addHandler(console_handler)
 
-# 在模組導入時自動設定日誌記錄器
-setup_logger()
+    # 寫入日誌檔案的標題
+    with open(log_file_path, 'w', encoding='utf-8') as f:
+        f.write(f"# 鳳凰之心作戰日誌 - {filename.replace('.md', '')}\n\n")
+        f.write("## 系統啟動程序\n")
 
-# 使用範例 (如果直接執行此檔案):
-async def main_async():
-    import asyncio
-
-    if not SYSTEM_EVENTS_QUEUE:
-        print("SYSTEM_EVENTS_QUEUE not found. Cannot run this example.")
-        return
-
-    # 模擬從佇列讀取日誌
-    async def log_reader():
-        while True:
-            try:
-                item = await asyncio.wait_for(SYSTEM_EVENTS_QUEUE.get(), timeout=2.0)
-                print(f"--- Received from Queue ---> {item}")
-                SYSTEM_EVENTS_QUEUE.task_done()
-            except asyncio.TimeoutError:
-                print("Queue is empty. Exiting.")
-                break
-
-    # 產生一些測試日誌
-    logging.info("這是一條資訊日誌。")
-    logging.warning("這是一條警告日誌。")
-    logging.error("這是一條錯誤日誌。")
-
-    await log_reader()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main_async())
+    logging.info(f"日誌系統初始化完成，日誌將記錄於: {log_file_path}")
