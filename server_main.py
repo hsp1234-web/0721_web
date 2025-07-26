@@ -1,5 +1,3 @@
-#!
-
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -12,14 +10,15 @@ import os
 app = FastAPI(
     title="鳳凰之心-後端引擎",
     description="提供儀表板介面與核心 API 服務",
-    version="1.0.0"
+    version="1.1.0"
 )
 
-# 取得目前檔案所在的絕對路徑
-# 這能確保無論從哪裡執行腳本，都能正確找到 templates 和 static 資料夾
-BASE_DIR = Path(__file__).resolve().parent
+# --- 關鍵修正 v1.1 ---
+# 在 Colab 環境中，啟動腳本已確保我們在正確的專案目錄下。
+# 因此，我們可以直接使用當前工作目錄 (Current Working Directory) 作為基準路徑。
+# 這比依賴 `__file__` 在某些執行環境下更為可靠。
+BASE_DIR = Path.cwd()
 
-# --- 關鍵修正 ---
 # 1. 設定模板引擎，並告訴它去哪裡找 HTML 檔案 (在 'templates' 資料夾中)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
