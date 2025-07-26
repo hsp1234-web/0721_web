@@ -1,0 +1,56 @@
+[project]
+name = "src"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "google-labs-jules[bot]",email = "161369871+google-labs-jules[bot]@users.noreply.github.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+packages = [
+    { include = "src" },
+]
+dependencies = [
+    "uvicorn[standard] (>=0.35.0,<0.36.0)",
+    "aiofiles (>=24.1.0,<25.0.0)",
+    "fastapi (>=0.116.1,<0.117.0)",
+    "python-multipart (>=0.0.20,<0.0.21)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "pytest (>=8.4.1,<9.0.0)",
+    "websockets (>=15.0.1,<16.0.0)",
+    "pytest-asyncio",
+    "sqlalchemy (>=2.0.41,<3.0.0)",
+    "opencc-python-reimplemented (>=0.1.7,<0.2.0)",
+    "pluggy",
+    "pygments",
+    "iniconfig",
+    "idna",
+    "click",
+    "starlette",
+    "pydantic==2.5.3",
+    "pydantic-core==2.14.6",
+    "typing_extensions",
+    "typing-inspection",
+    "annotated-types",
+    "anyio",
+    "sniffio",
+    "h11",
+    "pytest-timeout",
+    "httpcore",
+    "certifi",
+    "pytest-xprocess"
+]
+
+[project.optional-dependencies]
+transcribe = ["torch", "faster-whisper"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 30
+pythonpath = [
+  "."
+]

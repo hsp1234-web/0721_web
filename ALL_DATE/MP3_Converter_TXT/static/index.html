@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>鳳凰錄音轉寫服務</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 2rem; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #4a4a4a; text-align: center; }
+        #drop-zone { border: 2px dashed #007bff; border-radius: 5px; padding: 3rem; text-align: center; transition: background-color 0.2s ease; }
+        #drop-zone.dragover { background-color: #e9f5ff; }
+        #file-input { display: none; }
+        .button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; transition: background-color 0.2s ease; }
+        .button:hover { background-color: #0056b3; }
+        #status { margin-top: 1.5rem; font-size: 1.1rem; text-align: center; color: #555; }
+        #progress-bar-container { width: 100%; background-color: #e0e0e0; border-radius: 5px; margin-top: 1rem; display: none; }
+        #progress-bar { width: 0%; height: 20px; background-color: #007bff; border-radius: 5px; text-align: center; color: white; line-height: 20px; }
+        #result { margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>鳳凰錄音轉寫服務</h1>
+        <div id="drop-zone">
+            <p>將音檔拖曳至此，或點擊按鈕選擇檔案</p>
+            <button class="button" onclick="document.getElementById('file-input').click()">選擇檔案</button>
+            <input type="file" id="file-input" accept="audio/*">
+        </div>
+        <div id="status">等待上傳...</div>
+        <div id="progress-bar-container">
+            <div id="progress-bar">0%</div>
+        </div>
+        <div id="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const statusDiv = document.getElementById('status');
+        const progressBarContainer = document.getElementById('progress-bar-container');
+        const progressBar = document.getElementById('progress-bar');
+        const resultDiv = document.getElementById('result');
+
+        let socket;
+
+        function connectWebSocket() {
+            socket = new WebSocket(`ws://${window.location.host}/ws`);
+
+            socket.onopen = () => {
+                console.log("WebSocket 連線已建立。");
+                statusDiv.textContent = "連線成功，請上傳檔案。";
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log("收到訊息:", data);
+
+                if (data.type === 'progress') {
+                    progressBarContainer.style.display = 'block';
+                    const percentage = Math.round(data.progress * 100);
+                    progressBar.style.width = percentage + '%';
+                    progressBar.textContent = percentage + '%';
+                    statusDiv.textContent = `轉寫中... (${data.message})`;
+                } else if (data.type === 'result') {
+                    statusDiv.textContent = "轉寫完成！";
+                    progressBar.style.width = '100%';
+                    progressBar.textContent = '100%';
+                    resultDiv.textContent = data.transcript;
+                    resultDiv.style.display = 'block';
+                    socket.close();
+                } else if (data.type === 'error') {
+                    statusDiv.textContent = `發生錯誤: ${data.message}`;
+                    progressBarContainer.style.display = 'none';
+                }
+            };
+
+            socket.onclose = () => {
+                console.log("WebSocket 連線已關閉。");
+                // 可以在此處嘗試重新連線
+            };
+
+            socket.onerror = (error) => {
+                console.error("WebSocket 錯誤:", error);
+                statusDiv.textContent = "WebSocket 連線錯誤。";
+            };
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            statusDiv.textContent = '檔案上傳中...';
+            progressBarContainer.style.display = 'none';
+            resultDiv.style.display = 'none';
+            resultDiv.textContent = '';
+
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'processing') {
+                    statusDiv.textContent = '檔案已接收，等待轉寫...';
+                    connectWebSocket(); // 在確認檔案開始處理後才連線
+                } else {
+                    statusDiv.textContent = `上傳失敗: ${data.detail}`;
+                }
+            })
+            .catch(error => {
+                console.error('上傳錯誤:', error);
+                statusDiv.textContent = '上傳失敗，請檢查後端服務是否運行。';
+            });
+        }
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                uploadFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                uploadFile(fileInput.files[0]);
+            }
+        });
+
+    </script>
+</body>
+</html>
