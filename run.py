@@ -1,219 +1,91 @@
-import asyncio
-import json
-import subprocess
-import sys
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                🏃 run.py Colab 專用儀表板 v3.0 🏃                  ║
+# ╠══════════════════════════════════════════════════════════════════╣
+# ║                                                                  ║
+# ║  【功能重構】                                                    ║
+# ║  1. **職責單一**: 此腳本現在只負責在 Colab 環境中啟動一個視覺化的 ║
+# ║     儀表板，不再啟動任何網頁伺服器。                             ║
+# ║  2. **核心整合**: 直接使用 `core` 模組中的 `PresentationManager`  ║
+# ║     和 `HardwareMonitor` 來管理畫面顯示與硬體監控。              ║
+# ║  3. **簡化依賴**: 移除了 `websockets`, `asyncio`, `subprocess` 等 ║
+# ║     不再需要的依賴。                                             ║
+# ║                                                                  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
 import time
-import webbrowser
-from threading import Thread
-import websockets
+import logging
 
-# --- 組態設定 ---
-HOST = "127.0.0.1"
-BOOT_PORT = 8001
-APP_PORT = 8000
-BOOT_WEBSOCKET_URL = f"ws://{HOST}:{BOOT_PORT}/ws/boot"
-APP_URL = f"http://{HOST}:{APP_PORT}"
+# --- 核心模組匯入 ---
+from core.presentation_manager import PresentationManager
+from core.monitor import HardwareMonitor
+from core.logging_config import setup_logger
 
-# --- 輔助函式 ---
-def print_header(title):
-    print("\n" + "="*60)
-    print(f"🎬 {title}")
-    print("="*60)
+def display_dashboard():
+    """
+    在 Colab 環境中顯示一個互動式儀表板。
+    """
+    # --- 1. 初始化 ---
+    # 設定一個基本的日誌系統，輸出到控制台
+    setup_logger()
 
-def print_success(message):
-    print(f"✅ {message}")
+    # 初始化視覺指揮官 (PresentationManager)
+    pm = PresentationManager(log_lines=15)
 
-def print_info(message):
-    print(f"ℹ️  {message}")
+    # 準備頂部靜態 HTML 內容
+    top_html = """
+    <div style="font-family: 'Courier New', monospace; background-color: #f0f0f0; padding: 15px; border-radius: 8px;">
+        <h1 style="color: #333;">🚀 鳳凰之心 - Colab 監控儀表板 🚀</h1>
+        <p style="color: #555;">這是一個純客戶端的監控畫面，用於展示系統狀態和日誌。</p>
+    </div>
+    """
 
-def print_warning(message):
-    print(f"⚠️  {message}")
+    # --- 2. 啟動畫面與監控 ---
+    pm.setup_layout(top_html)
 
-def print_error(message):
-    print(f"❌ {message}")
+    # 啟動硬體監控器，它會自動將資訊回報給 PresentationManager
+    monitor = HardwareMonitor(presentation_manager=pm, interval=1.0)
+    monitor.start()
 
-class BootstrapBroadcaster:
-    """一個簡單的 WebSocket 客戶端，用於向引導伺服器廣播事件。"""
-    def __init__(self, uri):
-        self.uri = uri
-        self.websocket = None
+    logging.info("儀表板啟動成功，視覺指揮官已接管畫面。")
+    logging.info("硬體監控已啟動，每秒更新一次。")
 
-    async def connect(self):
-        try:
-            self.websocket = await websockets.connect(self.uri)
-            print_success(f"成功連接到引導伺服器: {self.uri}")
-        except Exception as e:
-            print_error(f"無法連接到引導伺服器: {e}")
-            raise
-
-    async def broadcast(self, event: dict):
-        if not self.websocket:
-            print_error("廣播失敗：WebSocket 未連接。")
-            return
-        try:
-            await self.websocket.send(json.dumps(event))
-        except Exception as e:
-            print_error(f"廣播事件失敗: {e}")
-
-    async def close(self):
-        if self.websocket:
-            await self.websocket.close()
-            print_info("與引導伺服器的連線已關閉。")
-
-
-async def run_boot_sequence(broadcaster: BootstrapBroadcaster):
-    # ... [啟動序列內容不變] ...
-    print_header("開始直播啟動序列")
-    await asyncio.sleep(1) # 等待前端連線
-    steps = [
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '>>> 鳳凰之心 v14.0 最終定稿 啟動序列 <<<', 'type': 'header'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '===================================================', 'type': 'dim'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ 核心初始化完成', 'type': 'ok'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '⏳ 正在掃描硬體介面...', 'type': 'battle'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ 硬體掃描完成', 'type': 'ok'}},
-    ]
-    for step in steps:
-        await broadcaster.broadcast(step)
-        await asyncio.sleep(0.2)
-    await broadcaster.broadcast({'event_type': 'BOOT_STEP', 'payload': {'text': '--- 正在安裝核心依賴 ---', 'type': 'header'}})
-    await asyncio.sleep(0.5)
-    deps = [
-        {'name': 'fastapi', 'size': '1.2MB'},
-        {'name': 'uvicorn', 'size': '0.8MB'},
-        {'name': 'websockets', 'size': '0.5MB'},
-        {'name': 'psutil', 'size': '0.3MB'}
-    ]
-    for dep in deps:
-        await broadcaster.broadcast({'event_type': 'BOOT_PROGRESS_START', 'payload': {'name': dep['name'], 'size': dep['size']}})
-        for progress in range(0, 101, 10):
-            await broadcaster.broadcast({'event_type': 'BOOT_PROGRESS_UPDATE', 'payload': {'name': dep['name'], 'progress': progress}})
-            await asyncio.sleep(0.05)
-    print_info("依賴安裝直播完成。")
-    await broadcaster.broadcast({'event_type': 'BOOT_STEP', 'payload': {'text': '--- 正在執行系統預檢 ---', 'type': 'header'}})
-    await asyncio.sleep(0.5)
-    disk_check_rows = [
-        ['總空間', ':', '10.0 GB'],
-        ['已使用', ':', '6.0 GB'],
-        ['剩餘空間', ':', '<span class="highlight">4.0 GB</span>'],
-        ['套件需求', ':', '5.0 GB (大型語言模型 v2)'],
-        ['狀態', ':', '<span class="error">❌ 空間不足</span>']
-    ]
-    await broadcaster.broadcast({
-        'event_type': 'BOOT_TABLE',
-        'payload': {
-            'title': '🛡️ 大型套件磁碟空間預檢報告',
-            'rows': disk_check_rows
-        }
-    })
-    print_info("系統預檢直播完成。")
-    await asyncio.sleep(1)
-    final_steps = [
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '⏳ 啟動 FastAPI 引擎...', 'type': 'battle'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '✅ WebSocket 頻道 (/ws/dashboard) 已規劃', 'type': 'ok'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': f'✅ 主引擎將於 http://{HOST}:{APP_PORT} 上線', 'type': 'ok'}},
-        {'event_type': 'BOOT_STEP', 'payload': {'text': '\n<span class="ok">✨ 系統啟動完成，歡迎指揮官。</span>', 'type': 'raw'}},
-    ]
-    for step in final_steps:
-        await broadcaster.broadcast(step)
-        await asyncio.sleep(0.3)
-    await broadcaster.broadcast({'event_type': 'BOOT_COMPLETE'})
-    print_success("啟動序列直播完成！")
-
-def get_python_executable() -> str:
-    """獲取當前正在運行的 Python 解釋器路徑。"""
-    return sys.executable
-
-def stream_reader(stream, prefix):
-    """讀取並印出流的內容。"""
-    for line in iter(stream.readline, b''):
-        print(f"[{prefix}] {line.decode().strip()}")
-    stream.close()
-
-def launch_bootstrap_server():
-    """在背景啟動引導伺服器，並確保它使用正確的 Python 環境。"""
-    print_header("啟動引導伺服器")
+    # --- 3. 模擬日誌流 ---
+    # 這裡我們模擬一些來自不同系統模組的日誌訊息
     try:
-        python_executable = get_python_executable()
-        print_info(f"使用 Python 解釋器: {python_executable}")
-
-        cmd = [
-            python_executable,
-            "-m", "uvicorn",
-            "main:app",
-            "--host", HOST,
-            "--port", str(BOOT_PORT),
+        log_messages = [
+            ("INFO", "正在初始化量化分析模組..."),
+            ("INFO", "讀取歷史 K 線數據。"),
+            ("BATTLE", "策略 '海龜湯' 開始回測..."),
+            ("SUCCESS", "回測完成，夏普比率: 1.8。"),
+            ("INFO", "正在初始化語音轉錄模組..."),
+            ("BATTLE", "載入 Whisper 大型模型 (需要 5GB VRAM)..."),
+            ("SUCCESS", "模型載入成功，系統準備就緒。"),
+            ("WARNING", "偵測到磁碟空間低於 10%。"),
+            ("INFO", "等待新的指令..."),
         ]
-        print_info(f"正在執行命令: {' '.join(cmd)}")
-        server_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        print_success(f"引導伺服器已在背景啟動 (PID: {server_process.pid})。")
 
-        # 啟動線程來讀取輸出
-        Thread(target=stream_reader, args=(server_process.stdout, "UVICORN_OUT"), daemon=True).start()
-        Thread(target=stream_reader, args=(server_process.stderr, "UVICORN_ERR"), daemon=True).start()
+        for level, msg in log_messages:
+            # 使用 logging 模組來記錄，而不是直接呼叫 pm.add_log
+            # 這樣可以確保日誌同時被寫入檔案和顯示在儀表板上
+            logging.log(logging.getLevelName(level), msg)
+            time.sleep(0.8)
 
-        return server_process
-    except Exception as e:
-        print_error(f"啟動引導伺服器失敗: {e}")
-        return None
-
-def open_browser():
-    """打開瀏覽器以查看啟動畫面。"""
-    url = f"http://{HOST}:{BOOT_PORT}"
-    print_info(f"在瀏覽器中打開 {url} 以觀看啟動直播...")
-    try:
-        webbrowser.open(url)
-    except Exception:
-        print_warning("無法自動打開瀏覽器。請手動訪問以上網址。")
-
-
-def main():
-    """主執行函式。"""
-    server_process = launch_bootstrap_server()
-    if not server_process:
-        sys.exit(1)
-
-    # 等待伺服器完全啟動
-    time.sleep(4)
-    # 在背景線程中打開瀏覽器，避免阻塞主流程
-    Thread(target=open_browser, daemon=True).start()
-
-    broadcaster = BootstrapBroadcaster(BOOT_WEBSOCKET_URL)
-
-    async def main_async():
-        """將所有異步操作包裹在同一個事件循環中管理。"""
-        try:
-            await broadcaster.connect()
-            await run_boot_sequence(broadcaster)
-        except Exception as e:
-            print_error(f"執行異步任務時發生錯誤: {e}")
-        finally:
-            # 確保 close 操作在同一個事件循環中執行
-            await broadcaster.close()
-
-    try:
-        # 執行主要的異步邏輯
-        asyncio.run(main_async())
-
-        print_header("操作完成")
-        print_success("真實啟動序列已成功直播。")
-        print_info("引導伺服器將在 5 秒後自動關閉。")
-        time.sleep(5)
+        # 讓儀表板持續顯示 30 秒
+        logging.info("日誌模擬完成，儀表板將在 30 秒後關閉。")
+        time.sleep(30)
 
     except KeyboardInterrupt:
-        print_warning("\n偵測到手動中斷，正在清理資源...")
-    except Exception as e:
-        print_error(f"執行主函式時發生未知錯誤: {e}")
+        logging.warning("\n偵測到手動中斷，正在關閉儀表板...")
     finally:
-        # 在所有操作完成後，終止背景伺服器進程
-        if server_process.poll() is None: # 檢查進程是否仍在執行
-            server_process.terminate()
-            server_process.wait()
-            print_success("引導伺服器已關閉。")
+        # --- 4. 清理資源 ---
+        logging.info("正在停止硬體監控...")
+        monitor.stop()
 
+        logging.info("視覺指揮官正在釋放畫面控制權...")
+        pm.stop()
+
+        logging.info("儀表板已成功關閉。")
 
 if __name__ == "__main__":
-    main()
+    # 在 Colab 或類似的 Jupyter 環境中，直接呼叫此函式即可啟動儀表板
+    display_dashboard()

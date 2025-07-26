@@ -88,12 +88,12 @@ echo "✅ 依賴安裝完成。"
 echo "--- 步驟 3/5: 在後台啟動核心伺服器 ---"
 # 使用 nohup 在後台運行，並將日誌重定向
 # 現在可以直接呼叫 python，因為 venv 已經啟動
-nohup python server_main.py --host "$HOST" --port "$PORT" > "$SERVER_LOG_FILE" 2>&1 &
+nohup python server_main.py --host "$HOST" --port "$PORT" --no-reload > "$SERVER_LOG_FILE" 2>&1 &
 # 獲取後台進程的 PID 並寫入檔案
 SERVER_PID=$!
 echo "$SERVER_PID" > "$SERVER_PID_FILE"
 echo "✅ 伺服器已在後台啟動 (PID: $SERVER_PID)。正在等待其完全啟動..."
-sleep 10 # 等待 10 秒，確保所有資源（包括懶加載的模型）都已準備就緒
+sleep 15 # 等待 15 秒，確保所有資源（包括懶加載的模型）都已準備就緒
 
 # 4. 執行 API 測試
 echo "--- 步驟 4/5: 執行 API 端點測試 ---"

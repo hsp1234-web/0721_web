@@ -61,12 +61,10 @@ print_info "正在執行 'deptry' 依賴關係檢查... (暫時停用)"
 print_success "Deptry 依賴關係檢查完成。"
 
 
-# 6. 執行最終的啟動導演腳本
-print_header "步驟 6/7: 執行 'run.py' 進行最終視覺與功能驗證"
-print_info "這將啟動引導伺服器並打開瀏覽器來展示啟動動畫。"
-print_info "請觀察瀏覽器中的動畫是否符合預期。"
-# 明確使用虛擬環境中的 python 來執行腳本，確保依賴正確
-./.venv/bin/python run.py
+# 6. 執行 e2e 測試
+print_header "步驟 6/6: 執行端到端 (E2E) 測試"
+print_info "這將啟動伺服器並對 API 端點進行測試。"
+./e2e_test.sh
 
-print_header "步驟 7/7: 測試流程已全部完成！"
-print_success "如果瀏覽器中的啟動動畫正常顯示，則表示系統在全新環境下可成功部署與運行。"
+print_header "步驟 7/7: 設置流程已全部完成！"
+print_success "如果所有步驟都成功，則表示系統在全新環境下可成功部署與運行。"
