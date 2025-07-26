@@ -1,194 +1,64 @@
-import asyncio
 import logging
-from typing import List
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-
-from core.monitor import SYSTEM_EVENTS_QUEUE, PerformanceMonitor
-from core.presentation_manager import PresentationManager
-
-import importlib
-import os
+import sys
 from pathlib import Path
 
-# --- App Initialization ---
-app = FastAPI(title="鳳凰之心後端指揮中心")
-presentation_manager = PresentationManager()
-monitor = PerformanceMonitor(refresh_interval=1.0)
+# 移除舊的、未使用的日誌類別
+# class Logger: ...
 
-# --- Dynamic App Loading ---
-def load_app_routers():
-    """動態掃描 'apps' 目錄並載入所有子應用的 API 路由器。"""
-    apps_dir = Path("apps")
-    if not apps_dir.is_dir():
-        logging.warning("'apps' a directory not found, skipping dynamic router loading.")
-        return
+# --- 關鍵新增 v2.0 ---
+# 建立一個自訂的 Markdown 格式器
+class MarkdownFormatter(logging.Formatter):
+    """一個將日誌記錄格式化為 Markdown 的自訂格式器。"""
 
-    for entry in apps_dir.iterdir():
-        if entry.is_dir() and (entry / "main.py").is_file():
-            app_name = entry.name
-            try:
-                # 動態導入 'apps.{app_name}.main' 模組
-                module_name = f"apps.{app_name}.main"
-                module = importlib.import_module(module_name)
-                if hasattr(module, "router"):
-                    # 將子應用的路由器包含進主應用
-                    # 使用 app_name 作為前綴
-                    app.include_router(module.router, prefix=f"/{app_name}", tags=[app_name])
-                    logging.info(f"✅ Successfully loaded router from '{app_name}'.")
-                else:
-                    logging.warning(f"⚠️  Module '{module_name}' does not have a 'router' attribute.")
-            except Exception as e:
-                logging.error(f"❌ Failed to load router from '{app_name}': {e}", exc_info=True)
+    # 為不同等級的日誌定義 Markdown 格式
+    FORMATS = {
+        logging.DEBUG: "- **DEBUG**: {message}",
+        logging.INFO: "- **INFO**: {message}",
+        logging.WARNING: "### ⚠️ 系統警告\n- **WARN**: {message}",
+        logging.ERROR: "### ❌ 嚴重錯誤\n- **ERROR**: {message}",
+        logging.CRITICAL: "### 🔥 致命錯誤\n- **CRITICAL**: {message}"
+    }
 
-load_app_routers()
+    def format(self, record):
+        # 根據日誌等級選擇對應的格式
+        log_fmt = self.FORMATS.get(record.levelno, self._fmt)
+        formatter = logging.Formatter(log_fmt, style='{')
+        return formatter.format(record)
 
-# --- Connection Managers ---
-class ConnectionManager:
-    """管理一組活躍的 WebSocket 連線。"""
-    def __init__(self, name: str):
-        self.active_connections: List[WebSocket] = []
-        self.name = name
-        logging.info(f"'{self.name}' 連線管理器已初始化。")
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logging.info(f"[{self.name}] 新連線: {websocket.client}. 目前連線數: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logging.info(f"[{self.name}] 斷開連線: {websocket.client}. 目前連線數: {len(self.active_connections)}")
-
-    async def broadcast_json(self, payload: dict):
-        """將 JSON 負載廣播給所有連線中的客戶端。"""
-        if not self.active_connections:
-            return
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(payload)
-            except Exception as e:
-                logging.warning(f"[{self.name}] 廣播失敗: {e} for client {connection.client}")
-
-# 為不同的端點建立不同的管理器實例
-boot_manager = ConnectionManager("BootServer")
-dashboard_manager = ConnectionManager("Dashboard")
-
-# --- Background Task: Dashboard Event Broadcaster ---
-async def dashboard_event_broadcaster():
+def setup_markdown_logger(log_dir: Path, filename: str):
     """
-    這個背景任務負責處理儀表板的即時數據更新。
-    它從事件佇列中讀取事件，並將其廣播給所有連接到儀表板的客戶端。
+    設定一個全域日誌器，將日誌以 Markdown 格式寫入指定檔案。
+
+    Args:
+        log_dir (Path): 存放日誌檔案的資料夾路徑。
+        filename (str): 日誌檔案的名稱 (例如 'log-2025-07-26.md')。
     """
-    logging.info("儀表板事件廣播器已啟動...")
-    while True:
-        try:
-            event = await SYSTEM_EVENTS_QUEUE.get()
+    log_dir.mkdir(exist_ok=True)
+    log_file_path = log_dir / filename
 
-            if event["type"] == "PERFORMANCE_UPDATE":
-                stats_data = {
-                    "cpu": event.get("data", {}).get("cpu", 0),
-                    "ram": event.get("data", {}).get("ram", 0),
-                    "log": None,
-                    "time": event.get("timestamp"),
-                    "services": [
-                        {"name": "後端 FastAPI 引擎", "status": "ok"},
-                        {"name": "WebSocket 通訊頻道", "status": "ok"},
-                    ]
-                }
-                js_command = presentation_manager.get_dashboard_update_js(stats_data)
-                payload = {"action": "execute_js", "js_code": js_command}
-                await dashboard_manager.broadcast_json(payload)
+    # 取得根日誌器，並設定最低記錄等級
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO) # 只記錄 INFO 和更高等級的日誌
 
-            elif event["type"] == "LOG_MESSAGE":
-                 stats_data = {
-                    "log": event.get("data"),
-                    "time": event.get("timestamp"),
-                }
-                 js_command = presentation_manager.get_dashboard_update_js(stats_data)
-                 payload = {"action": "execute_js", "js_code": js_command}
-                 await dashboard_manager.broadcast_json(payload)
+    # 清除任何可能已存在的舊處理器，確保日誌不會重複輸出
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
 
+    # --- 檔案處理器：寫入到 .md 檔案 ---
+    file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
+    file_handler.setFormatter(MarkdownFormatter())
+    root_logger.addHandler(file_handler)
 
-            SYSTEM_EVENTS_QUEUE.task_done()
-        except Exception as e:
-            logging.error(f"儀表板廣播器發生錯誤: {e}", exc_info=True)
-            await asyncio.sleep(1)
+    # --- 主控台處理器：同時在終端機顯示日誌 (可選，方便即時偵錯) ---
+    console_handler = logging.StreamHandler(sys.stdout)
+    # 讓主控台輸出更簡潔
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    root_logger.addHandler(console_handler)
 
+    # 寫入日誌檔案的標題
+    with open(log_file_path, 'w', encoding='utf-8') as f:
+        f.write(f"# 鳳凰之心作戰日誌 - {filename.replace('.md', '')}\n\n")
+        f.write("## 系統啟動程序\n")
 
-# --- FastAPI App Events ---
-@app.on_event("startup")
-async def startup_event():
-    """在應用啟動時執行的動作。"""
-    logging.info("主應用程式啟動...")
-    # 啟動背景性能監控
-    monitor.start()
-    # 啟動背景事件廣播器
-    asyncio.create_task(dashboard_event_broadcaster())
+    logging.info(f"日誌系統初始化完成，日誌將記錄於: {log_file_path}")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """在應用關閉時執行的動作。"""
-    logging.info("後端應用程式關閉...")
-    await monitor.stop()
-
-
-# --- HTTP Routes ---
-@app.get("/", response_class=HTMLResponse)
-async def get_root():
-    """
-    提供主 HTML 頁面。
-    這個頁面包含了連接到引導伺服器的邏輯。
-    """
-    # 注意：我們不再從 PresentationManager 生成 HTML。
-    # HTML 現在是位於 templates/ 檔案夾中的一個靜態檔案。
-    # FastAPI 會自動尋找並提供這個檔案。
-    # 為了讓它運作，我們需要設定靜態檔案目錄。
-    try:
-        with open("templates/dashboard.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        return HTMLResponse(content="<h1>錯誤：找不到 templates/dashboard.html</h1>", status_code=500)
-
-
-# --- WebSocket Endpoints ---
-
-@app.websocket("/ws/boot")
-async def websocket_boot_endpoint(websocket: WebSocket):
-    """
-    此端點用於處理「啟動序列」的事件廣播。
-    它只接受連線，然後由後端（例如 run.py）單向廣播事件。
-    """
-    await boot_manager.connect(websocket)
-    try:
-        # 這個端點主要是被動的，等待後端廣播。
-        # 我們可以保持連線開放以接收廣播。
-        while True:
-            # 我們不需要從客戶端接收任何訊息，所以我們可以只是等待。
-            # receive_text() 會保持連線開放，直到客戶端斷開。
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        logging.warning(f"[BootServer] 客戶端斷開連線: {websocket.client}")
-    except Exception as e:
-        logging.error(f"[BootServer] WebSocket 發生錯誤: {e}", exc_info=True)
-    finally:
-        boot_manager.disconnect(websocket)
-
-
-@app.websocket("/ws/dashboard")
-async def websocket_dashboard_endpoint(websocket: WebSocket):
-    """
-    此端點用於處理啟動完成後的「儀表板」即時數據。
-    """
-    await dashboard_manager.connect(websocket)
-    try:
-        while True:
-            # 等待來自客戶端的訊息 (雖然目前我們不處理任何訊息)
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        logging.warning(f"[Dashboard] 客戶端斷開連線: {websocket.client}")
-    except Exception as e:
-        logging.error(f"[Dashboard] WebSocket 發生錯誤: {e}", exc_info=True)
-    finally:
-        dashboard_manager.disconnect(websocket)
