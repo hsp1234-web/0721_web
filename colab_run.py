@@ -213,7 +213,7 @@ def main_execution_logic(log_manager, stats, lock, log_lines_to_show):
             stats["light"] = "錯誤"; stats["task_status"] = f"發生致命錯誤！"
         log_manager.log("ERROR", f"主業務邏輯發生未預期錯誤: {e}")
 
-def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path, refresh_rate):
+def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path, refresh_rate=0.2):
     """專案啟動主函數，由 Colab 儲存格呼叫"""
     display_manager = None
     stats = {"task_status": "準備中...", "light": "正常", "app_url": "等待伺服器啟動..."}
