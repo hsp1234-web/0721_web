@@ -1,471 +1,265 @@
-# ==============================================================================
-#                      鳳凰之心 Colab 橋接器 (v15.0)
-#
-#   本腳本為在 Google Colab 環境中執行後端應用的核心。
-#   它被設計為由一個極簡的 Colab 儲存格觸發，接收參數後，
-#   負責處理所有複雜的任務，包括：
-#   - 動態 UI 渲染與日誌顯示
-#   - 安全的進程管理與生命週期控制
-#   - 動態路徑發現，避免硬編碼
-#   - 錯誤處理與最終日誌歸檔
-#
-# ==============================================================================
 
-# --- 標準函式庫 ---
+"""
+鳳凰之心 v17.0 - Colab 即時反應駕駛艙
+=======================================
+此腳本為 Google Colab 環境的專用入口點，採用「介面優先」架構。
+
+核心流程:
+1.  **瞬間響應**: 立即渲染 HTML 駕駛艙介面，為使用者提供即時反饋。
+2.  **後台執行**: 在獨立線程中處理所有耗時任務 (安裝依賴、啟動伺服器)。
+3.  **即時串流**: 將安裝過程的每一行輸出即時串流到前端的「啟動畫面」。
+4.  **無縫切換**: 任務完成後，自動將前端從「啟動畫面」切換為「主儀表板」，並開始推送即時系統狀態。
+"""
+
+import asyncio
+import json
+import logging
 import os
-import sqlite3
+import queue
 import subprocess
 import sys
 import threading
 import time
-import traceback
-import uuid
-from datetime import datetime
 from pathlib import Path
 
-import psutil
-from zoneinfo import ZoneInfo
-import collections
-
-# --- Colab 專用模組 ---
+# 確保在 Colab 環境中運行
 try:
-    from google.colab import output as colab_output
-    from IPython.display import HTML, Javascript, clear_output, display
+    from IPython import get_ipython
+    from IPython.display import Javascript, display, HTML
+    if 'google.colab' not in sys.modules:
+        raise ImportError("Not in Google Colab")
 except ImportError:
-    print("警告：未能導入 Colab 專用模組。此腳本可能無法在非 Colab 環境中正確顯示 UI。")
-    # 提供備用方案，以防在本地環境執行
-    class DummyDisplay:
-        def display(self, *args, **kwargs): pass
-        def html(self, *args, **kwargs): pass
-        def javascript(self, *args, **kwargs): pass
-        # 讓 clear_output 成為一個可呼叫的物件，即使它什麼都不做
-        def clear_output(self, wait=False): pass
+    print("❌ 致命錯誤：此腳本僅設計用於 Google Colab 環境。")
+    sys.exit(1)
 
-    dummy_display_instance = DummyDisplay()
-    display = dummy_display_instance.display
-    HTML = dummy_display_instance.html
-    Javascript = dummy_display_instance.javascript
-    clear_output = dummy_display_instance.clear_output
-    class DummyColabOutput:
-        def redirect_to_element(self, *args, **kwargs): return self
-        def clear(self): pass
-        def serve_kernel_port_as_iframe(self, *args, **kwargs): pass
-        def __enter__(self): pass
-        def __exit__(self, *args): pass
-    colab_output = DummyColabOutput()
+# --- 全域設定與日誌樣式 ---
+LOG_LEVEL_STYLES = {
+    'DEBUG': {'icon': '🐛', 'level': 'DEBUG'},
+    'INFO': {'icon': '✨', 'level': 'INFO'},
+    'WARNING': {'icon': '🟡', 'level': 'WARN'},
+    'ERROR': {'icon': '🔴', 'level': 'ERROR'},
+    'CRITICAL': {'icon': '🔥', 'level': 'CRITICAL'},
+    'BATTLE': {'icon': '⚡', 'level': 'BATTLE'},
+    'SUCCESS': {'icon': '✅', 'level': 'SUCCESS'},
+    'SECURITY': {'icon': '🛡️', 'level': 'SECURITY'},
+}
 
-# ==============================================================================
-# SECTION 0: 動態路徑與全域設定
-# ==============================================================================
-# 以此腳本自身位置為錨點，動態計算所有路徑
-try:
-    SCRIPT_PATH = Path(__file__).resolve()
-    PROJECT_ROOT = SCRIPT_PATH.parent
-except NameError:
-    # 如果在非標準執行環境（如某些 Notebook）中 __file__ 未定義，則使用當前工作目錄
-    PROJECT_ROOT = Path(os.getcwd()).resolve()
+# --- 核心類別 ---
 
-TAIPEI_TZ = ZoneInfo("Asia/Taipei")
-STOP_EVENT = threading.Event()
-SERVER_PROCESS = None
-UI_INSTANCE_ID = f"phoenix-ui-{uuid.uuid4().hex[:8]}"
+class UvicornLogHandler(logging.Handler):
+    """攔截 uvicorn 日誌並將其格式化後放入佇列。"""
+    def __init__(self, log_queue):
+        super().__init__()
+        self.log_queue = log_queue
 
-# ==============================================================================
-# SECTION 1: 後端日誌管理器
-# ==============================================================================
-class LogManager:
-    """負責將日誌安全地寫入中央 SQLite 資料庫。"""
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.lock = threading.Lock()
-        self._create_table()
-
-    def _get_connection(self):
-        return sqlite3.connect(self.db_path, timeout=10)
-
-    def _create_table(self):
-        with self.lock:
-            try:
-                with self._get_connection() as conn:
-                    conn.execute("""
-                    CREATE TABLE IF NOT EXISTS logs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        level TEXT NOT NULL,
-                        message TEXT NOT NULL
-                    );
-                    """)
-                    conn.commit()
-            except Exception as e:
-                print(f"CRITICAL DB TABLE CREATION ERROR: {e}", file=sys.stderr)
-
-    def log(self, level, message):
-        ts = datetime.now(TAIPEI_TZ).isoformat()
-        with self.lock:
-            try:
-                with self._get_connection() as conn:
-                    conn.execute(
-                        "INSERT INTO logs (timestamp, level, message) VALUES (?, ?, ?);",
-                        (ts, level, message)
-                    )
-                    conn.commit()
-            except Exception as e:
-                print(f"CRITICAL DB LOGGING ERROR: {e}", file=sys.stderr)
-
-# ==============================================================================
-# SECTION 2: 精準指示器 (Precision Indicator)
-# ==============================================================================
-class PrecisionIndicator:
-    """
-    v82.0 精準指示器介面。
-    採用雙區塊、分離刷新策略，提供高效且無閃爍的終端監控體驗。
-    - 高頻區 (Live Indicator): 即時顯示系統狀態，快速更新。
-    - 低頻區 (Situation Report): 僅在出現關鍵日誌時刷新，減少資源消耗。
-    """
-    def __init__(self, log_manager, stats_dict):
-        """
-        初始化指示器。
-        :param log_manager: 後端日誌管理器實例。
-        :param stats_dict: 一個共享的字典，用於跨執行緒傳遞即時狀態。
-        """
-        self.log_manager = log_manager
-        self.stats_dict = stats_dict
-        self.stop_event = threading.Event()
-        self.activated = threading.Event() # 新增的啟動事件
-        self.render_thread = threading.Thread(target=self._run, daemon=True)
-        # 使用 deque 作為日誌緩衝區，設定最大長度
-        self.log_deque = collections.deque(maxlen=50)
-
-    def start(self):
-        """啟動背景渲染執行緒。"""
-        self.render_thread.start()
-
-    def activate(self):
-        """活化渲染迴圈，允許其開始繪製。"""
-        self.activated.set()
-
-    def stop(self):
-        """設置停止事件並等待執行緒安全退出。"""
-        self.stop_event.set()
-        self.render_thread.join()
-
-    # 將 INFO 也視為關鍵日誌，以便在儀表板上顯示啟動過程
-    KEY_LOG_LEVELS = {"SUCCESS", "ERROR", "CRITICAL", "BATTLE", "WARNING", "INFO"}
-
-    def log(self, level, message):
-        """
-        接收新的日誌訊息。
-        所有日誌都無條件傳遞給後端儲存，但只有關鍵日誌會觸發 UI 重繪。
-        """
-        # 步驟 1: 無條件寫入後端日誌，這是記錄的真相來源
-        self.log_manager.log(level, message)
-
-        # 步驟 2: 判斷是否為關鍵日誌，以決定是否更新 UI
-        if level.upper() in self.KEY_LOG_LEVELS:
-            # 獲取當前時間
-            timestamp = datetime.now(TAIPEI_TZ)
-            # 將日誌元組存入 deque，供下一次渲染使用
-            self.log_deque.append((timestamp, level, message))
-
-    def _create_progress_bar(self, percentage, length=10):
-        """根據百分比生成一個文字進度條。"""
-        filled_length = int(length * percentage / 100)
-        bar = '█' * filled_length + '░' * (length - filled_length)
-        return f"[{bar}] {percentage:5.1f}%"
-
-    def _render_top_panel(self):
-        """渲染儀表板的頂部面板，包含資源監控和服務狀態。"""
-        cpu_perc = self.stats_dict.get('cpu', 0.0)
-        ram_perc = self.stats_dict.get('ram', 0.0)
-        fastapi_status = self.stats_dict.get('fastapi_status', '⏳')
-        websocket_status = self.stats_dict.get('websocket_status', '⏳')
-        db_status = self.stats_dict.get('db_status', '⏳')
-        db_latency = self.stats_dict.get('db_latency', 'N/A')
-
-        cpu_bar = self._create_progress_bar(cpu_perc)
-        ram_bar = self._create_progress_bar(ram_perc)
-
-        line1 = "│┌─ ⚙️ 即時資源監控 ───────────┐ ┌─ 🌐 核心服務狀態 ───────────┐│"
-        line2 = f"││ CPU: {cpu_bar}   │ │ {fastapi_status} 後端 FastAPI 引擎        ││"
-        line3 = f"││ RAM: {ram_bar}   │ │ {websocket_status} WebSocket 通訊頻道       ││"
-        line4 = (f"││                           │ │ {db_status} 日誌資料庫 "
-                 f"(延遲: {db_latency: <5}) ││")
-        line5 = "│└───────────────────────────┘ └───────────────────────────┘│"
-        header = ("┌" + "─" * 35 + " 鳳凰之心 v14.0 駕駛艙 " + "─" * 35 + "┐")
-
-        return "\n".join([header, line1, line2, line3, line4, line5])
-
-    def _render_log_panel(self):
-        """渲染儀表板的日誌面板。"""
-        header = "├" + "─" * 30 + " 近況彙報 (最新 5 條) " + "─" * 30 + "┤"
-        log_styles = {
-            "SUCCESS": ("\x1b[32m", "✅"), "ERROR": ("\x1b[31m", "🔴"),
-            "CRITICAL": ("\x1b[91m", "🔥"), "WARNING": ("\x1b[33m", "🟡"),
-            "BATTLE": ("\x1b[34m", "⚡"), "INFO": ("\x1b[37m", "✨"),
-            "DEFAULT": ("\x1b[0m", "🔹")
+    def emit(self, record):
+        msg = record.getMessage()
+        level = record.levelname
+        
+        # 忽略嘈雜的存取日誌，除非是錯誤
+        if "GET /" in msg and record.status_code in [200, 304]:
+            return
+            
+        log_entry = {
+            "ts": time.strftime('%H:%M:%S'),
+            "icon": LOG_LEVEL_STYLES.get(level, {}).get('icon', '📝'),
+            "level": LOG_LEVEL_STYLES.get(level, {}).get('level', level),
+            "msg": msg,
         }
-        lines = []
-        num_logs = 5
-        recent_logs = list(self.log_deque)[-num_logs:]
+        self.log_queue.put(log_entry)
 
-        for i in range(num_logs):
-            if i < len(recent_logs):
-                timestamp, level, message = recent_logs[i]
-                color, icon = log_styles.get(level.upper(), log_styles["DEFAULT"])
-                reset_color = log_styles["DEFAULT"][0]
-                ts_str = timestamp.strftime('%H:%M:%S')
-                level_str = f"[{level.upper():^7}]"
-                max_msg_len = 58
-                if len(message) > max_msg_len:
-                    message_str = message[:max_msg_len] + '...'
-                else:
-                    message_str = message
-                line = (f"│[{ts_str}] {color}{level_str}{reset_color} {icon} "
-                        f"{message_str:<61}│")
-                lines.append(line)
-            else:
-                lines.append("│" + " " * 78 + "│")
+class SystemMonitor:
+    """監控系統資源 (CPU, RAM) 和服務進程。"""
+    def __init__(self):
+        self.psutil = None
+        self.server_process = None
 
-        footer = "└" + "─" * 78 + "┘"
-        return "\n".join([header] + lines + [footer])
-
-    def _render_status_bar(self):
-        """渲染儀表板底部的狀態欄。"""
-        bg_color = "\x1b[44m"
-        reset = "\x1b[0m"
-        cpu_perc = self.stats_dict.get('cpu', 0.0)
-        ram_perc = self.stats_dict.get('ram', 0.0)
-        system_status = self.stats_dict.get('system_status', '系統狀態未知')
-        time_str = datetime.now(TAIPEI_TZ).strftime('%H:%M:%S')
-        status_line = (f" CPU: {cpu_perc:5.1f}% | RAM: {ram_perc:5.1f}% | "
-                       f"{system_status} | {time_str} ")
-        padded_line = status_line.ljust(80)
-        return f"{bg_color}{padded_line}{reset}"
-
-    def _run(self):
-        """
-        背景渲染執行緒的主迴圈。
-        負責以固定頻率重繪整個儀表板。
-        """
-        self.activated.wait()
-        while not self.stop_event.is_set():
-            try:
-                clear_output(wait=True)
-                top_panel = self._render_top_panel()
-                log_panel = self._render_log_panel()
-                status_bar = self._render_status_bar()
-                full_screen = f"{top_panel}\n{log_panel}\n{status_bar}"
-                print(full_screen, end="", flush=True)
-            except Exception as e:
-                print(f"儀表板渲染錯誤: {e}")
-            time.sleep(0.2)
-
-# ==============================================================================
-# SECTION 3: 核心輔助函式
-# ==============================================================================
-def execute_and_stream(cmd, cwd, system_log):
-    env = os.environ.copy()
-    project_root_str = str(cwd)
-    python_path = env.get("PYTHONPATH", "")
-    if project_root_str not in python_path.split(os.pathsep):
-        env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{python_path}"
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        cwd=cwd,
-        bufsize=1,
-        env=env
-    )
-    def stream_logger(stream, level):
+    def load_psutil(self):
+        """延遲載入 psutil。"""
         try:
-            for line in iter(stream.readline, ''):
-                if line:
-                    system_log(level, line.strip())
-        finally:
-            stream.close()
-    threading.Thread(
-        target=stream_logger, args=(process.stdout, "INFO"), daemon=True
-    ).start()
-    threading.Thread(
-        target=stream_logger, args=(process.stderr, "ERROR"), daemon=True
-    ).start()
-    return process
+            import psutil
+            self.psutil = psutil
+            return True
+        except ImportError:
+            return False
 
-def create_public_portal(port, system_log):
-    """將後端服務的埠號透過 Colab 的代理暴露出來。"""
-    system_log("BATTLE", f"正在透過 Colab 代理暴露服務 (埠號: {port})...")
-    try:
-        colab_output.serve_kernel_port_as_iframe(port, width='100%', height='500')
-        system_log("SUCCESS", "服務連結已生成。")
-    except Exception as e:
-        system_log("CRITICAL", f"透過 Colab 代理暴露服務失敗: {e}")
-
-def terminate_process_tree(pid, system_log):
-    """使用 psutil 遞歸地終止一個進程及其所有子進程。"""
-    try:
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        for child in children:
-            system_log("INFO", f"正在終止子進程 (PID: {child.pid})...")
-            child.terminate()
-        gone, alive = psutil.wait_procs(children, timeout=3)
-        for p in alive:
-            system_log("WARNING", f"子進程 (PID: {p.pid}) 未能溫和終止，將強制結束。")
-            p.kill()
-        system_log("INFO", f"正在終止主進程 (PID: {parent.pid})...")
-        parent.terminate()
-        parent.wait(timeout=5)
-        system_log("SUCCESS", f"進程樹 (PID: {pid}) 已成功終止。")
-    except psutil.NoSuchProcess:
-        system_log("INFO", f"嘗試終止進程 (PID: {pid}) 時，發現它已不存在。")
-    except psutil.TimeoutExpired:
-        system_log("WARNING", f"主進程 (PID: {pid}) 未能溫和終止，將強制結束。")
-        parent.kill()
-    except Exception as e:
-        system_log("CRITICAL", f"終止進程樹時發生未預期的錯誤: {e}")
-
-def archive_final_log(db_path, archive_dir, log_manager, filename_prefix="作戰日誌"):
-    log_manager.log("INFO", "正在生成最終作戰報告...")
-    if not db_path or not db_path.is_file():
-        log_manager.log("WARNING", f"找不到日誌資料庫 ({db_path})，無法歸檔。")
-        return
-    try:
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        now = datetime.now(TAIPEI_TZ)
-        archive_filename = f"{filename_prefix}_{now.strftime('%Y-%m-%d_%H-%M-%S')}.txt"
-        archive_filepath = archive_dir / archive_filename
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            logs = conn.execute(
-                "SELECT timestamp, level, message FROM logs ORDER BY id ASC"
-            ).fetchall()
-        with open(archive_filepath, 'w', encoding='utf-8') as f:
-            f.write("--- 鳳凰之心作戰日誌 v15.0 ---\n")
-            f.write(f"報告生成時間: {now.isoformat()}\n")
-            f.write("--------------------------------------------------\n\n")
-            for ts, lvl, msg in logs:
-                f.write(f"[{ts}] [{lvl.upper():<8}] {msg}\n")
-        log_manager.log("SUCCESS", f"完整日誌已歸檔至: {archive_filepath}")
-    except Exception as e:
-        log_manager.log("ERROR", f"歸檔日誌時發生錯誤: {e}")
-        log_manager.log("ERROR", traceback.format_exc())
-
-# ==============================================================================
-# SECTION 4: 作戰主流程 (進入點)
-# ==============================================================================
-def main(config: dict):
-    """
-    Colab 橋接器的主要進入點函式。
-    接收來自 Colab 儲存格的設定，並執行完整的後端啟動與監控流程。
-    """
-    global SERVER_PROCESS, STOP_EVENT, UI_INSTANCE_ID
-    log_manager = None
-    indicator = None
-    sqlite_db_path = None
-    stats_dict = {}
-    is_test_mode = os.environ.get("PHOENIX_TEST_MODE") == "1"
-
-    try:
-        archive_folder_name = config.get("archive_folder_name", "作戰日誌歸檔")
-        fastapi_port = config.get("fastapi_port", 8000)
-        sqlite_db_path = PROJECT_ROOT / "logs.sqlite"
-        if sqlite_db_path.exists():
-            sqlite_db_path.unlink()
-        log_manager = LogManager(sqlite_db_path)
-
-        if is_test_mode:
-            def plain_logger(level, message):
-                print(f"TEST_LOG: [{level}] {message}", flush=True)
-                log_manager.log(level, message)
-            system_log = plain_logger
-        else:
-            indicator = PrecisionIndicator(log_manager=log_manager, stats_dict=stats_dict)
-            system_log = indicator.log
-            indicator.start()
-
-        system_log("INFO", f"專案根目錄 (動態偵測): {PROJECT_ROOT}")
-        system_log("INFO", f"日誌資料庫將建立於: {sqlite_db_path}")
-        system_log("BATTLE", "作戰流程啟動：正在安裝/驗證專案依賴...")
-        uv_manager_path = PROJECT_ROOT / "uv_manager.py"
-        if not uv_manager_path.is_file():
-            system_log("WARNING", "未找到 'uv_manager.py'，將執行備用安裝流程。")
-            system_log("INFO", "正在安裝 'uv' 工具...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "uv"],
-                check=True, capture_output=True, text=True
-            )
-            system_log("INFO", "正在使用 'uv' 安裝 'requirements.txt'...")
-            install_process = execute_and_stream(
-                ["uv", "pip", "install", "-r", "requirements.txt"],
-                PROJECT_ROOT, system_log
-            )
-        else:
-            install_process = execute_and_stream(
-                [sys.executable, "uv_manager.py"], PROJECT_ROOT, system_log
-            )
-        install_process.wait()
-        if install_process.returncode != 0:
-            raise RuntimeError("依賴安裝失敗，請檢查日誌輸出以了解詳細原因。作戰終止。")
-        system_log("SUCCESS", "專案依賴已成功配置。")
-
-        system_log("BATTLE", "正在啟動主應用伺服器...")
-        SERVER_PROCESS = execute_and_stream(
-            [sys.executable, "server_main.py", "--port", str(fastapi_port), "--host", "0.0.0.0"],
-            PROJECT_ROOT, system_log
+    def start_server(self, port, log_queue):
+        """在背景啟動 FastAPI 伺服器。"""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path.cwd())
+        cmd = [sys.executable, "server_main.py", "--port", str(port)]
+        
+        self.server_process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', bufsize=1
         )
 
-        system_log("INFO", "準備啟動儀表板...")
-        if indicator:
-            indicator.activate()
+        # 為伺服器輸出建立一個監聽線程
+        threading.Thread(target=self._log_server_output, args=(log_queue,), daemon=True).start()
 
-        system_log("INFO", "等待 10 秒以確保伺服器完全啟動...")
-        time.sleep(10)
-        create_public_portal(fastapi_port, system_log)
-        system_log("SUCCESS", "作戰系統已上線！要停止所有服務並歸檔日誌，請中斷此儲存格的執行。")
+    def _log_server_output(self, log_queue):
+        """讀取伺服器進程的輸出並放入日誌佇列。"""
+        for line in iter(self.server_process.stdout.readline, ''):
+            log_entry = {
+                "ts": time.strftime('%H:%M:%S'),
+                "icon": "🚀", "level": "ENGINE",
+                "msg": line.strip(),
+            }
+            log_queue.put(log_entry)
 
-        while SERVER_PROCESS.poll() is None:
-            if STOP_EVENT.is_set():
-                break
+    def get_status(self):
+        """獲取系統和服務的當前狀態。"""
+        if not self.psutil:
+            return {"cpu": 0, "ram": 0, "services": []}
+
+        services = [
+            {"name": "後端 FastAPI 引擎", "status": "ok" if self.server_process and self.server_process.poll() is None else "error"},
+            {"name": "WebSocket 通訊頻道", "status": "ok"},
+            {"name": "日誌資料庫", "status": "ok"},
+        ]
+        return {"cpu": self.psutil.cpu_percent(), "ram": self.psutil.virtual_memory().percent, "services": services}
+
+    def stop_server(self):
+        """停止伺服器進程。"""
+        if self.server_process and self.server_process.poll() is None:
+            self.server_process.terminate()
             try:
-                stats_dict['cpu'] = psutil.cpu_percent()
-                stats_dict['ram'] = psutil.virtual_memory().percent
-                stats_dict.setdefault('progress_label', '系統運行中')
-            except psutil.Error:
-                stats_dict['cpu'] = -1.0
-                stats_dict['ram'] = -1.0
-            time.sleep(1)
+                self.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.server_process.kill()
 
-        if SERVER_PROCESS.poll() is not None and SERVER_PROCESS.returncode != 0:
-            system_log("CRITICAL", f"後端進程意外終止，返回碼: {SERVER_PROCESS.returncode}")
+class DashboardManager:
+    """管理 HTML 儀表板的渲染和數據更新。"""
+    def __init__(self, config):
+        self.config = config
+        self.log_queue = queue.Queue()
+        self.monitor = SystemMonitor()
+        self._stop_event = threading.Event()
+        self.fastapi_url = f"http://127.0.0.1:{config['fastapi_port']}"
 
-    except KeyboardInterrupt:
-        if 'system_log' in locals() and callable(system_log):
-            system_log("WARNING", "\n[偵測到使用者手動中斷請求...正在準備安全關閉...]")
+    def _js_call(self, function_name, *args):
+        """輔助函數，用於安全地呼叫前端的 JavaScript 函數。"""
+        try:
+            json_args = [json.dumps(arg) for arg in args]
+            js_code = f"window.{function_name}({', '.join(json_args)})"
+            display(Javascript(js_code))
+        except Exception:
+            pass # 忽略在非活躍儲存格中的 JS 呼叫錯誤
+
+    def _install_dependencies(self):
+        """使用 uv 安裝依賴並通過 JS 顯示進度。"""
+        self._js_call('bootLog', '<span class="header">&gt;&gt;&gt; 鳳凰之心 v17.0 駕駛艙啟動序列 &lt;&lt;&lt;</span>')
+        
+        try:
+            # 1. 安裝 uv
+            self._js_call('bootLog', '<span class="info">安裝 uv 加速器...</span>')
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "uv"], check=True)
+            
+            # 2. 使用 uv 安裝依賴
+            requirements_path = "requirements.txt"
+            self._js_call('bootLog', f'<span class="info">使用 uv 安裝 {requirements_path}...</span>')
+            cmd = ["uv", "pip", "install", "-r", requirements_path]
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+
+            for line in iter(process.stdout.readline, ''):
+                self._js_call('bootLog', f'<span class="dim">{line.strip()}</span>')
+            
+            process.wait()
+            if process.returncode == 0:
+                self._js_call('bootLog', '<span class="ok">✅ 所有依賴已成功安裝。</span>')
+                return True
+            else:
+                self._js_call('bootLog', f'<span class="error">❌ 依賴安裝失敗，返回碼: {process.returncode}</span>')
+                return False
+        except Exception as e:
+            self._js_call('bootLog', f'<span class="error">❌ 安裝過程中發生嚴重錯誤: {e}</span>')
+            return False
+
+    def _work_thread_main(self):
+        """在背景線程中執行的主工作流程。"""
+        # 步驟 1: 安裝依賴
+        if not self._install_dependencies():
+            return
+
+        # 步驟 2: 載入 psutil
+        if not self.monitor.load_psutil():
+            self._js_call('bootLog', '<span class="warn">⚠️ psutil 未能載入，資源監控將不可用。</span>')
+        
+        # 步驟 3: 啟動後端伺服器
+        self._js_call('bootLog', '<span class="battle">⏳ 正在啟動後端 FastAPI 引擎...</span>')
+        self.monitor.start_server(self.config['fastapi_port'], self.log_queue)
+        time.sleep(4) # 給予伺服器啟動時間
+
+        if self.monitor.server_process.poll() is not None:
+            self._js_call('bootLog', '<span class="error">❌ 引擎啟動失敗，請檢查日誌。</span>')
+            return
+        
+        self._js_call('bootLog', f'<span class="ok">✅ 引擎已上線: {self.fastapi_url}</span>')
+        self._js_call('bootLog', '<span class="ok">✨ 系統啟動完成，歡迎指揮官。</span>')
+        time.sleep(2)
+
+        # 步驟 4: 啟動主更新迴圈
+        self._update_loop()
+
+    def _update_loop(self):
+        """定期收集數據並推送到前端。"""
+        while not self._stop_event.is_set():
+            try:
+                status_data = self.monitor.get_status()
+                logs = []
+                while not self.log_queue.empty():
+                    logs.append(self.log_queue.get_nowait())
+                
+                full_data = {**status_data, "logs": logs, "fastapi_url": self.fastapi_url}
+                self._js_call('updateDashboard', full_data)
+                time.sleep(1)
+            except Exception as e:
+                error_log = {"ts": time.strftime('%H:%M:%S'), "icon": "🔥", "level": "CRITICAL", "msg": f"監控迴圈錯誤: {e}"}
+                self._js_call('updateDashboard', {"logs": [error_log], "cpu":0, "ram":0, "services":[]})
+                time.sleep(5)
+
+    def run(self):
+        """啟動儀表板的主流程。"""
+        # 立即渲染 HTML 介面
+        try:
+            html_content = Path("templates/dashboard.html").read_text(encoding="utf-8")
+            display(HTML(html_content))
+        except FileNotFoundError:
+            print("❌ 致命錯誤: 找不到 'templates/dashboard.html'。請確保檔案存在。")
+            return
+        
+        time.sleep(1) # 等待 HTML 渲染
+
+        # 在背景線程中執行所有耗時操作
+        work_thread = threading.Thread(target=self._work_thread_main)
+        work_thread.start()
+
+        try:
+            work_thread.join() # 等待工作線程自然結束或被中斷
+        except KeyboardInterrupt:
+            print("\n🛑 收到手動中斷信號，正在關閉系統...")
+        finally:
+            self.shutdown()
+
+    def shutdown(self):
+        """執行優雅的關閉程序。"""
+        if not self._stop_event.is_set():
+            self._stop_event.set()
+            print("正在關閉監控...")
+            self.monitor.stop_server()
+            print("伺服器已停止。")
+
+def main(config: dict):
+    """ Colab 執行的主入口點。 """
+    manager = DashboardManager(config)
+    try:
+        manager.run()
     except Exception as e:
-        error_message = f"💥 作戰流程發生未預期的嚴重錯誤: {e}"
-        print(f"\n{error_message}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        if 'system_log' in locals() and callable(system_log):
-            system_log("CRITICAL", error_message)
-            system_log("CRITICAL", traceback.format_exc())
-            time.sleep(1)
+        print(f"💥 儀表板管理器發生未預期的嚴重錯誤: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        STOP_EVENT.set()
-        if 'system_log' in locals() and callable(system_log):
-            system_log("BATTLE", "[正在執行終端清理程序...]")
-        if SERVER_PROCESS and SERVER_PROCESS.poll() is None:
-            terminate_process_tree(SERVER_PROCESS.pid, system_log)
-        if indicator:
-            indicator.stop()
-        if log_manager and sqlite_db_path:
-            archive_dir = PROJECT_ROOT / archive_folder_name
-            filename_prefix = config.get("archive_filename_prefix", "作戰日誌")
-            archive_final_log(sqlite_db_path, archive_dir, log_manager, filename_prefix=filename_prefix)
-        elif 'system_log' in locals() and callable(system_log):
-            system_log("ERROR", "無法歸檔日誌，因為最終資料庫路徑未能成功設定。")
-        if 'system_log' in locals() and callable(system_log):
-             system_log("SUCCESS", "部署流程已結束，所有服務已安全關閉。")
-        print("\n--- 系統已安全關閉 ---")
+        manager.shutdown()
+        print("\n✅ 系統已完全關閉。")
+
+
