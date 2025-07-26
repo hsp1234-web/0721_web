@@ -73,7 +73,7 @@ class LogManager:
 
 class DisplayManager:
     """視覺指揮官 (FRED 風格)：只使用 print() 進行高頻率重繪，根除閃爍。"""
-    def __init__(self, stats: dict, log_manager: LogManager, log_lines_to_show: int, refresh_rate: float = 0.25):
+    def __init__(self, stats: dict, log_manager: LogManager, log_lines_to_show: int, lock: threading.Lock, refresh_rate: float = 0.25):
         self._stats = stats
         self._log_manager = log_manager
         self._log_lines_to_show = log_lines_to_show
@@ -81,6 +81,7 @@ class DisplayManager:
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self.STATUS_LIGHTS = {"正常": "🟢", "警告": "🟡", "錯誤": "🔴", "完成": "✅", "待機": "⚪️"}
+        self._lock = lock
 
     def _run(self):
         """背景重繪迴圈。"""
@@ -93,9 +94,9 @@ class DisplayManager:
 
     def _draw_dashboard(self):
         """繪製單一影格的儀表板，只使用 print()。"""
-        print("╔═════════════════════════════════════════════════════════════════════════╗")
-        print("║                      🚀 鳳凰之心指揮中心 v9.0 🚀                      ║")
-        print("╚═════════════════════════════════════════════════════════════════════════╝")
+        print("="*77)
+        print("                      🚀 鳳凰之心指揮中心 v9.0 🚀                      ")
+        print("="*77)
         print("\n---[ 最近日誌 ]-------------------------------------------------------------")
         recent_logs = self._log_manager.get_recent_logs(self._log_lines_to_show)
         for log in recent_logs:
@@ -105,15 +106,17 @@ class DisplayManager:
             print(f"[{ts}] {color}[{log['level']:<7}]{reset_color} {log['message']}")
         for _ in range(self._log_lines_to_show - len(recent_logs)): print()
         print("\n---[ 即時狀態 ]-------------------------------------------------------------")
-        light = self.STATUS_LIGHTS.get(self._stats.get("light", "待機"), "⚪️")
-        print(f"{light} 核心狀態：{self._stats.get('task_status', '待命中...')}")
+        with self._lock:
+            light = self.STATUS_LIGHTS.get(self._stats.get("light", "待機"), "⚪️")
+            task_status = self._stats.get('task_status', '待命中...')
+            app_url = self._stats.get("app_url", "網頁伺服器啟動中...")
+        print(f"{light} 核心狀態：{task_status}")
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
         ts = datetime.now(self._log_manager.timezone).strftime('%H:%M:%S')
         print(f"💻 硬體監控：[{ts}] CPU: {cpu:5.1f}% | RAM: {ram:5.1f}%")
         print("\n---[ 操作介面 ]-------------------------------------------------------------")
-        link = self._stats.get("app_url", "網頁伺服器啟動中...")
-        print(f"🚀 開啟網頁介面 -> {link}")
+        print(f"🚀 開啟網頁介面 -> {app_url}")
         print("="*77)
 
     def start(self): self._thread.start()
@@ -128,7 +131,7 @@ class DisplayManager:
 # █   Part 3: 主要業務邏輯與啟動協調器                                  █
 # █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█
 
-def start_web_server(log_manager, stats, port=8000):
+def start_web_server(log_manager, stats, lock, port=8000):
     """在背景執行緒中啟動 FastAPI 伺服器並透過重試機制更新 URL。"""
     def server_thread():
         log_manager.log("INFO", "正在嘗試清理舊的伺服器程序...")
@@ -149,7 +152,8 @@ def start_web_server(log_manager, stats, port=8000):
                     try:
                         app_url = colab_output.eval_js(f'google.colab.kernel.proxyPort({port})')
                         if app_url:
-                            stats["app_url"] = app_url
+                            with lock:
+                                stats["app_url"] = app_url
                             log_manager.log("SUCCESS", f"網頁介面 URL 已成功獲取: {app_url}")
                             break # 成功後跳出重試迴圈
                     except Exception:
@@ -158,7 +162,8 @@ def start_web_server(log_manager, stats, port=8000):
                             time.sleep(2)
                         else:
                             error_msg = "在多次嘗試後，獲取 URL 依然失敗。"
-                            stats["app_url"] = error_msg
+                            with lock:
+                                stats["app_url"] = error_msg
                             log_manager.log("ERROR", error_msg)
                 break 
         server_process.wait()
@@ -166,58 +171,67 @@ def start_web_server(log_manager, stats, port=8000):
     thread = threading.Thread(target=server_thread, daemon=True)
     thread.start()
 
-def main_execution_logic(log_manager, stats, log_lines_to_show):
+def main_execution_logic(log_manager, stats, lock, log_lines_to_show):
     """專案的主要業務邏輯 (延長版)"""
     try:
-        stats["light"] = "正常"
-        stats["task_status"] = "正在執行主要任務"
+        with lock:
+            stats["light"] = "正常"
+            stats["task_status"] = "正在執行主要任務"
         log_manager.log("INFO", "主業務邏輯開始執行...")
         
         total_tasks = log_lines_to_show + 15 
         for i in range(1, total_tasks + 1):
             log_manager.log("BATTLE", f"正在處理第 {i}/{total_tasks} 階段的戰鬥任務...")
-            stats["task_status"] = f"任務進度 {i}/{total_tasks}"
+            with lock:
+                stats["task_status"] = f"任務進度 {i}/{total_tasks}"
             time.sleep(0.3)
             if i == 15:
-                stats["light"] = "警告"
+                with lock:
+                    stats["light"] = "警告"
                 log_manager.log("WARNING", "偵測到 API 回應延遲，已自動重試...")
             if i % 10 == 0:
-                stats["light"] = "正常"
+                with lock:
+                    stats["light"] = "正常"
                 log_manager.log("SUCCESS", f"第 {i} 階段作戰節點順利完成！")
         
-        stats["light"] = "完成"
-        stats["task_status"] = "所有主要業務邏輯已成功執行完畢！"
+        with lock:
+            stats["light"] = "完成"
+            stats["task_status"] = "所有主要業務邏輯已成功執行完畢！"
         log_manager.log("SUCCESS", stats["task_status"])
         
         time.sleep(2)
-        stats["light"] = "待機"
-        stats["task_status"] = "任務完成，系統待命中"
+        with lock:
+            stats["light"] = "待機"
+            stats["task_status"] = "任務完成，系統待命中"
 
     except KeyboardInterrupt:
-        stats["light"] = "警告"; stats["task_status"] = "使用者手動中斷"
+        with lock:
+            stats["light"] = "警告"; stats["task_status"] = "使用者手動中斷"
         log_manager.log("WARNING", "偵測到手動中斷信號！")
     except Exception as e:
-        stats["light"] = "錯誤"; stats["task_status"] = f"發生致命錯誤！"
+        with lock:
+            stats["light"] = "錯誤"; stats["task_status"] = f"發生致命錯誤！"
         log_manager.log("ERROR", f"主業務邏輯發生未預期錯誤: {e}")
 
-def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path):
+def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path, refresh_rate):
     """專案啟動主函數，由 Colab 儲存格呼叫"""
     display_manager = None
     stats = {"task_status": "準備中...", "light": "正常", "app_url": "等待伺服器啟動..."}
+    lock = threading.Lock()
 
     try:
         log_manager = LogManager(timezone_str=timezone)
-        display_manager = DisplayManager(stats, log_manager, log_lines_to_show=log_lines)
+        display_manager = DisplayManager(stats, log_manager, log_lines_to_show=log_lines, lock=lock, refresh_rate=refresh_rate)
         display_manager.start()
         log_manager.log("INFO", "視覺指揮官已啟動。")
 
         log_manager.setup_file_logging(log_dir=project_path / "logs")
         log_manager.log("INFO", f"檔案日誌系統已設定，將記錄至 {log_manager.log_file_path}")
         
-        start_web_server(log_manager, stats, port=8000)
+        start_web_server(log_manager, stats, lock, port=8000)
         
         log_manager.log("SUCCESS", "所有服務已成功啟動，指揮中心上線！")
-        main_execution_logic(log_manager, stats, log_lines)
+        main_execution_logic(log_manager, stats, lock, log_lines)
 
         while True: time.sleep(1)
 
