@@ -1,83 +1,82 @@
-import asyncio
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                                                                      ║
+# ║   核心檔案：core/monitor.py (v2.0 升級版)                          ║
+# ║                                                                      ║
+# ╠══════════════════════════════════════════════════════════════════╣
+# ║                                                                      ║
+# ║   功能：                                                             ║
+# ║       硬體資源的「情報員」。它在背景獨立運作，持續偵測 CPU 與       ║
+# ║       RAM 的使用率。                                                 ║
+# ║                                                                      ║
+# ║   設計哲學：                                                         ║
+# ║       職責單一，只負責收集數據。它不再直接輸出到畫面，而是將格式      ║
+# ║       化後的硬體狀態字串，以高頻率「匯報」給視覺指揮官              ║
+# ║       (PresentationManager)，由其統一更新到畫面的即時狀態層。      ║
+# ║                                                                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+import threading
+import time
 import psutil
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
-# 建立一個全域的、可被應用內其他模組存取的 asyncio.Queue
-# 這將是所有系統事件的中央訊息中樞。
-SYSTEM_EVENTS_QUEUE = asyncio.Queue()
-
-class PerformanceMonitor:
+class HardwareMonitor:
     """
-    一個獨立的監控器，定期收集系統性能數據，
-    並將其放入中央的 SYSTEM_EVENTS_QUEUE 中。
+    在背景執行緒中監控 CPU 和 RAM 使用率。
     """
-    def __init__(self, refresh_interval: float = 1.0):
-        self.refresh_interval = max(0.5, refresh_interval)
-        self._is_running = False
-        self._task: asyncio.Task | None = None
+    def __init__(self, presentation_manager, interval=1.0):
+        """
+        初始化監控器。
+        :param presentation_manager: 視覺指揮官的實例。
+        :param interval: 更新間隔（秒）。
+        """
+        self.pm = presentation_manager
+        self.interval = interval
+        self.is_running = False
+        self._thread = None
 
-    async def _monitor_loop(self):
-        """監控迴圈，定期收集數據並放入佇列。"""
-        while self._is_running:
+    def _monitor(self):
+        """
+        監控迴圈，會在新執行緒中執行。
+        """
+        self.is_running = True
+        while self.is_running:
             try:
+                # 獲取硬體資訊
                 cpu_percent = psutil.cpu_percent()
-                virtual_memory = psutil.virtual_memory()
-                ram_percent = virtual_memory.percent
+                ram_percent = psutil.virtual_memory().percent
+                timestamp = datetime.now().strftime('%H:%M:%S')
 
-                # 將數據打包成一個標準格式的字典
-                stats_payload = {
-                    "type": "PERFORMANCE_UPDATE",
-                    "timestamp": datetime.now(ZoneInfo("Asia/Taipei")).isoformat(),
-                    "data": {
-                        "cpu": cpu_percent,
-                        "ram": ram_percent,
-                    }
-                }
-                # 將數據放入中央佇列
-                await SYSTEM_EVENTS_QUEUE.put(stats_payload)
+                # 格式化字串
+                hardware_string = f"[{timestamp}] CPU: {cpu_percent:5.1f}% | RAM: {ram_percent:5.1f}%"
 
-            except psutil.NoSuchProcess:
-                # 當程序退出時，psutil 可能會引發此錯誤
-                print("Monitor: Process not found, shutting down monitoring.")
-                self._is_running = False
-            except Exception as e:
-                print(f"Error in performance monitor: {e}")
+                # 將情報匯報給視覺指揮官
+                self.pm.update_hardware_status(hardware_string)
 
-            await asyncio.sleep(self.refresh_interval)
+                # 等待下一個週期
+                time.sleep(self.interval)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # 在某些情況下，程序可能已經結束，這時會拋出異常
+                self.pm.update_hardware_status("硬體監控：程序結束")
+                break
+            except Exception:
+                # 捕獲其他潛在錯誤
+                self.pm.update_hardware_status("硬體監控：發生錯誤")
+                break
 
     def start(self):
-        """啟動背景監控任務。"""
-        if not self._is_running:
-            print(f"Starting performance monitor with {self.refresh_interval}s interval.")
-            self._is_running = True
-            self._task = asyncio.create_task(self._monitor_loop())
+        """
+        啟動背景監控執行緒。
+        """
+        if not self.is_running:
+            self._thread = threading.Thread(target=self._monitor, daemon=True)
+            self._thread.start()
 
-    async def stop(self):
-        """停止背景監控任務。"""
-        if self._is_running and self._task:
-            print("Stopping performance monitor...")
-            self._is_running = False
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass  # 任務被取消是正常的
-            print("Performance monitor stopped.")
+    def stop(self):
+        """
+        停止監控。
+        """
+        self.is_running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=self.interval * 2) # 等待執行緒結束
 
-# 使用範例 (如果直接執行此檔案):
-async def main():
-    monitor = PerformanceMonitor(refresh_interval=2)
-    monitor.start()
-
-    try:
-        # 從佇列中讀取數據並印出
-        for _ in range(5):
-            item = await SYSTEM_EVENTS_QUEUE.get()
-            print(f"Received from queue: {item}")
-            SYSTEM_EVENTS_QUEUE.task_done()
-    finally:
-        await monitor.stop()
-
-if __name__ == "__main__":
-    asyncio.run(main())
