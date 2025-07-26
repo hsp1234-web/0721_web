@@ -292,9 +292,25 @@ class PrecisionIndicator:
 # SECTION 3: 核心輔助函式
 # ==============================================================================
 def execute_and_stream(cmd, cwd, system_log):
+    # 創建一個環境變量的副本，以傳遞給子進程
+    env = os.environ.copy()
+
+    # 確保 PYTHONPATH 包含專案根目錄，以便子進程能找到模組
+    project_root_str = str(cwd)
+    python_path = env.get("PYTHONPATH", "")
+    if project_root_str not in python_path.split(os.pathsep):
+        env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{python_path}"
+
     process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding='utf-8', errors='replace', cwd=cwd, bufsize=1
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        cwd=cwd,
+        bufsize=1,
+        env=env  # 傳遞完整的環境變量副本
     )
     def stream_logger(stream, level):
         try:
@@ -387,25 +403,31 @@ def main(config: dict):
     sqlite_db_path = None
     stats_dict = {} # 用於跨執行緒共享狀態
 
+    # 測試模式下，簡化日誌記錄，禁用UI
+    is_test_mode = os.environ.get("PHOENIX_TEST_MODE") == "1"
+
     try:
         # 步驟 1: 解構設定並啟動日誌與指示器
         archive_folder_name = config.get("archive_folder_name", "作戰日誌歸檔")
         fastapi_port = config.get("fastapi_port", 8000)
 
-        # 由於 PrecisionIndicator 直接處理日誌，不再需要臨時資料庫
         sqlite_db_path = PROJECT_ROOT / "logs.sqlite"
         if sqlite_db_path.exists():
-            # 確保一個乾淨的開始
             sqlite_db_path.unlink()
 
         log_manager = LogManager(sqlite_db_path)
-        indicator = PrecisionIndicator(log_manager=log_manager, stats_dict=stats_dict)
 
-        # 將 indicator 的 log 方法作為系統的主要日誌點
-        # 這樣所有日誌都會先經過 indicator 再存入資料庫
-        system_log = indicator.log
-
-        indicator.start()
+        if is_test_mode:
+            # 在測試模式下，使用簡單的 print 進行日誌記錄
+            def plain_logger(level, message):
+                print(f"TEST_LOG: [{level}] {message}", flush=True)
+                log_manager.log(level, message) # 仍然寫入資料庫以供歸檔驗證
+            system_log = plain_logger
+        else:
+            # 正常模式下，使用帶有 UI 的 PrecisionIndicator
+            indicator = PrecisionIndicator(log_manager=log_manager, stats_dict=stats_dict)
+            system_log = indicator.log
+            indicator.start()
 
         # 步驟 2: 驗證路徑
         system_log("INFO", f"專案根目錄 (動態偵測): {PROJECT_ROOT}")
