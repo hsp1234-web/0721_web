@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳳凰之心 - 駕駛艙 v16.2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-bg: #131314; --color-panel-bg: #1e1f20; --color-border: #3c4043;
+            --color-text: #e8eaed; --color-dim: #9aa0a6; --color-header: #8ab4f8;
+            --color-ok: #34a853; --color-warn: #fbbc04; --color-error: #ea4335;
+            --color-info: #4285f4; --color-battle: #8ab4f8; --color-security: #f28b82;
+            --font-mono: 'Fira Code', 'Courier New', monospace; --font-sans: 'Noto Sans TC', sans-serif;
+            --base-font-size: 15px; --line-height: 1.8;
+        }
+        html, body { height: 100%; margin: 0; overflow: hidden; box-sizing: border-box; }
+        body {
+            background-color: var(--color-bg); color: var(--color-text); font-family: var(--font-mono);
+            font-size: var(--base-font-size); line-height: var(--line-height); display: flex; flex-direction: column;
+        }
+        .ok { color: var(--color-ok); } .warn { color: var(--color-warn); } .error { color: var(--color-error); }
+        .info { color: var(--color-info); } .battle { color: var(--color-battle); } .security { color: var(--color-security); }
+        .header { color: var(--color-header); } .dim { color: var(--color-dim); } .highlight { color: #ffffff; font-weight: bold; }
+        pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
+        .hidden { display: none !important; }
+
+        #dashboard-container { display: flex; flex-direction: column; height: 100vh; }
+        
+        #top-panel {
+            padding: 15px 20px; border-bottom: 1px solid var(--color-border); background-color: var(--color-panel-bg);
+            display: flex; flex-wrap: wrap; gap: 20px 30px; align-items: flex-start; flex-shrink: 0;
+        }
+        .panel-section { flex: 1; min-width: 280px; }
+        .panel-title { font-family: var(--font-sans); font-weight: bold; color: var(--color-header); margin-bottom: 10px; }
+        
+        #resource-monitor { display: flex; flex-direction: column; gap: 10px; }
+        .resource-item { display: flex; align-items: center; gap: 10px; }
+        .resource-label { font-family: var(--font-mono); width: 40px; text-align: right; color: var(--color-dim); }
+        .progress-bar-wrapper {
+            flex-grow: 1; height: 10px; background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 5px; overflow: hidden; position: relative;
+        }
+        .progress-bar { height: 100%; background-color: var(--color-info); width: 0%; transition: width 0.3s ease-out; border-radius: 5px; }
+        .percentage-text { font-family: var(--font-mono); font-size: 0.9em; width: 50px; text-align: right; color: var(--color-text); }
+
+        .service-item { display: flex; align-items: center; margin-bottom: 5px; }
+        .service-icon { min-width: 2.2em; }
+        .app-button {
+            background-color: var(--color-battle); color: var(--color-bg); border: none; border-radius: 5px;
+            padding: 10px 15px; font-family: var(--font-sans); font-weight: bold; font-size: 1em;
+            cursor: pointer; transition: background-color 0.2s; white-space: nowrap;
+        }
+        .app-button:hover { background-color: #a8c7fa; }
+
+        #main-stream-container { flex-grow: 1; overflow-y: auto; padding: 10px 20px 60px 20px; }
+        .stream-item { margin-bottom: 15px; word-wrap: break-word; overflow-wrap: break-word; }
+        .stream-meta { display: flex; gap: 15px; align-items: center; }
+        .stream-icon { min-width: 2em; }
+        .stream-ts { color: var(--color-dim); }
+        .stream-level { font-weight: bold; min-width: 90px; text-transform: uppercase; }
+        .stream-text-content { padding-left: calc(2em + 15px); margin-top: 5px; }
+        .stream-block-content { margin-top: 0.8em; padding-left: 0; padding-bottom: 0.8em; }
+        
+        .data-stream-table {
+            border: 1px solid var(--color-border); padding: 10px; background: rgba(0,0,0,0.2);
+            border-radius: 5px; display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 0;
+        }
+        .ds-row { display: flex; flex-wrap: wrap; }
+        .ds-cell { flex: 1; padding: 2px 10px; border-bottom: 1px solid var(--color-border); min-width: 80px; word-wrap: break-word; overflow-wrap: break-word; }
+        .ds-row:last-child .ds-cell { border-bottom: none; }
+        .ds-header .ds-cell { font-weight: bold; color: var(--color-header); }
+        .ds-separator .ds-cell { padding: 0; height: 1px; background: var(--color-border); flex-basis: 100%; }
+
+        #status-bar {
+            position: fixed; bottom: 0; left: 0; width: 100%; background: var(--color-panel-bg);
+            padding: 8px 20px; border-top: 1px solid var(--color-border); display: flex;
+            justify-content: space-between; align-items: center; font-size: 14px; z-index: 10; box-sizing: border-box;
+        }
+        .status-group { display: flex; gap: 25px; }
+
+        @media (max-width: 767px) {
+            body { font-size: 13px; line-height: 1.6; }
+            #top-panel { flex-direction: column; padding: 10px 15px; gap: 15px; }
+            .panel-section { min-width: auto; width: 100%; }
+            #main-stream-container { padding: 10px 15px 80px 15px; }
+            .stream-meta { flex-direction: column; align-items: flex-start; gap: 5px; }
+            .stream-icon, .stream-level { min-width: auto; }
+            .stream-text-content { padding-left: 0; }
+            .data-stream-table .ds-cell { min-width: 100%; flex-basis: 100%; }
+            .ds-row { flex-direction: column; }
+            .ds-header .ds-cell { border-bottom: none; }
+            .ds-separator .ds-cell { display: none; }
+            #status-bar { padding: 5px 15px; font-size: 12px; flex-direction: column; gap: 5px; align-items: flex-start; height: auto; }
+            .status-group { gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 容器將由 JS 控制顯示啟動畫面或主儀表板 -->
+    <div id="dashboard-container">
+        <!-- 主儀表板結構 -->
+        <div id="top-panel" class="hidden">
+            <div class="panel-section">
+                <div class="panel-title">⚙️ 即時資源監控</div>
+                <div id="resource-monitor">
+                    <div class="resource-item">
+                        <span class="resource-label">CPU:</span>
+                        <div class="progress-bar-wrapper"><div id="cpu-progress-bar" class="progress-bar"></div></div>
+                        <span id="cpu-percentage" class="percentage-text">0.0%</span>
+                    </div>
+                    <div class="resource-item">
+                        <span class="resource-label">RAM:</span>
+                        <div class="progress-bar-wrapper"><div id="ram-progress-bar" class="progress-bar"></div></div>
+                        <span id="ram-percentage" class="percentage-text">0.0%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-section">
+                <div class="panel-title">🌐 核心服務狀態</div>
+                <div id="service-status"></div>
+            </div>
+            <div class="panel-section">
+                <div class="panel-title">🚀 應用程式入口</div>
+                <button class="app-button" onclick="window.open(window.fastApiUrl, '_blank')">進入鳳凰之心主介面</button>
+            </div>
+        </div>
+        <div id="main-stream-container"></div>
+        <div id="status-bar" class="hidden"></div>
+    </div>
+
+<script>
+// ==================================================================
+// 全域變數與 DOM 元素 (由 Python 驅動)
+// ==================================================================
+const config = { maxStreamLines: 200 };
+window.fastApiUrl = '';
+
+const container = document.getElementById('dashboard-container');
+const topPanel = document.getElementById('top-panel');
+const mainStream = document.getElementById('main-stream-container');
+const statusBar = document.getElementById('status-bar');
+
+const elements = {
+    cpuBar: document.getElementById('cpu-progress-bar'),
+    cpuText: document.getElementById('cpu-percentage'),
+    ramBar: document.getElementById('ram-progress-bar'),
+    ramText: document.getElementById('ram-percentage'),
+    services: document.getElementById('service-status'),
+};
+
+// ==================================================================
+// 核心渲染與更新邏輯 (由 Python 呼叫)
+// ==================================================================
+
+/**
+ * 接收來自 Python 的完整數據並更新整個儀表板
+ * @param {object} data - 包含所有狀態的數據對象
+ */
+window.updateDashboard = function(data) {
+    if (topPanel.classList.contains('hidden')) {
+        mainStream.innerHTML = ''; // 清空啟動日誌
+        topPanel.classList.remove('hidden');
+        statusBar.classList.remove('hidden');
+    }
+    
+    window.fastApiUrl = data.fastapi_url;
+
+    // 更新資源監控
+    elements.cpuBar.style.width = `${data.cpu}%`;
+    elements.cpuText.textContent = `${data.cpu.toFixed(1)}%`;
+    elements.ramBar.style.width = `${data.ram}%`;
+    elements.ramText.textContent = `${data.ram.toFixed(1)}%`;
+
+    // 更新服務狀態
+    const statusIcons = { ok: '✅', warn: '⚠️', error: '❌' };
+    let servicesHtml = '';
+    (data.services || []).forEach(s => {
+        const status = s.status || 'warn';
+        servicesHtml += `<div class="service-item"><span class="service-icon">${statusIcons[status]}</span><span class="${status}">${s.name}</span></div>`;
+    });
+    elements.services.innerHTML = servicesHtml;
+
+    // 更新狀態欄
+    const isOk = (data.services || []).every(s => s.status === 'ok');
+    const systemStatus = isOk ? '<span class="ok">🟢 系統狀態正常</span>' : '<span class="error">🔴 系統偵測到異常</span>';
+    const currentTime = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    statusBar.innerHTML = `
+        <div class="status-group"><span>CPU: ${data.cpu.toFixed(1)}%</span><span>RAM: ${data.ram.toFixed(1)}%</span></div>
+        <div>${systemStatus}</div>
+        <div class="dim">${currentTime}</div>`;
+
+    // 添加新的日誌
+    if (data.logs && data.logs.length > 0) {
+        data.logs.reverse().forEach(log => addStreamItem(log)); // 反轉以保持時間順序
+    }
+};
+
+/**
+ * 在啟動階段顯示日誌
+ * @param {string} htmlContent - 要添加到啟動畫面的 HTML 內容
+ */
+window.bootLog = function(htmlContent) {
+    const line = document.createElement('pre');
+    line.innerHTML = htmlContent;
+    mainStream.appendChild(line);
+    mainStream.scrollTop = mainStream.scrollHeight;
+}
+
+function addStreamItem(log) {
+    const { ts, icon, level, msg } = log;
+    const levelClass = level.toLowerCase();
+    const streamItem = document.createElement('div');
+    streamItem.className = 'stream-item';
+    
+    const metaHTML = `
+        <div class="stream-meta">
+            <span class="stream-icon">${icon}</span>
+            <span class="stream-ts">[${ts}]</span> 
+            <span class="stream-level ${levelClass}">[${level}]</span>
+        </div>`;
+    streamItem.innerHTML = metaHTML;
+
+    let contentDiv;
+    if (typeof msg === 'string') {
+        contentDiv = document.createElement('div');
+        contentDiv.className = 'stream-text-content';
+        contentDiv.innerHTML = `<span>${msg}</span>`;
+    } else if (typeof msg === 'object' && msg.type === 'table') {
+        contentDiv = document.createElement('div');
+        contentDiv.className = 'stream-block-content';
+        contentDiv.appendChild(createDataTable(msg.title, msg.rows));
+    }
+    
+    if (contentDiv) {
+        streamItem.appendChild(contentDiv);
+    }
+
+    mainStream.prepend(streamItem);
+    while (mainStream.children.length > config.maxStreamLines) {
+        mainStream.lastChild.remove();
+    }
+}
+
+function createDataTable(title, rows) {
+    const table = document.createElement('div');
+    table.className = 'data-stream-table';
+    let content = `<div class="ds-row ds-header"><div class="ds-cell">${title}</div></div>`;
+    content += `<div class="ds-row ds-separator"><div class="ds-cell"></div></div>`;
+    (rows || []).forEach(rowData => {
+        content += `<div class="ds-row">`;
+        (rowData || []).forEach(cellData => {
+            content += `<div class="ds-cell">${cellData}</div>`;
+        });
+        content += `</div>`;
+    });
+    table.innerHTML = content;
+    return table;
+}
+</script>
+</body>
+</html>
