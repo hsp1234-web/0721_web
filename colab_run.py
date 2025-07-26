@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 colab_run.py (v3.1 邏輯修正最終版)                              ║
+# ║   🚀 colab_run.py (v3.2 語法修正最終版)                              ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
@@ -8,10 +8,10 @@
 # ║       這是鳳凰之心指揮中心的「一體化核心」。它整合了所有必要的      ║
 # ║       模組，提供完整的原生儀表板功能。                               ║
 # ║                                                                      ║
-# ║   v3.1 更新：                                                        ║
-# ║       修正了 Logger 類別中的核心邏輯錯誤。對於自定義的日誌級別      ║
-# ║       (BATTLE, SUCCESS)，改為使用正確的 `logger.log(level_num, ...)` ║
-# ║       方法進行記錄，徹底解決 `AttributeError` 的問題。               ║
+# ║   v3.2 更新：                                                        ║
+# ║       修正了 PresentationManager 中因 f-string 使用不當而導致的      ║
+# ║       `SyntaxError`。將有問題的程式碼拆分為多行，確保語法正確性，   ║
+# ║       這是啟動流程的最終修正。                                       ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -56,7 +56,15 @@ class PresentationManager:
         with self.lock:
             if self.is_running: return
             display(HTML(top_html_content))
-            self._write_flush(f"{'\\n' * (self.log_lines_count + 2)}{f'\\033[{self.log_lines_count + 1}A{self.SAVE_CURSOR}'}")
+            # === 關鍵語法修正：將有問題的 f-string 拆分為清晰的多行 ===
+            # 1. 為日誌區域預留空白行
+            self._write_flush('\n' * (self.log_lines_count + 1))
+            # 2. 為狀態列預留一行
+            self._write_flush('\n')
+            # 3. 將游標向上移動並儲存位置
+            move_and_save_cmd = f'\033[{self.log_lines_count + 1}A{self.SAVE_CURSOR}'
+            self._write_flush(move_and_save_cmd)
+            
             self.is_running = True
             self._redraw_all()
 
@@ -67,7 +75,8 @@ class PresentationManager:
             self._write_flush(f'{self.CLEAR_LINE}{line}\n')
 
     def _redraw_status_line(self):
-        self._write_flush(f"{self.RESTORE_CURSOR}\033[{self.log_lines_count + 1}B")
+        move_down_cmd = f'\033[{self.log_lines_count + 1}B'
+        self._write_flush(f"{self.RESTORE_CURSOR}{move_down_cmd}")
         self._write_flush(f'\r{self.CLEAR_LINE}{self.hardware_text} | {self.status_text}')
         self._write_flush(self.RESTORE_CURSOR)
 
@@ -86,7 +95,8 @@ class PresentationManager:
         if self.is_running:
             with self.lock:
                 self.is_running = False
-                self._write_flush(f"{self.RESTORE_CURSOR}\033[{self.log_lines_count + 2}B\n")
+                move_down_cmd = f'\033[{self.log_lines_count + 2}B'
+                self._write_flush(f"{self.RESTORE_CURSOR}{move_down_cmd}\n")
             print("--- [PresentationManager] 視覺指揮官已停止運作 ---")
 
 
@@ -115,7 +125,6 @@ class Logger:
 
     def _log(self, level, message, *args, **kwargs):
         level_upper = level.upper()
-        # --- 關鍵修正 ---
         if level_upper in self.CUSTOM_LEVELS:
             self.logger.log(self.CUSTOM_LEVELS[level_upper], message, *args, **kwargs)
         else:
