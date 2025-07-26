@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   核心檔案：logger/main.py (v2.0 升級版)                           ║
+# ║   核心檔案：logger/main.py (v2.1 台北時區強化版)                   ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
@@ -8,10 +8,9 @@
 # ║       專案的「戰地記錄官」。負責處理所有日誌訊息，定義日誌的格式      ║
 # ║       與顏色，並將其寫入後端的 .md 檔案中。                          ║
 # ║                                                                      ║
-# ║   設計哲學：                                                         ║
-# ║       在完成其核心記錄任務的同時，它會將格式化後的日誌訊息，「抄送」  ║
-# ║       一份給視覺指揮官 (PresentationManager)，由其決定是否以及如何   ║
-# ║       顯示在畫面的滾動日誌層。實現了後端記錄與前端顯示的解耦。      ║
+# ║   v2.1 更新：                                                        ║
+# ║       確保每日輪替的日誌檔名，是根據指定的 `Asia/Taipei` 時區的   ║
+# ║       日期來建立，避免因伺服器時區不同而導致檔案命名錯誤。          ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -52,8 +51,11 @@ class Logger:
 
         # 避免重複添加 handler
         if not self.logger.handlers:
-            # 檔案 handler
-            log_file = self.log_dir / f"日誌-{datetime.now(self.timezone).strftime('%Y-%m-%d')}.md"
+            # === 時區強化 ===
+            # 使用指定的時區來命名日誌檔案
+            today_in_tz = datetime.now(self.timezone).strftime('%Y-%m-%d')
+            log_file = self.log_dir / f"日誌-{today_in_tz}.md"
+            
             file_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=7, encoding='utf-8')
             file_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt='%Y-%m-%d %H:%M:%S'))
             self.logger.addHandler(file_handler)
@@ -95,4 +97,3 @@ class Logger:
 
     def critical(self, message, *args, **kwargs):
         self._log("critical", message, *args, **kwargs)
-
