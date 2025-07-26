@@ -1,17 +1,19 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 colab_run.py (v3.2 語法修正最終版)                              ║
+# ║   🚀 colab_run.py (v4.0 FRED 風格版)                                 ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
 # ║   功能：                                                             ║
-# ║       這是鳳凰之心指揮中心的「一體化核心」。它整合了所有必要的      ║
-# ║       模組，提供完整的原生儀表板功能。                               ║
+# ║       這是鳳凰之心指揮中心的「一體化核心」。它全面採納了您所欣賞      ║
+# ║       的「FRED 工具」設計哲學，使用「高頻率全螢幕重繪」技術，提      ║
+# ║       供一個絕對整潔、穩定、且版面佈局正確的儀表板。                 ║
 # ║                                                                      ║
-# ║   v3.2 更新：                                                        ║
-# ║       修正了 PresentationManager 中因 f-string 使用不當而導致的      ║
-# ║       `SyntaxError`。將有問題的程式碼拆分為多行，確保語法正確性，   ║
-# ║       這是啟動流程的最終修正。                                       ║
+# ║   v4.0 更新：                                                        ║
+# ║       - 架構重構：從「分層渲染」改為「全螢幕重繪」，根除排版混亂。    ║
+# ║       - 版面調整：完全依照您的要求，將標題置頂，按鈕置底。         ║
+# ║       - 狀態燈號：引入 🟢 🟡 🔴 燈號，讓核心狀態一目了然。         ║
+# ║       - 程式碼整合：所有必要邏輯皆在此單一檔案中，簡化維護。       ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -20,16 +22,14 @@ import sys
 import threading
 import time
 import collections
-import logging
 import shutil
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from datetime import datetime
 
 try:
     import psutil
     import pytz
-    from IPython.display import display, HTML
+    from IPython.display import display, clear_output, HTML
 except ImportError as e:
     print(f"💥 核心套件匯入失敗: {e}")
     print("請確保在 Colab 儲存格中已透過 requirements.txt 正確安裝 psutil 與 pytz。")
@@ -37,193 +37,214 @@ except ImportError as e:
 
 
 # █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█
-# █   Part 2: 核心類別定義 (視覺、日誌、監控)                           █
+# █   Part 2: 核心類別定義 (日誌、顯示管理器)                           █
 # █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█
 
-class PresentationManager:
-    """視覺指揮官"""
-    def __init__(self, log_lines=20):
-        self.CURSOR_UP, self.CLEAR_LINE, self.SAVE_CURSOR, self.RESTORE_CURSOR = '\033[A', '\033[K', '\033[s', '\033[u'
-        self.log_lines_count = log_lines
-        self.log_buffer = collections.deque(maxlen=log_lines)
-        self.status_text, self.hardware_text = "核心狀態：初始化中...", "硬體監控：待命中..."
-        self.is_running, self.lock = False, threading.Lock()
+class LogManager:
+    """
+    一個執行緒安全的日誌管理器，負責集中管理所有日誌訊息。
+    """
+    def __init__(self, timezone_str, max_logs=1000):
+        self._logs = collections.deque(maxlen=max_logs)
+        self._lock = threading.Lock()
+        self.timezone = pytz.timezone(timezone_str)
+        self.log_file_path = None
 
-    def _write_flush(self, text):
-        sys.stdout.write(text); sys.stdout.flush()
+    def setup_file_logging(self, log_dir="logs"):
+        log_dir_path = Path(log_dir)
+        log_dir_path.mkdir(exist_ok=True)
+        today_in_tz = datetime.now(self.timezone).strftime('%Y-%m-%d')
+        self.log_file_path = log_dir_path / f"日誌-{today_in_tz}.md"
 
-    def setup_layout(self, top_html_content):
-        with self.lock:
-            if self.is_running: return
-            display(HTML(top_html_content))
-            # === 關鍵語法修正：將有問題的 f-string 拆分為清晰的多行 ===
-            # 1. 為日誌區域預留空白行
-            self._write_flush('\n' * (self.log_lines_count + 1))
-            # 2. 為狀態列預留一行
-            self._write_flush('\n')
-            # 3. 將游標向上移動並儲存位置
-            move_and_save_cmd = f'\033[{self.log_lines_count + 1}A{self.SAVE_CURSOR}'
-            self._write_flush(move_and_save_cmd)
-            
-            self.is_running = True
-            self._redraw_all()
+    def log(self, level: str, message: str):
+        log_item = {
+            "timestamp": datetime.now(self.timezone),
+            "level": level.upper(),
+            "message": message
+        }
+        with self._lock:
+            self._logs.append(log_item)
+            if self.log_file_path:
+                try:
+                    with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                        ts = log_item["timestamp"].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        f.write(f"[{ts}] [{log_item['level']}] {log_item['message']}\n")
+                except Exception:
+                    # 在主循環中忽略檔案寫入錯誤，避免中斷
+                    pass
 
-    def _redraw_logs(self):
-        self._write_flush(self.RESTORE_CURSOR)
-        for i in range(self.log_lines_count):
-            line = self.log_buffer[i] if i < len(self.log_buffer) else ""
-            self._write_flush(f'{self.CLEAR_LINE}{line}\n')
+    def get_recent_logs(self, count: int) -> list:
+        with self._lock:
+            return list(self._logs)[-count:]
 
-    def _redraw_status_line(self):
-        move_down_cmd = f'\033[{self.log_lines_count + 1}B'
-        self._write_flush(f"{self.RESTORE_CURSOR}{move_down_cmd}")
-        self._write_flush(f'\r{self.CLEAR_LINE}{self.hardware_text} | {self.status_text}')
-        self._write_flush(self.RESTORE_CURSOR)
+class DisplayManager:
+    """
+    視覺指揮官 (FRED 風格)：負責高頻率重繪整個儀表板畫面。
+    """
+    def __init__(self, stats: dict, log_manager: LogManager, log_lines_to_show: int, refresh_rate: float = 0.2):
+        self._stats = stats
+        self._log_manager = log_manager
+        self._log_lines_to_show = log_lines_to_show
+        self._refresh_rate = refresh_rate
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self.STATUS_LIGHTS = {"正常": "🟢", "警告": "🟡", "錯誤": "🔴", "完成": "✅", "待機": "⚪️"}
 
-    def _redraw_all(self): self._redraw_logs(); self._redraw_status_line()
-    def add_log(self, message):
-        if self.is_running:
-            with self.lock: self.log_buffer.append(message); self._redraw_logs()
-    def update_task_status(self, status):
-        if self.is_running:
-            with self.lock: self.status_text = status; self._redraw_status_line()
-    def update_hardware_status(self, hardware_string):
-        if self.is_running:
-            with self.lock: self.hardware_text = hardware_string; self._redraw_status_line()
-
-    def stop(self):
-        if self.is_running:
-            with self.lock:
-                self.is_running = False
-                move_down_cmd = f'\033[{self.log_lines_count + 2}B'
-                self._write_flush(f"{self.RESTORE_CURSOR}{move_down_cmd}\n")
-            print("--- [PresentationManager] 視覺指揮官已停止運作 ---")
-
-
-class Logger:
-    """戰地記錄官"""
-    COLORS = {"INFO": "\033[97m", "BATTLE": "\033[96m", "SUCCESS": "\033[92m", "WARNING": "\033[93m", "ERROR": "\033[91m", "CRITICAL": "\033[91;1m", "RESET": "\033[0m"}
-    CUSTOM_LEVELS = {"BATTLE": 25, "SUCCESS": 26}
-
-    def __init__(self, presentation_manager, log_dir="logs", timezone="Asia/Taipei"):
-        self.pm = presentation_manager
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-        self.timezone = pytz.timezone(timezone)
-        
-        logging.addLevelName(self.CUSTOM_LEVELS["BATTLE"], "BATTLE")
-        logging.addLevelName(self.CUSTOM_LEVELS["SUCCESS"], "SUCCESS")
-        
-        self.logger = logging.getLogger("PhoenixHeartLogger")
-        self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:
-            today_in_tz = datetime.now(self.timezone).strftime('%Y-%m-%d')
-            log_file = self.log_dir / f"日誌-{today_in_tz}.md"
-            file_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=7, encoding='utf-8')
-            file_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt='%Y-%m-%d %H:%M:%S'))
-            self.logger.addHandler(file_handler)
-
-    def _log(self, level, message, *args, **kwargs):
-        level_upper = level.upper()
-        if level_upper in self.CUSTOM_LEVELS:
-            self.logger.log(self.CUSTOM_LEVELS[level_upper], message, *args, **kwargs)
-        else:
-            getattr(self.logger, level.lower())(message, *args, **kwargs)
-        
-        timestamp = datetime.now(self.timezone).strftime('%H:%M:%S.%f')[:-3]
-        color = self.COLORS.get(level_upper, self.COLORS["INFO"])
-        display_message = f"[{timestamp}] {color}[{level_upper}]{self.COLORS['RESET']} {message}"
-        self.pm.add_log(display_message)
-
-    def info(self, m, *a, **kw): self._log("info", m, *a, **kw)
-    def battle(self, m, *a, **kw): self._log("battle", m, *a, **kw)
-    def success(self, m, *a, **kw): self._log("success", m, *a, **kw)
-    def warning(self, m, *a, **kw): self._log("warning", m, *a, **kw)
-    def error(self, m, *a, **kw): self._log("error", m, *a, **kw)
-    def critical(self, m, *a, **kw): self._log("critical", m, *a, **kw)
-
-
-class HardwareMonitor:
-    """情報員"""
-    def __init__(self, presentation_manager, interval=1.0):
-        self.pm, self.interval, self.is_running, self._thread = presentation_manager, interval, False, None
-
-    def _monitor(self):
-        self.is_running = True
-        while self.is_running:
+    def _run(self):
+        """背景重繪迴圈。"""
+        while not self._stop_event.is_set():
             try:
-                ts = datetime.now().strftime('%H:%M:%S')
-                hw_str = f"[{ts}] CPU: {psutil.cpu_percent():5.1f}% | RAM: {psutil.virtual_memory().percent:5.1f}%"
-                self.pm.update_hardware_status(hw_str)
-                time.sleep(self.interval)
-            except (psutil.NoSuchProcess, psutil.AccessDenied): self.pm.update_hardware_status("硬體監控：程序結束"); break
-            except Exception: self.pm.update_hardware_status("硬體監控：發生錯誤"); break
+                clear_output(wait=True)
+                self._draw_dashboard()
+                time.sleep(self._refresh_rate)
+            except Exception:
+                # 在顯示迴圈中捕獲異常，避免主程式崩潰
+                pass
+
+    def _draw_dashboard(self):
+        """繪製單一影格的儀表板。"""
+        # --- Part A: 標題 ---
+        print("╔═════════════════════════════════════════════════════════════════════════╗")
+        print("║                      🚀 鳳凰之心指揮中心 v4.0 🚀                      ║")
+        print("╚═════════════════════════════════════════════════════════════════════════╝")
+
+        # --- Part B: 日誌區 ---
+        print("\n---[ 最近日誌 ]-------------------------------------------------------------")
+        recent_logs = self._log_manager.get_recent_logs(self._log_lines_to_show)
+        for log in recent_logs:
+            ts = log["timestamp"].strftime('%H:%M:%S.%f')[:-3]
+            print(f"[{ts}] [{log['level']:<7}] {log['message']}")
+        # 打印空行以保持日誌區高度穩定
+        for _ in range(self._log_lines_to_show - len(recent_logs)):
+            print()
+
+        # --- Part C: 狀態區 ---
+        print("\n---[ 即時狀態 ]-------------------------------------------------------------")
+        light = self.STATUS_LIGHTS.get(self._stats.get("light", "待機"), "⚪️")
+        print(f"{light} 核心狀態：{self._stats.get('task_status', '待命中...')}")
+        
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        ts = datetime.now(self._log_manager.timezone).strftime('%H:%M:%S')
+        print(f"💻 硬體監控：[{ts}] CPU: {cpu:5.1f}% | RAM: {ram:5.1f}%")
+
+        # --- Part D: 按鈕區 (透過 display 顯示 HTML) ---
+        button_html = """
+        <div style="border:2px solid #00BCD4; padding:10px; border-radius:8px; margin-top: 15px; background-color:#1a1a1a;">
+            <p style="text-align:center; margin:0;">
+                <a href="YOUR_FASTAPI_URL_PLACEHOLDER" target="_blank" style="background-color:#00BCD4; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold;">
+                    開啟網頁操作介面
+                </a>
+            </p>
+        </div>
+        """
+        display(HTML(button_html))
 
     def start(self):
-        if not self.is_running: self._thread = threading.Thread(target=self._monitor, daemon=True); self._thread.start()
+        self._thread.start()
+
     def stop(self):
-        self.is_running = False
-        if self._thread and self._thread.is_alive(): self._thread.join(timeout=self.interval * 2)
+        self._stop_event.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1)
+        # 停止後，最後一次清理畫面並顯示最終訊息
+        clear_output(wait=True)
+        print("--- [DisplayManager] 視覺指揮官已停止運作 ---")
 
 
 # █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█
 # █   Part 3: 主要業務邏輯與啟動協調器                                  █
 # █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█
 
-def main_execution_logic(logger, pm):
+def main_execution_logic(log_manager, stats):
     """專案的主要業務邏輯"""
     try:
-        logger.info("主業務邏輯開始執行...")
-        pm.update_task_status("核心狀態：正在執行主要任務")
+        stats["light"] = "正常"
+        stats["task_status"] = "正在執行主要任務"
+        log_manager.log("INFO", "主業務邏輯開始執行...")
+        
         for i in range(1, 11):
-            logger.battle(f"正在處理第 {i}/10 階段的戰鬥任務...")
-            pm.update_task_status(f"核心狀態：任務進度 {i}/10")
+            log_manager.log("BATTLE", f"正在處理第 {i}/10 階段的戰鬥任務...")
+            stats["task_status"] = f"任務進度 {i}/10"
             time.sleep(0.5)
-            if i % 5 == 0: logger.success(f"第 {i} 階段作戰節點順利完成！")
-        logger.success("所有主要業務邏輯已成功執行完畢！")
-        pm.update_task_status("核心狀態：任務完成，系統待命中")
+            if i == 7:
+                stats["light"] = "警告"
+                log_manager.log("WARNING", "偵測到 API 回應延遲，已自動重試...")
+            if i % 5 == 0:
+                log_manager.log("SUCCESS", f"第 {i} 階段作戰節點順利完成！")
+        
+        stats["light"] = "完成"
+        stats["task_status"] = "所有主要業務邏輯已成功執行完畢！"
+        log_manager.log("SUCCESS", stats["task_status"])
+        
+        stats["light"] = "待機"
+        stats["task_status"] = "任務完成，系統待命中"
+
     except KeyboardInterrupt:
-        logger.warning("偵測到手動中斷信號！")
-        pm.update_task_status("核心狀態：使用者手動中斷")
+        stats["light"] = "警告"
+        stats["task_status"] = "使用者手動中斷"
+        log_manager.log("WARNING", "偵測到手動中斷信號！")
     except Exception as e:
-        logger.error(f"主業務邏輯發生未預期錯誤: {e}")
-        pm.update_task_status(f"核心狀態：發生致命錯誤！")
+        stats["light"] = "錯誤"
+        stats["task_status"] = f"發生致命錯誤！"
+        log_manager.log("ERROR", f"主業務邏輯發生未預期錯誤: {e}")
 
 def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, base_path):
     """專案啟動主函數，由 Colab 儲存格呼叫"""
-    pm, monitor, logger = None, None, None
+    display_manager = None
+    
+    # 共享的狀態字典
+    stats = {
+        "task_status": "準備中...",
+        "light": "正常" # 狀態燈號: 正常, 警告, 錯誤, 完成, 待機
+    }
+
     try:
-        button_html = """<div style="border:2px solid #00BCD4;padding:10px;border-radius:8px;background-color:#1a1a1a;"><h2 style="text-align:center;color:#00BCD4;font-family:'Orbitron',sans-serif;">🚀 鳳凰之心指揮中心 🚀</h2><p style="text-align:center;"><a href="YOUR_FASTAPI_URL_PLACEHOLDER" target="_blank" style="background-color:#00BCD4;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">開啟網頁操作介面</a></p></div>"""
-        pm = PresentationManager(log_lines=log_lines)
-        pm.setup_layout(button_html)
-        logger = Logger(presentation_manager=pm, timezone=timezone)
-        monitor = HardwareMonitor(presentation_manager=pm, interval=1.0)
-        logger.info("正在啟動所有核心服務...")
-        monitor.start()
-        logger.info("硬體監控情報員已派出。")
-        logger.success("所有服務已成功啟動，指揮中心上線！")
-        main_execution_logic(logger, pm)
-        while True: time.sleep(1)
+        # --- 1. 初始化日誌與顯示管理器 ---
+        log_manager = LogManager(timezone_str=timezone)
+        display_manager = DisplayManager(stats, log_manager, log_lines_to_show=log_lines)
+
+        # --- 2. 啟動顯示迴圈 ---
+        display_manager.start()
+        log_manager.log("INFO", "視覺指揮官已啟動。")
+
+        # --- 3. 設定檔案日誌 ---
+        log_manager.setup_file_logging(log_dir=project_path / "logs")
+        log_manager.log("INFO", f"檔案日誌系統已設定，將記錄至 {log_manager.log_file_path}")
+        
+        log_manager.log("SUCCESS", "所有服務已成功啟動，指揮中心上線！")
+
+        # --- 4. 執行主要業務邏輯 ---
+        main_execution_logic(log_manager, stats)
+
+        # --- 5. 保持待命 ---
+        while True:
+            time.sleep(1)
+
     except KeyboardInterrupt:
-        if logger: logger.warning("系統在運行中被手動中斷！")
-        if pm: pm.update_task_status("核心狀態：系統已被中斷")
+        if 'log_manager' in locals() and log_manager:
+            log_manager.log("WARNING", "系統在運行中被手動中斷！")
     finally:
-        if monitor: monitor.stop()
-        if archive_folder_name and archive_folder_name.strip():
-            print("\n--- 執行日誌歸檔 (台北時區) ---")
+        # --- 6. 優雅關閉 ---
+        if display_manager:
+            display_manager.stop()
+
+        # --- 7. 執行日誌歸檔 ---
+        if 'log_manager' in locals() and log_manager and archive_folder_name and archive_folder_name.strip():
+            print(f"\n--- 執行日誌歸檔 (台北時區) ---")
             try:
-                tz, now_in_tz = pytz.timezone(timezone), datetime.now(pytz.timezone(timezone))
-                today_str = now_in_tz.strftime('%Y-%m-%d')
-                source_log_path = project_path / "logs" / f"日誌-{today_str}.md"
+                source_log_path = log_manager.log_file_path
                 archive_folder_path = base_path / archive_folder_name.strip()
-                if source_log_path.exists():
+                
+                if source_log_path and source_log_path.exists():
                     archive_folder_path.mkdir(exist_ok=True)
-                    ts_str = now_in_tz.strftime("%Y%m%d_%H%M%S")
+                    ts_str = datetime.now(log_manager.timezone).strftime("%Y%m%d_%H%M%S")
                     dest_path = archive_folder_path / f"日誌_{ts_str}.md"
                     shutil.copy2(source_log_path, dest_path)
                     print(f"✅ 日誌已成功歸檔至: {dest_path}")
                 else:
                     print(f"⚠️  警告：找不到來源日誌檔 {source_log_path}。")
-            except Exception as e: print(f"💥 歸檔期間發生錯誤: {e}")
-        if pm: pm.stop()
+            except Exception as e:
+                print(f"💥 歸檔期間發生錯誤: {e}")
+        
         print("--- 鳳凰之心指揮中心程序已結束 ---")
