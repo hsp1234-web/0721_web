@@ -1,7 +1,32 @@
+# 核心依賴 (任何環境都需要)
 fastapi
-uvicorn[standard]
-websockets
+uvicorn
+duckdb
+python-multipart # fastapi 上傳檔案需要
+# 用於系統監控
 psutil
-pydantic-settings
-uv
-python-dotenv
+# 用於非同步佇列
+aiofiles
+# 用於資料處理
+pandas
+# 用於整合測試
+httpx
+
+# Colab 環境特定依賴
+ipywidgets
+IPython
+
+# --- 測試框架 ---
+pytest         # 核心測試框架
+pytest-cov     # 測試覆蓋率外掛
+pytest-asyncio # 支援異步 (asyncio) 測試
+pytest-timeout # 設定測試超時，防止卡死
+
+# --- 程式碼品質與預檢工具 ---
+ruff           # Linter 和 Formatter，速度極快
+deptry         # 依賴關係檢查
+mypy           # 靜態型別檢查
+bandit         # 程式碼安全掃描
+radon          # 程式碼複雜度分析
+coverage       # 測試覆蓋率
+pre-commit     # Git 提交鉤子管理

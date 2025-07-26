@@ -136,7 +136,7 @@ def start_web_server(log_manager, stats, port=8000):
         time.sleep(1)
         
         log_manager.log("BATTLE", f"正在背景啟動 FastAPI 伺服器於埠號 {port}...")
-        server_process = subprocess.Popen([sys.executable, "server_main.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+        server_process = subprocess.Popen([sys.executable, "main.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
         
         for line in iter(server_process.stdout.readline, ''):
             log_manager.log("SERVER", line.strip())

@@ -1,6 +1,0 @@
-# Colab 環境特定依賴
--r base.txt
-
-# Colab UI 互動
-ipywidgets
-IPython
