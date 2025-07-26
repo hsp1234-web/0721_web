@@ -25,7 +25,7 @@
 | `server_main.py`          | **核心服務啟動器**：極簡的、阻塞式的伺服器啟動腳本，用於生產和 Colab 環境，確保服務長期運行。 | `uvicorn`, `argparse`。                                              |
 | `main.py`                 | **應用主入口**：建立 FastAPI 實例，動態掃描並聚合所有 `apps` 的 API 路由。 | FastAPI 路由管理 (`include_router`)、動態模組匯入 (`importlib`)。     |
 | `apps/*`                  | **業務邏輯單元**：包含所有具體應用功能（如量化、語音轉錄）的獨立模組。 | 業務邏輯、懶加載模式 (Lazy Loading)。                                |
-| `colab_run.py`            | **Colab 橋接器與儀表板**：作為 Colab 的唯一接口，不僅負責啟動流程，還內建一個強大的純文字儀表板 (`PrecisionIndicator`)，用於即時監控。 | `PrecisionIndicator`、ANSI 跳脫碼、`IPython.display`、多執行緒渲染。 |
+| `colab_run.py`            | **Colab 顯示層管理器**：作為 Colab 的唯一接口，採用「介面優先」架構。主線程負責立即渲染 HTML 儀表板，並將所有耗時操作（建立 venv、安裝依賴、啟動服務）委派給一個背景工作線程。 | `IPython.display`、多執行緒 (`threading`)、`subprocess`。             |
 | `logger/main.py`          | **中央日誌中心**：由一個日誌消費者進程，負責將日誌批次寫入資料庫。     | 非同步佇列 (`multiprocessing.Queue`)、單一寫入者模式 (Single Writer)。 |
 | `database/`               | **日誌與指標資料庫**：儲存所有結構化的日誌與系統監控數據。             | DuckDB (或 SQLite)，高效批次寫入。                                    |
 | `templates/dashboard.html`| **本地啟動儀表板**：由 `run.py` 使用的 HTML 範本，用於展示啟動動畫。     | HTML/CSS/JS、WebSocket 客戶端。                                      |
@@ -90,15 +90,39 @@ graph TD
     在 Colab 中，啟動流程由 `Colab_Guide.md` 中的儲存格觸發。該儲存格呼叫 `colab_run.py`，此腳本包含一個特殊設計的 `PrecisionIndicator` 類別，作為一個純文字、多區塊的儀表板渲染引擎。
 
     其運作流程如下：
-    - **模擬指揮官**：`colab_run.py` 自身會模擬一個微型的指揮官，直接啟動主應用進程。
-    - **啟動渲染執行緒**：`PrecisionIndicator` 會在一個獨立的背景執行緒中運行。
-    - **持續重繪**：該執行緒以固定頻率（約 0.2 秒）執行一個渲染迴圈。在每次迴圈中，它會：
-        1.  使用 `clear_output()` 清空 Colab 儲存格的輸出。
-        2.  從共享的狀態字典中讀取最新的 CPU、RAM 和核心服務狀態。
-        3.  從一個 `deque` 中讀取最新的關鍵日誌。
-        4.  使用 ANSI 跳脫碼和偽圖形字元，繪製出一個包含頂部面板、日誌區和底部狀態欄的完整儀表板畫面。
-        5.  將繪製好的多行字串一次性 `print` 到儲存格。
-    - **資訊高度整合**：這種方法取代了過去將應用程式嵌入 `iframe` 的方式，提供了一個資訊密度更高、反應更迅速、視覺上更統一的作戰駕駛艙。
+    - **主線程 (Main Thread):**
+        1.  **立即渲染:** 執行 `display(HTML(...))`，在幾秒內將 `dashboard.html` 的內容呈現給使用者。
+        2.  **啟動背景線程:** 建立並啟動一個 `threading.Thread`，其目標是執行所有耗時的後端準備工作。
+        3.  **等待中斷:** 主線程 `join()` 等待背景線程結束，或捕捉 `KeyboardInterrupt` 以便優雅地關閉系統。
+
+    - **背景線程 (Work Thread):**
+        1.  **建立虛擬環境:** 檢查 `.venv` 是否存在，若無則執行 `python -m venv .venv`。
+        2.  **安裝依賴:** 使用 `.venv/bin/uv` 根據 `requirements/colab.txt` 安裝所有必要的套件。
+        3.  **啟動核心服務:** 執行 `.venv/bin/python server_main.py`，在一個新的子進程中啟動 FastAPI 伺服器。
+        4.  **進入監控迴圈:** 開始一個無限迴圈，定期從 `psutil` 收集系統資源數據、從伺服器子進程讀取日誌，並透過 `IPython.display.Javascript` 將這些數據即時推送到前端儀表板。
+
+    這種非同步、解耦的架構，完美地解決了 Colab 環境下啟動時間過長導致的使用者體驗問題，實現了「瞬時反應駕駛艙」的核心目標。
+
+    ```mermaid
+    graph TD
+        subgraph Colab Notebook Cell
+            A[使用者點擊 "Run"] --> B[colab_run.py];
+        end
+
+        subgraph B [主線程 Main Thread]
+            B1[渲染 dashboard.html] --> B2[啟動背景線程];
+            B2 --> B3[等待 KeyboardInterrupt];
+        end
+
+        subgraph Work Thread [背景線程 Work Thread]
+            C[建立 .venv] --> D[安裝依賴];
+            D --> E[啟動 server_main.py];
+            E --> F[進入監控與更新迴圈];
+        end
+
+        B2 -- start --> C;
+        F -- JS Call --> B1;
+    ```
 
 ## 4. 依賴與虛擬環境管理
 

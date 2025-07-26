@@ -75,19 +75,35 @@ class SystemMonitor:
         self.server_process = None
 
     def load_psutil(self):
-        """延遲載入 psutil。"""
+        """延遲載入 psutil，並從虛擬環境中尋找。"""
         try:
+            # 優先嘗試直接導入，以防它在全域可用
             import psutil
             self.psutil = psutil
             return True
         except ImportError:
-            return False
+            # 如果直接導入失敗，則嘗試從虛擬環境的 site-packages 中載入
+            try:
+                venv_dir = Path(".venv")
+                # 這是一個常見的結構，但可能因 Python 版本而異
+                site_packages = next(venv_dir.glob("lib/python*/site-packages"))
+                if site_packages.is_dir() and str(site_packages) not in sys.path:
+                    sys.path.insert(0, str(site_packages))
+
+                import psutil
+                self.psutil = psutil
+                self._js_call('bootLog', '<span class="info">成功從 .venv 動態載入 psutil。</span>')
+                return True
+            except (StopIteration, ImportError) as e:
+                self._js_call('bootLog', f'<span class="warn">⚠️ 無法找到或載入 psutil: {e}</span>')
+                return False
 
     def start_server(self, port, log_queue):
         """在背景啟動 FastAPI 伺服器。"""
         env = os.environ.copy()
         env["PYTHONPATH"] = str(Path.cwd())
-        cmd = [sys.executable, "server_main.py", "--port", str(port)]
+        # 使用虛擬環境的 python 來啟動伺服器
+        cmd = [self.venv_python, "server_main.py", "--port", str(port)]
         
         self.server_process = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -146,30 +162,64 @@ class DashboardManager:
         except Exception:
             pass # 忽略在非活躍儲存格中的 JS 呼叫錯誤
 
+    def _run_command(self, command, venv_path=None):
+        """在子進程中執行命令並將輸出即時串流到前端。"""
+        executable = command[0]
+        if venv_path:
+            executable = str(Path(venv_path) / "bin" / command[0])
+
+        process = subprocess.Popen(
+            [executable] + command[1:],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            bufsize=1
+        )
+        for line in iter(process.stdout.readline, ''):
+            self._js_call('bootLog', f'<span class="dim">{line.strip()}</span>')
+
+        process.wait()
+        return process.returncode
+
     def _install_dependencies(self):
-        """使用 uv 安裝依賴並通過 JS 顯示進度。"""
+        """建立虛擬環境，安裝依賴，並通過 JS 顯示進度。"""
         self._js_call('bootLog', '<span class="header">&gt;&gt;&gt; 鳳凰之心 v17.0 駕駛艙啟動序列 &lt;&lt;&lt;</span>')
         
-        try:
-            # 1. 安裝 uv
-            self._js_call('bootLog', '<span class="info">安裝 uv 加速器...</span>')
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "uv"], check=True)
+        venv_dir = Path(".venv")
+        if not venv_dir.exists():
+            self._js_call('bootLog', f'<span class="info">正在建立虛擬環境 (.venv)...</span>')
+            try:
+                subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+                self._js_call('bootLog', '<span class="ok">✅ 虛擬環境建立成功。</span>')
+            except subprocess.CalledProcessError as e:
+                self._js_call('bootLog', f'<span class="error">❌ 虛擬環境建立失敗: {e}</span>')
+                return False
+        else:
+            self._js_call('bootLog', '<span class="info">偵測到現有虛擬環境 (.venv)，跳過建立步驟。</span>')
             
-            # 2. 使用 uv 安裝依賴
-            requirements_path = "requirements.txt"
-            self._js_call('bootLog', f'<span class="info">使用 uv 安裝 {requirements_path}...</span>')
-            cmd = ["uv", "pip", "install", "-r", requirements_path]
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+        # 定義虛擬環境中的執行檔路徑
+        self.venv_python = str(venv_dir / "bin" / "python")
+        self.venv_uv = str(venv_dir / "bin" / "uv")
 
-            for line in iter(process.stdout.readline, ''):
-                self._js_call('bootLog', f'<span class="dim">{line.strip()}</span>')
+        try:
+            # 1. 在虛擬環境中安裝 uv
+            self._js_call('bootLog', '<span class="info">在 .venv 中安裝 uv 加速器...</span>')
+            if self._run_command([self.venv_python, "-m", "pip", "install", "-q", "uv"]) != 0:
+                self._js_call('bootLog', f'<span class="error">❌ 在 .venv 中安裝 uv 失敗。</span>')
+                return False
+
+            # 2. 使用 venv 中的 uv 安裝依賴
+            requirements_path = "requirements/colab.txt"
+            self._js_call('bootLog', f'<span class="info">使用 .venv/bin/uv 安裝 {requirements_path}...</span>')
             
-            process.wait()
-            if process.returncode == 0:
-                self._js_call('bootLog', '<span class="ok">✅ 所有依賴已成功安裝。</span>')
+            return_code = self._run_command([self.venv_uv, "pip", "install", "-r", requirements_path])
+
+            if return_code == 0:
+                self._js_call('bootLog', '<span class="ok">✅ 所有依賴已成功安裝至 .venv。</span>')
                 return True
             else:
-                self._js_call('bootLog', f'<span class="error">❌ 依賴安裝失敗，返回碼: {process.returncode}</span>')
+                self._js_call('bootLog', f'<span class="error">❌ 依賴安裝失敗，返回碼: {return_code}</span>')
                 return False
         except Exception as e:
             self._js_call('bootLog', f'<span class="error">❌ 安裝過程中發生嚴重錯誤: {e}</span>')
