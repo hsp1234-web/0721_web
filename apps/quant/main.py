@@ -22,3 +22,14 @@ async def get_backtest_status(task_id: str) -> Dict[str, Any]:
     if not status:
         raise HTTPException(status_code=404, detail="Task not found")
     return status
+
+
+@router.get("/data")
+async def get_quant_data() -> Dict[str, Any]:
+    """提供一些模擬的量化數據。"""
+    return {
+        "symbol": "BTC/USDT",
+        "timestamp": "2025-07-26T10:00:00Z",
+        "price": 100000.0,
+        "volume": 123.456,
+    }

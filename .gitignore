@@ -18,11 +18,12 @@ dist/
 *.sqlite3
 *.db
 *.sqlite
-# *.duckdb
-# *.duckdb.wal
+*.duckdb
+*.duckdb.wal
 
 # Test artifacts
 .test_venv/
+.e2e_venv/
 test_final_archive/
 
 # Logs

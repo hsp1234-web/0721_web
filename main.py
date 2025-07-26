@@ -8,10 +8,41 @@ from fastapi.responses import HTMLResponse
 from core.monitor import SYSTEM_EVENTS_QUEUE, PerformanceMonitor
 from core.presentation_manager import PresentationManager
 
+import importlib
+import os
+from pathlib import Path
+
 # --- App Initialization ---
 app = FastAPI(title="鳳凰之心後端指揮中心")
 presentation_manager = PresentationManager()
 monitor = PerformanceMonitor(refresh_interval=1.0)
+
+# --- Dynamic App Loading ---
+def load_app_routers():
+    """動態掃描 'apps' 目錄並載入所有子應用的 API 路由器。"""
+    apps_dir = Path("apps")
+    if not apps_dir.is_dir():
+        logging.warning("'apps' a directory not found, skipping dynamic router loading.")
+        return
+
+    for entry in apps_dir.iterdir():
+        if entry.is_dir() and (entry / "main.py").is_file():
+            app_name = entry.name
+            try:
+                # 動態導入 'apps.{app_name}.main' 模組
+                module_name = f"apps.{app_name}.main"
+                module = importlib.import_module(module_name)
+                if hasattr(module, "router"):
+                    # 將子應用的路由器包含進主應用
+                    # 使用 app_name 作為前綴
+                    app.include_router(module.router, prefix=f"/{app_name}", tags=[app_name])
+                    logging.info(f"✅ Successfully loaded router from '{app_name}'.")
+                else:
+                    logging.warning(f"⚠️  Module '{module_name}' does not have a 'router' attribute.")
+            except Exception as e:
+                logging.error(f"❌ Failed to load router from '{app_name}': {e}", exc_info=True)
+
+load_app_routers()
 
 # --- Connection Managers ---
 class ConnectionManager:
