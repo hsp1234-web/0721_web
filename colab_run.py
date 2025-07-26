@@ -131,41 +131,76 @@ class DisplayManager:
 # █   Part 3: 主要業務邏輯與啟動協調器                                  █
 # █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█
 
+import concurrent.futures
+
 def start_web_server(log_manager, stats, lock, port=8000):
-    """在背景執行緒中啟動 FastAPI 伺服器並透過重試機制更新 URL。"""
+    """在背景執行緒中啟動 FastAPI 伺服器並透過「主動超時重試機制」更新 URL。"""
+    def get_colab_url(port):
+        """嘗試獲取 Colab 公開 URL，此函式應在獨立執行緒中運行。"""
+        try:
+            # colab_output.eval_js 可能會卡住，因此需要此機制
+            return colab_output.eval_js(f'google.colab.kernel.proxyPort({port})')
+        except Exception as e:
+            # 這個例外可能不會被觸發，如果 eval_js 完全卡死
+            log_manager.log("ERROR", f"獲取 URL 時內部發生錯誤: {e}")
+            return None
+
     def server_thread():
         log_manager.log("INFO", "正在嘗試清理舊的伺服器程序...")
         subprocess.run(f"fuser -k -n tcp {port}", shell=True, capture_output=True)
         time.sleep(1)
-        
+
         log_manager.log("BATTLE", f"正在背景啟動 FastAPI 伺服器於埠號 {port}...")
-        server_process = subprocess.Popen([sys.executable, "main.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
-        
+        server_process = subprocess.Popen(
+            [sys.executable, "main.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8'
+        )
+
         for line in iter(server_process.stdout.readline, ''):
             log_manager.log("SERVER", line.strip())
             if "Uvicorn running on" in line:
                 log_manager.log("SUCCESS", "FastAPI 伺服器已成功啟動！正在獲取公開 URL...")
-                
-                # --- 關鍵修正：引入重試機制 ---
-                max_retries = 5
+
+                # --- 主動超時重試機制 ---
+                max_retries = 10
+                total_timeout = 30
+                single_try_timeout = 3
+                url_found = False
+
                 for attempt in range(max_retries):
-                    try:
-                        app_url = colab_output.eval_js(f'google.colab.kernel.proxyPort({port})')
-                        if app_url:
-                            with lock:
-                                stats["app_url"] = app_url
-                            log_manager.log("SUCCESS", f"網頁介面 URL 已成功獲取: {app_url}")
-                            break # 成功後跳出重試迴圈
-                    except Exception:
-                        if attempt < max_retries - 1:
-                            log_manager.log("WARNING", f"獲取 URL 失敗 (第 {attempt+1} 次)，2 秒後重試...")
-                            time.sleep(2)
-                        else:
-                            error_msg = "在多次嘗試後，獲取 URL 依然失敗。"
-                            with lock:
-                                stats["app_url"] = error_msg
-                            log_manager.log("ERROR", error_msg)
-                break 
+                    log_manager.log("INFO", f"第 {attempt + 1}/{max_retries} 次嘗試獲取 URL (單次超時: {single_try_timeout}s)...")
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(get_colab_url, port)
+                        try:
+                            app_url = future.result(timeout=single_try_timeout)
+                            if app_url:
+                                with lock:
+                                    stats["app_url"] = app_url
+                                log_manager.log("SUCCESS", f"網頁介面 URL 已成功獲取: {app_url}")
+                                url_found = True
+                                break
+                        except concurrent.futures.TimeoutError:
+                            log_manager.log("WARNING", f"第 {attempt + 1} 次嘗試獲取 URL 超時！")
+                        except Exception as e:
+                            log_manager.log("ERROR", f"第 {attempt + 1} 次嘗試中發生未預期錯誤: {e}")
+
+                    if url_found:
+                        break
+
+                    time.sleep( (total_timeout / max_retries) - single_try_timeout )
+
+
+                if not url_found:
+                    error_msg = "在多次嘗試後，獲取 URL 依然失敗。"
+                    with lock:
+                        stats["app_url"] = error_msg
+                    log_manager.log("ERROR", error_msg)
+
+                break
+
         server_process.wait()
 
     thread = threading.Thread(target=server_thread, daemon=True)
