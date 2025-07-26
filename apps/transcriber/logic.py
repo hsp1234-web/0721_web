@@ -1,57 +1,98 @@
-import time
+# 繁體中文: apps/transcriber/logic.py - 語音轉錄核心邏輯封裝
+
+import uuid
+import aiofiles
+import aiosqlite
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 
-# --- 懶加載 (Lazy Loading) 的核心 ---
+# 調整導入路徑
+from .core import BaseConfig, get_logger
+from .queues import add_task_to_queue
 
-AI_MODEL: Optional[Dict[str, Any]] = None
+logger = get_logger(__name__)
 
 
-def _load_model() -> Dict[str, Any]:
-    """一個模擬的、耗時的模型加載函數。
-
-    在真實應用中，這裡會是 `torch.load()` 或類似的操作。
+async def submit_transcription_task(file: UploadFile, config: BaseConfig) -> Dict[str, str]:
     """
-    print("[Transcriber Logic] 開始加載大型 AI 模型... (這會需要幾秒鐘)")
-    # 模擬 IO 或計算密集型操作
-    time.sleep(5)
-    model_data = {"version": "1.0", "load_time": time.time()}
-    print(f"[Transcriber Logic] 模型加載完畢！資料: {model_data}")
-    return model_data
+    處理檔案上傳，儲存檔案，並在資料庫中創建一個新的轉錄任務。
+
+    Args:
+        file (UploadFile): 從 FastAPI 端點接收的上傳檔案。
+        config (BaseConfig): 當前的應用設定。
+
+    Returns:
+        Dict[str, str]: 包含新任務 ID 的字典。
+
+    Raises:
+        HTTPException: 如果檔案或資料庫操作失敗。
+    """
+    task_id = str(uuid.uuid4())
+
+    # 使用 pathlib 確保路徑操作的穩健性
+    filename = file.filename if file.filename else "unknown_file"
+    filepath = config.UPLOAD_DIR / f"{task_id}_{filename}"
+
+    try:
+        # 確保上傳目錄存在
+        config.UPLOAD_DIR.mkdir(exist_ok=True)
+
+        # 非同步寫入檔案
+        async with aiofiles.open(filepath, "wb") as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB 區塊
+                await out_file.write(content)
+        logger.info("檔案 '%s' 已上傳至 '%s'", filename, filepath)
+
+        # 在資料庫中記錄任務
+        async with aiosqlite.connect(config.DATABASE_FILE) as db:
+            await db.execute(
+                "INSERT INTO transcription_tasks (id, original_filepath) VALUES (?, ?)",
+                (task_id, str(filepath)),
+            )
+            await db.commit()
+
+        # 將任務加入處理佇列
+        await add_task_to_queue(task_id, config)
+        logger.info("任務已在資料庫中創建，ID: %s", task_id)
+
+    except IOError as e:
+        logger.exception("檔案操作失敗: %s", e)
+        raise HTTPException(status_code=500, detail="檔案操作失敗。") from e
+    except aiosqlite.Error as e:
+        logger.exception("資料庫操作失敗: %s", e)
+        raise HTTPException(status_code=500, detail="資料庫操作失敗。") from e
+
+    return {"task_id": task_id}
 
 
-def get_model() -> Dict[str, Any]:
-    """獲取模型的接口。這是實現懶加載的關鍵。"""
-    global AI_MODEL
-    if AI_MODEL is None:
-        AI_MODEL = _load_model()
-    return AI_MODEL
+async def get_task_status(task_id: str, config: BaseConfig) -> Optional[Dict[str, Any]]:
+    """
+    根據任務 ID 查詢並返回任務的狀態和結果。
 
+    Args:
+        task_id (str): 要查詢的任務 ID。
+        config (BaseConfig): 當前的應用設定。
 
-# --- 業務邏輯函數 ---
+    Returns:
+        Optional[Dict[str, Any]]: 如果找到任務，返回包含任務詳情的字典，否則返回 None。
 
+    Raises:
+        HTTPException: 如果資料庫查詢失敗。
+    """
+    try:
+        async with aiosqlite.connect(config.DATABASE_FILE) as db:
+            db.row_factory = aiosqlite.Row  # 以字典形式返回結果
+            async with db.execute(
+                "SELECT * FROM transcription_tasks WHERE id = ?", (task_id,)
+            ) as cursor:
+                task_data = await cursor.fetchone()
 
-def transcribe_audio(file: UploadFile) -> Dict[str, Any]:
-    """處理音訊轉錄的核心業務邏輯。"""
-    model = get_model()
+        if task_data:
+            return dict(task_data)
+        return None
 
-    print(
-        f"[Transcriber Logic] 正在使用模型 {model['version']} 處理檔案: {file.filename}"
-    )
-    time.sleep(1)
-
-    content = file.file.read(100)
-    transcription_result = (
-        f"檔案 '{file.filename}' (大小: {file.size} 字節) 的模擬轉錄結果。"
-        f"內容開頭: {content[:50]!r}..."
-    )
-
-    print("[Transcriber Logic] 處理完畢。")
-
-    return {
-        "filename": file.filename,
-        "content_type": file.content_type,
-        "transcription": transcription_result,
-        "model_used": model,
-    }
+    except aiosqlite.Error as e:
+        logger.exception("查詢任務狀態時出錯 (ID: %s): %s", task_id, e)
+        raise HTTPException(status_code=500, detail="查詢狀態時出錯。") from e

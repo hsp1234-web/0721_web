@@ -1,32 +1,57 @@
-# 核心依賴 (任何環境都需要)
+# 繁體中文: 統一指揮中心 - 依賴清單
+
+# --- 核心框架 ---
 fastapi
 uvicorn
-duckdb
-python-multipart # fastapi 上傳檔案需要
-# 用於系統監控
-psutil
-# 用於非同步佇列
-aiofiles
-# 用於資料處理
-pandas
-# 用於整合測試
-httpx
+python-multipart
+click
 
-# Colab 環境特定依賴
-ipywidgets
-IPython
+# --- 數據處理與資料庫 ---
+pandas
+numpy<2.0
+duckdb
+aiosqlite
+pyyaml
+openpyxl
+pandas-ta
+sqlalchemy
+
+# --- 語音轉錄 ---
+faster-whisper
+torch
+opencc-python-reimplemented
+
+# --- 量化分析 ---
+vectorbt
+deap
+
+# --- 網路與 API 客戶端 ---
+requests
+requests-cache
+fredapi
+yfinance
+httpx
+websockets
+
+# --- 工具與其他 ---
+rich
+psutil
+pybreaker
+aiofiles
+setuptools
 
 # --- 測試框架 ---
-pytest         # 核心測試框架
-pytest-cov     # 測試覆蓋率外掛
-pytest-asyncio # 支援異步 (asyncio) 測試
-pytest-timeout # 設定測試超時，防止卡死
+pytest
+pytest-cov
+pytest-asyncio
+pytest-timeout
+pytest-xprocess
 
-# --- 程式碼品質與預檢工具 ---
-ruff           # Linter 和 Formatter，速度極快
-deptry         # 依賴關係檢查
-mypy           # 靜態型別檢查
-bandit         # 程式碼安全掃描
-radon          # 程式碼複雜度分析
-coverage       # 測試覆蓋率
-pre-commit     # Git 提交鉤子管理
+# --- 程式碼品質 ---
+ruff
+deptry
+mypy
+bandit
+radon
+coverage
+pre-commit
