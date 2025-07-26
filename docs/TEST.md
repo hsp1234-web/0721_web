@@ -156,6 +156,43 @@ kill $SERVER_PID
 
 ---
 
+## 第八章：修復 `TypeError`：一個關於參數不匹配的經典案例
+
+在整合 v10.1「數字輸入版」的 Colab 儲存格時，我們遭遇了一個經典的 `TypeError` 錯誤。這個案例雖然簡單，卻完美地展示了在軟體開發中，前端介面與後端邏輯保持同步的重要性。
+
+### 問題描述
+
+當執行新的 Colab 儲存格時，啟動程序在呼叫 `run_phoenix_heart` 函式時崩潰，並拋出以下錯誤：
+```
+TypeError: run_phoenix_heart() got an unexpected keyword argument 'refresh_rate'
+```
+
+### 根本原因分析
+
+1.  **前端變更**：新的 Colab 儲存格介面 (v10.1) 引入了一個數字輸入框，允許使用者自訂儀表板的更新頻率。這個值被作為一個名為 `refresh_rate` 的新參數，在啟動時傳遞給後端。
+2.  **後端未同步**：與之對應的後端函式 `colab_run.py` 中的 `run_phoenix_heart`，其函式簽章 (function signature) 尚未更新，不認識這個新的 `refresh_rate` 參數。
+3.  **連鎖反應**：`run_phoenix_heart` 內部在建立 `DisplayManager` 物件時，沒有傳遞這個更新頻率，而是使用了 `DisplayManager` 類別中寫死的預設值 (`0.25`)。
+
+這個問題清楚地表明，前端的修改沒有完全地、端到端地與後端邏輯進行同步。
+
+### 解決方案
+
+解決這個問題的步驟非常直接：
+
+1.  **修改 `colab_run.py` 中的函式簽章**：
+    -   將 `def run_phoenix_heart(...)` 的定義修改為 `def run_phoenix_heart(..., refresh_rate):`，使其能夠正式接收前端傳來的 `refresh_rate` 參數。
+
+2.  **向下傳遞參數**：
+    -   在 `run_phoenix_heart` 函式內部，將接收到的 `refresh_rate` 參數，在建立 `DisplayManager` 物件時傳遞下去：`display_manager = DisplayManager(..., refresh_rate=refresh_rate)`。
+
+### 核心啟示
+
+-   **介面與實作必須同步**：任何時候當你修改一個函式或 API 的呼叫方式時（例如，增加、刪除或重新命名參數），你必須確保所有呼叫該函式的地方，以及函式自身的定義，都進行了對應的更新。
+-   **錯誤訊息是最好的嚮導**：`TypeError: got an unexpected keyword argument` 是一個非常明確的信號，它直接告訴你問題出在「呼叫者傳遞了一個接收者不認識的參數」。這是除錯過程中最有價值的線索之一。
+-   **端到端測試的重要性**：這個問題如果在開發階段就進行一次完整的端到端測試（從點擊 Colab 執行按鈕開始），就能立刻被發現。這再次強調了自動化測試和完整流程驗證的重要性。
+
+---
+
 ## 五、第五章：「瞬時反應駕駛艙」與「環境隔離」的成功經驗
 
 本次作戰計畫（269-C）的核心是將「瞬時反應駕駛艙」架構與嚴格的「環境隔離」原則相結合，此舉取得了巨大成功，為未來在 Colab 等複雜環境中部署應用樹立了新的標竿。

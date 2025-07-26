@@ -7,8 +7,7 @@ set -e
 VENV_DIR=".e2e_venv"
 HOST="127.0.0.1"
 PORT="8000"
-SERVER_LOG_FILE="WEB/e2e_server.log" # Log file will be inside WEB
-PROJECT_DIR="WEB"
+SERVER_LOG_FILE="e2e_server.log"
 
 # --- 清理函式 ---
 cleanup() {
@@ -32,11 +31,10 @@ echo "--- 建立虛擬環境 ---"
 python3 -m venv "$VENV_DIR"
 
 echo "--- 啟用虛擬環境並安裝依賴 ---"
-source "$VENV_DIR/bin/activate"
-pip install -r "$PROJECT_DIR/requirements.txt"
+"$VENV_DIR/bin/pip" install -r requirements.txt
 
 echo "--- 在背景啟動核心服務 ---"
-nohup python "$PROJECT_DIR/main.py" --host "$HOST" --port "$PORT" > "$SERVER_LOG_FILE" 2>&1 &
+nohup "$VENV_DIR/bin/python" main.py --host "$HOST" --port "$PORT" > "$SERVER_LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
 echo "--- 等待 5 秒後驗證 API ---"
