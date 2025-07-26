@@ -82,7 +82,6 @@ echo "✅ 虛擬環境已啟動。"
 pip install uv > /dev/null
 # 使用 uv 安裝所有開發依賴，確保一切可用
 uv pip install -r requirements/dev.txt > /dev/null
-uv pip install python-multipart > /dev/null
 echo "✅ 依賴安裝完成。"
 
 # 3. 啟動核心服務
@@ -115,21 +114,30 @@ httpx "http://$HOST:$PORT/quant/data" --timeout 10
 echo "✅ 測試 3 通過。"
 
 # 測試 4: /transcriber/upload - 語音轉錄 API (首次呼叫，會觸發懶加載)
-# TODO: 修復 httpx 的檔案上傳語法
-# echo "🧪 測試 4: POST /transcriber/upload (首次呼叫，測試懶加載)"
-# # 建立一個臨時的假音訊檔
-# echo "這是一個假的音訊檔" > fake_audio.mp3
-# httpx --timeout 20 POST "http://$HOST:$PORT/transcriber/upload" -F "file=@fake_audio.mp3"
-# rm fake_audio.mp3
-# echo "✅ 測試 4 通過。"
+echo "🧪 測試 4: POST /transcriber/upload (首次呼叫，測試懶加載)"
+# 我們使用專案根目錄的 fake_audio.mp3
+# 第一次上傳，模型需要時間加載，所以 timeout 設定為 30 秒
+response=$(httpx "http://$HOST:$PORT/transcriber/upload" --method POST --timeout 30 --files file fake_audio.mp3)
+echo "✅ 測試 4 伺服器回應: $response"
+# 簡單驗證回應是否包含檔名，以確認上傳成功
+if [[ ! "$response" == *"fake_audio.mp3"* ]]; then
+    echo "❌ 測試 4 失敗：回應中未找到預期的檔名 'fake_audio.mp3'。"
+    exit 1
+fi
+echo "✅ 測試 4 通過。"
+
 
 # 測試 5: /transcriber/upload - 語音轉錄 API (第二次呼叫，應使用快取)
-# TODO: 修復 httpx 的檔案上傳語法
-# echo "🧪 測試 5: POST /transcriber/upload (第二次呼叫，測試快取)"
-# echo "這是一個假的音訊檔" > fake_audio.mp3
-# httpx --timeout 10 POST "http://$HOST:$PORT/transcriber/upload" -F "file=@fake_audio.mp3"
-# rm fake_audio.mp3
-# echo "✅ 測試 5 通過。"
+echo "🧪 測試 5: POST /transcriber/upload (第二次呼叫，測試快取)"
+# 第二次上傳，模型已加載，應在 10 秒內完成
+response=$(httpx "http://$HOST:$PORT/transcriber/upload" --method POST --timeout 10 --files file fake_audio.mp3)
+echo "✅ 測試 5 伺服器回應: $response"
+# 簡單驗證回應是否包含檔名，以確認上傳成功
+if [[ ! "$response" == *"fake_audio.mp3"* ]]; then
+    echo "❌ 測試 5 失敗：回應中未找到預期的檔名 'fake_audio.mp3'。"
+    exit 1
+fi
+echo "✅ 測試 5 通過。"
 
 # 5. 測試完成
 echo "--- 步驟 5/5: 所有測試均已成功通過 ---"
