@@ -12,6 +12,10 @@ description = "一個現代化、可維護的後端架構。"
 readme = "README.md"
 requires-python = ">=3.8"
 # 核心依賴應該與 requirements/base.txt 同步
+dependencies = [
+    "rich",
+    "toml",
+]
 # classifiers = [...]
 # authors = [...]
 

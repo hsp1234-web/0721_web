@@ -1,0 +1,16 @@
+[project]
+repository_url = "https://github.com/hsp1234-web/0721_web"
+target_branch_or_tag = "2.1.2"
+project_folder_name = "WEB1_E2E_TEST"
+force_repo_refresh = true
+
+[launcher]
+refresh_rate_seconds = 0.1
+log_display_lines = 10
+timezone = "Asia/Taipei"
+
+[log_archive]
+enabled = false
+
+[mode]
+test_mode = true
