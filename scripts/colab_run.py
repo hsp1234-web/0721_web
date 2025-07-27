@@ -227,6 +227,7 @@ def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, ba
     display_manager = None
     stats = {"task_status": "準備中...", "light": "正常", "app_url": "等待伺服器啟動..."}
     lock = threading.Lock()
+    STARTUP_TIMEOUT_SECONDS = 90 # 設定一個 90 秒的啟動超時
 
     try:
         log_manager = LogManager(timezone_str=timezone)
@@ -237,13 +238,46 @@ def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, ba
         log_manager.setup_file_logging(log_dir=project_path / "logs")
         log_manager.log("INFO", f"檔案日誌系統已設定，將記錄至 {log_manager.log_file_path}")
         
-        start_web_server(log_manager, stats, lock, port=8000)
+        # **關鍵修正**: 確保傳遞正確的埠號 8080
+        start_web_server(log_manager, stats, lock, port=8080)
         
         with lock:
             stats["task_status"] = "伺服器啟動中，正在獲取網址..."
 
-        while True:
+        # **關鍵修正**: 引入帶有進度條的優雅超時機制
+        log_manager.log("INFO", f"伺服器啟動程序開始，最長等待 {STARTUP_TIMEOUT_SECONDS} 秒...")
+        start_time = time.time()
+        url_obtained = False
+        while time.time() - start_time < STARTUP_TIMEOUT_SECONDS:
+            with lock:
+                current_url = stats.get("app_url", "")
+                # 檢查 URL 是否已成功獲取
+                if "https://" in current_url:
+                    log_manager.log("SUCCESS", "伺服器 URL 已成功獲取，系統將保持運行。")
+                    url_obtained = True
+                    break
+                # 檢查是否已明確失敗
+                if "失敗" in current_url:
+                    log_manager.log("ERROR", "伺服器啟動失敗，請檢查日誌。")
+                    url_obtained = True # 也視為結束條件
+                    break
+
+            # 繪製進度條
+            elapsed = time.time() - start_time
+            progress = int((elapsed / STARTUP_TIMEOUT_SECONDS) * 40) # 40 個字元的進度條
+            bar = "█" * progress + "-" * (40 - progress)
+            print(f"\r[⏳] 正在等待伺服器啟動... [{bar}] {int(elapsed)}s / {STARTUP_TIMEOUT_SECONDS}s", end="")
             time.sleep(1)
+
+        print() # 換行
+
+        if not url_obtained:
+            log_manager.log("ERROR", f"啟動超時！在 {STARTUP_TIMEOUT_SECONDS} 秒內未能獲取伺服器 URL。")
+        else:
+            # 如果成功，則進入無限迴圈以保持 Colab 活躍
+            log_manager.log("INFO", "您可以隨時透過點擊 Colab 的「停止」按鈕來終止此程序。")
+            while True:
+                time.sleep(3600) # 減少 CPU 消耗
 
     except KeyboardInterrupt:
         if 'log_manager' in locals() and log_manager:
