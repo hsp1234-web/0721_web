@@ -83,12 +83,15 @@ def phoenix_bootstrap():
 
         # --- 步驟 2: 下載程式碼 ---
         print(f"\n--- 步驟 2/4: 下載程式碼 ---")
+        # 關鍵修正：在執行任何檔案操作前，確保 base_path 存在
+        base_path.mkdir(exist_ok=True)
+
         if not project_path.exists():
             print(f"🚀 開始從 GitHub (分支/標籤: {TARGET_BRANCH_OR_TAG}) 拉取程式碼...")
             # 使用 -q (quiet) 選項來減少不必要的 git 輸出
             git_command = ["git", "clone", "-q", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", REPOSITORY_URL, str(project_path)]
-            # 關鍵修正：加入 capture_output=True 和 text=True 以便在出錯時獲取詳細日誌
-            subprocess.run(git_command, check=True, capture_output=True, text=True, encoding='utf-8')
+            # 關鍵修正：明確指定 git 的工作目錄為 base_path，以避免 "Unable to read CWD" 的錯誤
+            subprocess.run(git_command, check=True, capture_output=True, text=True, encoding='utf-8', cwd=base_path)
             print("✅ 程式碼成功下載！")
         else:
             print(f"✅ 資料夾 '{project_path.name}' 已存在，跳過下載。")
