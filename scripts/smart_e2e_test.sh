@@ -16,8 +16,6 @@ trap 'echo "💥 偵測到錯誤在行 $LINENO，指令為: $BASH_COMMAND" >&2' 
 # --- 環境變數 (可由外部覆寫) ---
 # TEST_MODE: "mock" (預設) 或 "real"。用於控制是否安裝和測試大型依賴。
 TEST_MODE="${TEST_MODE:-mock}"
-# REPO_SUBDIR: 專案所在的子目錄
-REPO_SUBDIR="ALL_DATE/MP3_Converter_TXT"
 
 # --- 顏色代碼 (用於日誌輸出) ---
 C_GREEN='\033[0;32m'
@@ -146,7 +144,6 @@ cleanup_venv() {
 main() {
     log_info "====== 智能端到端測試啟動 ======"
     log_info "測試模式: ${TEST_MODE}"
-    log_info "專案子目錄: ${REPO_SUBDIR}"
 
     ensure_uv_installed
 
@@ -168,10 +165,10 @@ run_base_service_test() {
     check_disk_space 1 # 基礎測試需要約 1GB
 
     # 依賴列表
-    local base_deps=("${REPO_SUBDIR}/requirements/base.txt" "${REPO_SUBDIR}/requirements/test.txt")
+    local base_deps=("requirements.txt" "ALL_DATE/MP3_Converter_TXT/requirements/test.txt")
 
     setup_venv_and_install_deps "${venv_name}" "${base_deps[@]}"
-    run_pytest_tests "${venv_name}" "${REPO_SUBDIR}/tests/ignition_test.py" 30
+    run_pytest_tests "${venv_name}" "tests/ignition_test.py" 30
     cleanup_venv "${venv_name}"
 
     log_success "--- 階段一測試完成 ---"
@@ -183,17 +180,15 @@ run_quant_feature_test() {
     check_disk_space 1 # 同樣需要約 1GB
 
     # 依賴列表
-    local quant_deps=("${REPO_SUBDIR}/requirements/base.txt" "${REPO_SUBDIR}/requirements/quant.txt" "${REPO_SUBDIR}/requirements/test.txt")
+    local quant_deps=("apps/quant/requirements.txt" "ALL_DATE/MP3_Converter_TXT/requirements/test.txt")
 
-    if [[ ! -s "${REPO_SUBDIR}/requirements/quant.txt" ]]; then
+    if [[ ! -s "apps/quant/requirements.txt" ]]; then
         log_warn "量化依賴文件为空，跳過此階段。"
         return
     fi
 
     setup_venv_and_install_deps "${venv_name}" "${quant_deps[@]}"
-    # 這裡假設量化測試有特定的測試文件
-    # run_pytest_tests "${venv_name}" "${REPO_SUBDIR}/tests/quant_tests.py" 120
-    log_warn "尚未實現量化功能的具體測試，此階段僅驗證依賴安裝。"
+    run_pytest_tests "${venv_name}" "apps/quant/tests/ignition_test.py" 120
     cleanup_venv "${venv_name}"
 
     log_success "--- 階段二測試完成 ---"
@@ -215,10 +210,10 @@ run_transcriber_feature_test() {
         log_info "模式：[真實測試]。將下載並測試大型語音模型。"
         check_disk_space 5 # 真實模式需要更多空間 (例如 5GB)
 
-        local transcriber_deps=("${REPO_SUBDIR}/requirements/base.txt" "${REPO_SUBDIR}/requirements/transcriber.txt" "${REPO_SUBDIR}/requirements/test.txt")
+        local transcriber_deps=("apps/transcriber/requirements.txt" "ALL_DATE/MP3_Converter_TXT/requirements/test.txt")
 
         setup_venv_and_install_deps "${venv_name}" "${transcriber_deps[@]}"
-        run_pytest_tests "${venv_name}" "${REPO_SUBDIR}/tests/test_e2e_flow.py" 300 # 真實測試需要更長超時
+        run_pytest_tests "${venv_name}" "apps/transcriber/tests/test_e2e_flow.py" 300 # 真實測試需要更長超時
         cleanup_venv "${venv_name}"
 
     elif [[ "$TEST_MODE" == "mock" ]]; then
@@ -226,7 +221,7 @@ run_transcriber_feature_test() {
         check_disk_space 1 # 模擬模式需要較少空間
 
         # 在模擬模式下，我們只安裝基礎依賴和測試依賴
-        local mock_deps=("${REPO_SUBDIR}/requirements/base.txt" "${REPO_SUBDIR}/requirements/test.txt")
+        local mock_deps=("requirements.txt" "requirements/test.txt")
 
         log_info "模擬安裝 'transcriber' 依賴..."
         echo "  -> echo 'Skipping torch installation in mock mode.'"
@@ -236,7 +231,7 @@ run_transcriber_feature_test() {
 
         # 在模擬模式下，我們可能需要一個不同的、不觸及真實模型的測試集
         # 這裡我們依然使用 ignition_test.py 作為流程佔位符
-        run_pytest_tests "${venv_name}" "${REPO_SUBDIR}/tests/ignition_test.py" 30
+        run_pytest_tests "${venv_name}" "tests/ignition_test.py" 30
         cleanup_venv "${venv_name}"
 
     else
