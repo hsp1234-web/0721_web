@@ -133,24 +133,40 @@ class DisplayManager:
 
 import concurrent.futures
 
-def start_web_server(log_manager, stats, lock, port=8000):
+def start_web_server(log_manager, stats, lock, port=8080):
     """在背景執行緒中啟動 FastAPI 伺服器並透過「主動超時重試機制」更新 URL。"""
+    def kill_process_on_port(port):
+        """使用 psutil 尋找並終止佔用指定埠的程序。"""
+        log_manager.log("INFO", f"正在掃描並清理埠 {port}...")
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'connections']):
+                for conn in proc.info.get('connections', []):
+                    if conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
+                        log_manager.log("WARNING", f"發現程序 {proc.info['name']} (PID: {proc.info['pid']}) 正在監聽埠 {port}。正在終止...")
+                        p = psutil.Process(proc.info['pid'])
+                        p.terminate()
+                        p.wait(timeout=3)
+                        log_manager.log("SUCCESS", f"程序 {proc.info['pid']} 已成功終止。")
+                        return # 找到並殺掉一個就夠了
+        except psutil.NoSuchProcess:
+            log_manager.log("INFO", "沒有找到需要清理的舊程序。")
+        except Exception as e:
+            log_manager.log("ERROR", f"清理埠時發生錯誤: {e}")
+
     def get_colab_url(port):
         """嘗試獲取 Colab 公開 URL，此函式應在獨立執行緒中運行。"""
         try:
-            # colab_output.eval_js 可能會卡住，因此需要此機制
             return colab_output.eval_js(f'google.colab.kernel.proxyPort({port})')
         except Exception as e:
-            # 這個例外可能不會被觸發，如果 eval_js 完全卡死
             log_manager.log("ERROR", f"獲取 URL 時內部發生錯誤: {e}")
             return None
 
     def server_thread():
-        log_manager.log("INFO", "正在嘗試清理舊的伺服器程序...")
-        subprocess.run(f"fuser -k -n tcp {port}", shell=True, capture_output=True)
+        # **關鍵修正**: 使用 psutil 進行更可靠的清理
+        kill_process_on_port(port)
         time.sleep(1)
 
-        log_manager.log("BATTLE", f"正在背景啟動 FastAPI 伺服器於埠號 {port}...")
+        log_manager.log("BATTLE", f"正在背景啟動應用程式伺服器於埠號 {port}...")
         server_process = subprocess.Popen(
             [sys.executable, "main.py"],
             stdout=subprocess.PIPE,

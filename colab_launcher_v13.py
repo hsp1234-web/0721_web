@@ -103,11 +103,11 @@ def phoenix_bootstrap():
 
         requirements_path = Path("requirements.txt")
         if requirements_path.exists():
-            print("⏳ 正在安裝所有必要的依賴套件，請稍候...")
-            # 首先確保核心套件存在
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "psutil", "pytz", "IPython"], check=True)
-            # 然後安裝專案指定的其他套件
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements_path)], check=True)
+            print("⏳ 正在安裝所有必要的依賴套件，將顯示進度條...")
+            # 首先確保核心套件存在 (移除 -q 以顯示進度)
+            subprocess.run([sys.executable, "-m", "pip", "install", "psutil", "pytz", "IPython"], check=True)
+            # 然後安裝專案指定的其他套件 (移除 -q 以顯示進度)
+            subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(requirements_path)], check=True)
             print("✅ 所有依賴套件已成功安裝。")
         else:
             print(f"⚠️  警告：找不到 'requirements.txt'，跳過依賴安裝。")
