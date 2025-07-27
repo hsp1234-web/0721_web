@@ -87,7 +87,8 @@ def phoenix_bootstrap():
             print(f"🚀 開始從 GitHub (分支/標籤: {TARGET_BRANCH_OR_TAG}) 拉取程式碼...")
             # 使用 -q (quiet) 選項來減少不必要的 git 輸出
             git_command = ["git", "clone", "-q", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", REPOSITORY_URL, str(project_path)]
-            subprocess.run(git_command, check=True)
+            # 關鍵修正：加入 capture_output=True 和 text=True 以便在出錯時獲取詳細日誌
+            subprocess.run(git_command, check=True, capture_output=True, text=True, encoding='utf-8')
             print("✅ 程式碼成功下載！")
         else:
             print(f"✅ 資料夾 '{project_path.name}' 已存在，跳過下載。")
