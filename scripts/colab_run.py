@@ -290,3 +290,43 @@ if __name__ == "__main__":
         base_path=base_path,
         refresh_rate=refresh_rate
     )
+
+# █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█
+# █   Part 4: 可獨立執行區塊                                            █
+# █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█
+
+if __name__ == "__main__":
+    """
+    當這個腳本被直接執行時 (python scripts/colab_run.py)，
+    這個區塊會被觸發。
+    """
+    print("--- [colab_run.py] 偵測到獨立執行模式，正在從環境變數讀取參數 ---")
+
+    # 從環境變數讀取由啟動器傳入的參數，並提供合理的預設值
+    log_lines = int(os.getenv("LOG_DISPLAY_LINES", 20))
+    archive_folder_name = os.getenv("LOG_ARCHIVE_FOLDER_NAME", "作戰日誌歸檔")
+    timezone = os.getenv("TIMEZONE", "Asia/Taipei")
+    refresh_rate = float(os.getenv("REFRESH_RATE_SECONDS", 0.25))
+
+    # Path 物件需要從字串轉換
+    project_path_str = os.getenv("PROJECT_PATH")
+    base_path_str = os.getenv("BASE_PATH")
+
+    if not project_path_str or not base_path_str:
+        print("💥 致命錯誤：環境變數 PROJECT_PATH 或 BASE_PATH 未設定。")
+        sys.exit(1)
+
+    project_path = Path(project_path_str)
+    base_path = Path(base_path_str)
+
+    print(f"✅ 參數讀取完成，準備啟動鳳凰之心核心...")
+
+    # 呼叫主函數
+    run_phoenix_heart(
+        log_lines=log_lines,
+        archive_folder_name=archive_folder_name,
+        timezone=timezone,
+        project_path=project_path,
+        base_path=base_path,
+        refresh_rate=refresh_rate
+    )
