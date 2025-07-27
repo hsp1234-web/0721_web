@@ -15,7 +15,8 @@ class ConfigManager:
     def __new__(cls, config_path: str = "config.yml"):
         if cls._instance is None:
             cls._instance = super(ConfigManager, cls).__new__(cls)
-        cls._instance._load_config(config_path)
+            # 只在第一次建立實例時載入設定檔
+            cls._instance._load_config(config_path)
         return cls._instance
 
     def _load_config(self, config_path: str):
