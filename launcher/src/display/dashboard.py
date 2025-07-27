@@ -44,7 +44,10 @@ class Dashboard:
     def _generate_header(self) -> Panel:
         """產生儀表板的標題。"""
         now = datetime.now()
-        header_text = Text(f"🚀 鳳凰之心指揮中心 v2.0 | {now.strftime('%Y-%m-%d %H:%M:%S')}", justify="center")
+        header_text = Text(
+            f"🚀 鳳凰之心指揮中心 v2.0 | {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            justify="center",
+        )
         return Panel(header_text, style="bold magenta")
 
     def _generate_status_panel(self) -> Panel:
@@ -56,7 +59,9 @@ class Dashboard:
         for key, value in self.status.items():
             status_table.add_row(f"{key}:", f"[bold green]{value}[/bold green]")
 
-        return Panel(status_table, title="[bold cyan]系統狀態[/bold cyan]", border_style="cyan")
+        return Panel(
+            status_table, title="[bold cyan]系統狀態[/bold cyan]", border_style="cyan"
+        )
 
     def _generate_resource_panel(self) -> Panel:
         """產生資源監控面板。"""
@@ -75,12 +80,18 @@ class Dashboard:
         resource_table.add_row("記憶體使用率:", f"[{mem_style}]{mem.percent:.1f}%[/{mem_style}]")
         resource_table.add_row("磁碟空間:", f"{disk.free // (1024**3)} GB 可用")
 
-        return Panel(resource_table, title="[bold yellow]資源監控[/bold yellow]", border_style="yellow")
+        return Panel(
+            resource_table,
+            title="[bold yellow]資源監控[/bold yellow]",
+            border_style="yellow",
+        )
 
     def _generate_log_panel(self) -> Panel:
         """產生顯示日誌的面板。"""
         log_text = "\n".join(self.logs)
-        return Panel(log_text, title="[bold green]作戰日誌[/bold green]", border_style="green")
+        return Panel(
+            log_text, title="[bold green]作戰日誌[/bold green]", border_style="green"
+        )
 
     def add_log(self, message: str, level: str = "INFO"):
         """新增一條日誌訊息，並可選地寫入資料庫。"""

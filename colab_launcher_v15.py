@@ -74,14 +74,14 @@ def phoenix_bootstrap():
         print("="*80)
 
         # --- 步驟 1: 準備下載目錄 ---
-        print(f"\n--- 步驟 1/4: 準備下載目錄 ---")
+        print("\n--- 步驟 1/4: 準備下載目錄 ---")
         if FORCE_REPO_REFRESH and project_path.exists():
             print(f"⚠️  偵測到「強制刷新」，正在刪除舊資料夾: {project_path}")
             shutil.rmtree(project_path)
             print("✅  舊資料夾已移除。")
 
         # --- 步驟 2: 下載程式碼 ---
-        print(f"\n--- 步驟 2/4: 下載程式碼 ---")
+        print("\n--- 步驟 2/4: 下載程式碼 ---")
         # 關鍵修正：在執行任何檔案操作前，確保 base_path 存在
         base_path.mkdir(exist_ok=True)
 
@@ -96,7 +96,7 @@ def phoenix_bootstrap():
             print(f"✅ 資料夾 '{project_path.name}' 已存在，跳過下載。")
 
         # --- 步驟 3: 切換目錄並安裝依賴 ---
-        print(f"\n--- 步驟 3/4: 設定環境並安裝依賴 ---")
+        print("\n--- 步驟 3/4: 設定環境並安裝依賴 ---")
         os.chdir(project_path)
         print(f"✅ 工作目錄已切換至: {os.getcwd()}")
 
@@ -109,10 +109,10 @@ def phoenix_bootstrap():
             subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(requirements_path)], check=True)
             print("✅ 所有依賴套件已成功安裝。")
         else:
-            print(f"⚠️  警告：找不到 'requirements.txt'，跳過依賴安裝。")
+            print("⚠️  警告：找不到 'requirements.txt'，跳過依賴安裝。")
 
         # --- 步驟 4: 執行核心邏輯 ---
-        print(f"\n--- 步驟 4/4: 執行核心邏輯 ---")
+        print("\n--- 步驟 4/4: 執行核心邏輯 ---")
         print("🚀 即將把控制權交給 'scripts/colab_run.py'...")
         print("="*80)
         time.sleep(2)
@@ -135,7 +135,7 @@ def phoenix_bootstrap():
             subprocess.run([sys.executable, str(core_script_path)], env=env, check=True)
 
     except subprocess.CalledProcessError as e:
-        print(f"\n💥 執行外部命令時發生錯誤！")
+        print("\n💥 執行外部命令時發生錯誤！")
         print(f"   命令: {' '.join(e.cmd)}")
         # 捕捉並解碼輸出
         stdout = e.stdout.strip() if hasattr(e, 'stdout') and e.stdout else ""

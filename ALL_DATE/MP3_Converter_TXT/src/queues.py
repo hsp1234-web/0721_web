@@ -6,7 +6,6 @@
 它利用 SQLite 資料庫作為後端, 確保即使在應用程式重新啟動後,
 任務也不會遺失.
 """
-import asyncio
 from typing import Optional
 
 import aiosqlite

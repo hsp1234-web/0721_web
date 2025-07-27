@@ -61,7 +61,6 @@ from pathlib import Path
 import threading
 import collections
 from datetime import datetime
-import concurrent.futures
 
 def ultimate_bootstrap_v16():
     """
@@ -80,7 +79,7 @@ def ultimate_bootstrap_v16():
         print("🚀 鳳凰之心 v16 [返璞歸真版] 啟動程序...")
         print("="*80)
 
-        print(f"\n--- 步驟 1/3: 準備下載目錄 ---")
+        print("\n--- 步驟 1/3: 準備下載目錄 ---")
         if FORCE_REPO_REFRESH and project_path.exists():
             print(f"⚠️  偵測到「強制刷新」，正在刪除舊資料夾: {project_path}")
             shutil.rmtree(project_path)
@@ -97,14 +96,14 @@ def ultimate_bootstrap_v16():
         print(f"✅ 工作目錄已切換至: {os.getcwd()}")
 
         # --- 步驟 2: 安裝依賴 ---
-        print(f"\n--- 步驟 2/3: 安裝依賴 (將顯示進度條) ---")
+        print("\n--- 步驟 2/3: 安裝依賴 (將顯示進度條) ---")
         requirements_path = Path("requirements.txt")
         if requirements_path.exists():
             # 安裝核心及專案依賴
             subprocess.run([sys.executable, "-m", "pip", "install", "psutil", "pytz", "IPython", "-r", str(requirements_path)], check=True)
             print("✅ 所有依賴套件已成功安裝。")
         else:
-            print(f"⚠️  警告：找不到 'requirements.txt'，跳過依賴安裝。")
+            print("⚠️  警告：找不到 'requirements.txt'，跳過依賴安裝。")
 
     except Exception as e:
         print(f"\n💥 環境準備階段發生嚴重錯誤: {e}")
@@ -113,7 +112,7 @@ def ultimate_bootstrap_v16():
         return # 準備失敗，直接退出
 
     # --- 步驟 3: 執行核心邏輯 ---
-    print(f"\n--- 步驟 3/3: 啟動指揮中心核心 ---")
+    print("\n--- 步驟 3/3: 啟動指揮中心核心 ---")
 
     # ==========================================================================
     #  核心邏輯：直接整合，確保在同一環境中運行

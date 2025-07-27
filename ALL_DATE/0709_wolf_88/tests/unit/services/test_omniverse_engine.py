@@ -1,7 +1,6 @@
 import unittest
 import pandas as pd
 import numpy as np
-import yaml
 import os
 
 from prometheus.services.evolution_chamber import EvolutionChamber

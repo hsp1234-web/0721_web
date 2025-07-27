@@ -1,36 +1,36 @@
-from typing import Any, Dict
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import Dict
+import uuid
+import aiofiles
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-
-from . import logic
+# 假設的插件邏輯
+from .src.logic import transcribe_audio_logic
 
 router = APIRouter()
+UPLOAD_DIR = "uploads" # 理想情況下，這個路徑應該從主應用程式的設定中傳入
 
-
-@router.get("/", summary="服務健康檢查")
-def transcriber_root() -> Dict[str, str]:
-    """提供一個簡單的 API 端點，用於確認 Transcriber 服務是否正常運行。"""
-    return {"message": "這裡是語音轉錄 (Transcriber) 服務，已準備好接收上傳。"}
-
-
-@router.post("/upload", summary="上傳音訊檔案進行轉錄")
-def upload_and_transcribe(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """上傳一個音訊檔案，系統將對其進行模擬的語音轉錄。
-
-    - **注意**: 首次調用此 API 時，後端會需要幾秒鐘來加載 AI 模型，
-      因此第一次的回應時間會比較長。後續的調用將會非常快。
+@router.post("/upload", status_code=202)
+async def upload_and_transcribe(file: UploadFile = File(...)) -> Dict[str, str]:
     """
-    if not file:
-        raise HTTPException(status_code=400, detail="沒有提供上傳檔案。")
-
-    if not file.content_type or not file.content_type.startswith("audio/"):
-        raise HTTPException(
-            status_code=415,
-            detail=f"不支援的檔案類型: '{file.content_type}'。請上傳音訊檔案。",
-        )
+    接收音訊檔案，並啟動一個模擬的轉寫任務。
+    """
+    task_id = str(uuid.uuid4())
+    filepath = f"{UPLOAD_DIR}/{task_id}_{file.filename}"
 
     try:
-        result = logic.transcribe_audio(file)
-        return result
+        async with aiofiles.open(filepath, "wb") as out_file:
+            content = await file.read()
+            await out_file.write(content)
+
+        # 這裡我們直接呼叫轉寫邏輯
+        # 在真實應用中，這可能會被推送到背景 worker
+        result = await transcribe_audio_logic(filepath)
+
+        return {"task_id": task_id, "status": "completed", "transcription": result}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"處理檔案時發生內部錯誤: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/health")
+def health_check():
+    return {"status": "ok", "plugin": "transcriber"}

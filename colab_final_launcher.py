@@ -103,7 +103,7 @@ def simple_bootstrap():
         subprocess.run([sys.executable, "scripts/colab_run.py"], env=env, check=True)
 
     except subprocess.CalledProcessError as e:
-        print(f"\n💥 執行外部命令時發生錯誤！")
+        print("\n💥 執行外部命令時發生錯誤！")
         print(f"   命令: {' '.join(e.cmd)}")
         if e.stdout:
             print(f"   輸出:\n{e.stdout}")

@@ -24,14 +24,26 @@ dependencies = [
 # Ruff (Linter & Formatter)
 [tool.ruff]
 line-length = 88
-# 排除 .venv 目錄
-exclude = [".venv"]
+# 排除 .venv 和所有舊的程式碼目錄
+exclude = [
+    ".venv",
+    "ALL_DATE",
+    "app",
+    "apps",
+    "scripts",
+    "colab_*.py",
+    "simulation_test*.py",
+]
 
 [tool.ruff.lint]
-# 選擇要啟用的規則集
-select = ["E", "F", "W", "I", "N"] # 暫時禁用 D (pydocstyle) 規則集以推進進度
+# 選擇要啟用的規則集 (E: Pyflakes Errors, F: Pyflakes Errors)
+select = ["E", "F"]
 # 忽略一些比較煩人的規則
-ignore = []
+ignore = ["E501"]
+
+[tool.ruff.format]
+# 這裡可以定義格式化規則，但 linting 不會使用
+# 例如: quote-style = "double"
 
 # Deptry (依賴檢查)
 [tool.deptry]
@@ -85,6 +97,11 @@ python_files = "tests.py test_*.py *_test.py"
 # 測試的預設路徑
 testpaths = [
     "tests",
+    "launcher/tests",
+]
+markers = [
+    "unit: 標記為單元測試",
+    "e2e: 標記為端到端測試",
 ]
 # 全域超時設定（秒），防止測試卡死
 timeout = 30

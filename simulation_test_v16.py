@@ -1,9 +1,7 @@
 import os
 import sys
 import subprocess
-import threading
 from pathlib import Path
-import time
 import shutil
 
 # --- 模擬環境設定 ---
@@ -22,7 +20,7 @@ def setup_simulation_environment():
 
     class FakeColabOutput:
         def eval_js(self, code):
-            print(f"[SIMULATOR] google.colab.output.eval_js called.")
+            print("[SIMULATOR] google.colab.output.eval_js called.")
             return "https://abcdef-1234.colab.googleusercontent.com/"
 
     class FakeGoogle:

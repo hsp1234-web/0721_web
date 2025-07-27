@@ -2,7 +2,6 @@ import duckdb
 import os
 import pandas as pd
 import numpy as np
-import pandas_ta
 
 def main():
     db_path = "data/analytics_warehouse/factors.duckdb"

@@ -1,7 +1,6 @@
 import os
 import sys
 import subprocess
-import time
 from pathlib import Path
 import threading
 
@@ -36,7 +35,7 @@ def setup_simulation_environment():
     # 2. 建立一個假的 git clone 腳本
     #    這個腳本會建立專案資料夾，並在裡面放入必要的檔案
     with open(FAKE_GIT_SCRIPT, "w", encoding="utf-8") as f:
-        f.write(f"""
+        f.write("""
 import os
 from pathlib import Path
 import sys
@@ -59,8 +58,8 @@ time.sleep(10) # 模擬伺服器運行
 ''')
 
 # 複製真實的 colab_run.py 到模擬的 scripts 資料夾
-os.system(f"cp scripts/colab_run.py {{scripts_dir}}")
-print(f"Fake git has 'cloned' the repo into {{project_dir}}")
+os.system(f"cp scripts/colab_run.py {scripts_dir}")
+print(f"Fake git has 'cloned' the repo into {project_dir}")
 """)
 
     # 3. 將 fake_git.py 加入到 PATH
@@ -70,7 +69,7 @@ print(f"Fake git has 'cloned' the repo into {{project_dir}}")
     # 4. 建立一個假的 google.colab.output.eval_js
     #    這是最棘手的部分，因為它在背景執行緒中被呼叫
     def fake_eval_js(code):
-        print(f"[SIMULATOR] google.colab.output.eval_js called with: {{code}}")
+        print("[SIMULATOR] google.colab.output.eval_js called with: {code}")
         return "https://abcdef-1234.colab.googleusercontent.com/"
 
     try:

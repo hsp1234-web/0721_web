@@ -1,7 +1,6 @@
 """轉錄工人模組."""
 import asyncio
 import multiprocessing as mp
-import time
 from typing import Any
 
 from faster_whisper import WhisperModel

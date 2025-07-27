@@ -1,7 +1,6 @@
 # 點火測試：確保核心服務能啟動且基礎 API 可回應
 # 這個測試應該非常輕量，不應該導入任何需要額外大型依賴的模組
 
-import pytest
 from fastapi.testclient import TestClient
 from src.main import app  # 直接從 src.main 導入 app
 

@@ -5,9 +5,9 @@ import sys
 import time
 import toml
 from pathlib import Path
+import argparse
 
 # 將專案根目錄加入 sys.path
-# 這樣我們就可以 `from src.core import ...`
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -35,6 +35,15 @@ def main():
     """
     鳳凰之心啟動器主函式。
     """
+    parser = argparse.ArgumentParser(description="鳳凰之心模組化啟動器")
+    parser.add_argument(
+        "--app",
+        type=str,
+        nargs='*',
+        help="指定要載入的應用插件名稱 (例如: transcriber quant)。如果未提供，則載入所有插件。"
+    )
+    args = parser.parse_args()
+
     # 1. 載入設定
     config_path = project_root / "config" / "settings.toml"
     try:
@@ -43,18 +52,23 @@ def main():
         print(f"錯誤：找不到設定檔 {config_path}")
         sys.exit(1)
 
+    # 將命令列參數加入設定
+    config["launcher"]["apps_to_load"] = args.app
+
     # 2. 初始化日誌資料庫 (如果啟用)
     log_db = None
     if config["log_archive"]["enabled"]:
         archive_path = Path("/content") / config["log_archive"]["folder_name"]
         db_path = archive_path / "launcher_logs.db"
-        log_db = LogDatabase(db_path, max_size_kb=config["log_archive"]["max_db_size_kb"])
+        log_db = LogDatabase(
+            db_path, max_size_kb=config["log_archive"]["max_db_size_kb"]
+        )
 
     # 3. 初始化儀表板
     dashboard = Dashboard(
         log_display_lines=config["launcher"]["log_display_lines"],
         timezone=config["launcher"]["timezone"],
-        log_db=log_db
+        log_db=log_db,
     )
     dashboard.start()
     dashboard.add_log("✅ 指揮中心介面已啟動。")
@@ -90,7 +104,10 @@ def main():
 
         # 4c. 下載或更新程式碼
         if not project_path.exists():
-            if not installer.download_code(config["project"]["repository_url"], config["project"]["target_branch_or_tag"]):
+            if not installer.download_code(
+                config["project"]["repository_url"],
+                config["project"]["target_branch_or_tag"],
+            ):
                 dashboard.add_log("❌ 程式碼下載失敗，程序中止。")
                 time.sleep(5)
                 return
@@ -99,13 +116,15 @@ def main():
             dashboard.add_log("ℹ️ 專案目錄已存在，跳過下載。")
 
         # 4d. 安裝專案依賴
-        os.chdir(project_path) # 切換工作目錄以正確執行 pip
+        os.chdir(project_path)  # 切換工作目錄以正確執行 pip
         dashboard.add_log(f"工作目錄切換至: {os.getcwd()}")
         if installer.install_dependencies():
             dashboard.add_log("✅ 專案依賴安裝成功。")
         else:
-            dashboard.add_log("⚠️ 專案依賴安裝被跳過（可能由於空間不足）。應用程式可能功能不全。")
-
+            dashboard.add_log(
+                "⚠️ 專案依賴安裝被跳過（可能由於空間不足）。"
+                "應用程式可能功能不全。"
+            )
 
         dashboard.update_status("階段", "核心服務啟動")
         dashboard.add_log("🚀 所有前置任務完成！準備啟動主應用程式...")
@@ -113,15 +132,17 @@ def main():
         # 5. 執行第二階段：非同步任務 (啟動伺服器)
         dashboard.update_status("階段", "啟動主應用")
         process_manager = ProcessManager(dashboard, project_path)
-        process_manager.start_server()
+        # 將要載入的 apps 傳遞給伺服器，這裡使用環境變數
+        env = os.environ.copy()
+        if config["launcher"]["apps_to_load"] is not None:
+            env["APPS_TO_LOAD"] = ",".join(config["launcher"]["apps_to_load"])
+        process_manager.start_server(env=env)
 
         # 嘗試獲取 Colab URL
-        # 這裡需要一個更好的方法來檢測 uvicorn 何時準備就緒
         dashboard.add_log("⏳ 等待伺服器啟動 (約 5 秒)...")
         time.sleep(5)
         app_url = get_colab_url(8000, dashboard)
         dashboard.update_status("應用 URL", app_url)
-
 
         # 在測試模式下，成功啟動伺服器後短暫等待即退出
         if config.get("mode", {}).get("test_mode", False):
@@ -143,6 +164,9 @@ def main():
         dashboard.add_log("🛑 指揮中心正在關閉。")
         if 'process_manager' in locals():
             process_manager.stop_server()
+        if log_db:
+            log_db.close()
+            dashboard.add_log("✅ 日誌資料庫連線已關閉。")
         dashboard.stop()
         print("鳳凰之心指揮中心已關閉。")
 

@@ -24,7 +24,7 @@ class ProcessManager:
         except Exception as e:
             self.dashboard.add_log(f"[bold red]讀取日誌流時出錯: {e}[/bold red]")
 
-    def start_server(self, main_app_file: str = "main_api.py"):
+    def start_server(self, main_app_file: str = "main_api.py", env: dict = None):
         """在一個單獨的執行緒中啟動 FastAPI 伺服器。"""
         command = [sys.executable, main_app_file]
 
@@ -38,22 +38,35 @@ class ProcessManager:
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                env=env
             )
 
             self.dashboard.add_log(f"✅ 主應用程式程序已啟動 (PID: {self.server_process.pid})。")
 
             # 為 stdout 和 stderr 建立單獨的執行緒來處理輸出
-            stdout_thread = threading.Thread(target=self._stream_output, args=(self.server_process.stdout, "SERVER"), daemon=True)
-            stderr_thread = threading.Thread(target=self._stream_output, args=(self.server_process.stderr, "ERROR"), daemon=True)
+            stdout_thread = threading.Thread(
+                target=self._stream_output,
+                args=(self.server_process.stdout, "SERVER"),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=self._stream_output,
+                args=(self.server_process.stderr, "ERROR"),
+                daemon=True,
+            )
 
             stdout_thread.start()
             stderr_thread.start()
 
         except FileNotFoundError:
-            self.dashboard.add_log(f"[bold red]❌ 錯誤: 找不到主應用程式檔案 '{main_app_file}'。[/bold red]")
+            self.dashboard.add_log(
+                f"[bold red]❌ 錯誤: 找不到主應用程式檔案 '{main_app_file}'。[/bold red]"
+            )
         except Exception as e:
-            self.dashboard.add_log(f"[bold red]❌ 啟動主應用程式時發生嚴重錯誤: {e}[/bold red]")
+            self.dashboard.add_log(
+                f"[bold red]❌ 啟動主應用程式時發生嚴重錯誤: {e}[/bold red]"
+            )
 
     def stop_server(self):
         """停止 FastAPI 伺服器。"""
@@ -64,7 +77,9 @@ class ProcessManager:
                 self.server_process.wait(timeout=10)
                 self.dashboard.add_log("主應用程式已成功終止。")
             except subprocess.TimeoutExpired:
-                self.dashboard.add_log("[bold yellow]警告: 主應用程式終止超時，強制終止。[/bold yellow]")
+                self.dashboard.add_log(
+                    "[bold yellow]警告: 主應用程式終止超時，強制終止。[/bold yellow]"
+                )
                 self.server_process.kill()
         else:
             self.dashboard.add_log("主應用程式未在運行。")

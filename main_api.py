@@ -69,6 +69,43 @@ async def initialize_database():
         await db.commit()
     print(f"資料庫 '{DATABASE_FILE}' 已成功初始化。")
 
+# --- 動態插件載入 ---
+def load_plugins(app: FastAPI):
+    """動態掃描 'apps' 目錄並載入所有插件的路由器。"""
+    apps_dir = Path("apps")
+    if not apps_dir.is_dir():
+        print("⚠️ 'apps' 目錄不存在，跳過插件載入。")
+        return
+
+    # 從環境變數讀取要載入的特定插件
+    apps_to_load_str = os.getenv("APPS_TO_LOAD")
+    apps_to_load = apps_to_load_str.split(',') if apps_to_load_str else None
+
+    if apps_to_load:
+        print(f"ℹ️ 指定載入插件: {apps_to_load}")
+    else:
+        print("ℹ️ 未指定特定插件，將嘗試載入所有插件。")
+
+    for plugin_dir in apps_dir.iterdir():
+        if plugin_dir.is_dir() and not plugin_dir.name.startswith('_'):
+            # 如果指定了要載入的插件，則只載入列表中的插件
+            if apps_to_load and plugin_dir.name not in apps_to_load:
+                continue
+
+            try:
+                # 動態導入插件的 main 模組
+                module_name = f"apps.{plugin_dir.name}.main"
+                plugin_module = __import__(module_name, fromlist=["router"])
+
+                # 假設每個插件都有一個名為 'router' 的 APIRouter
+                if hasattr(plugin_module, "router"):
+                    app.include_router(plugin_module.router, prefix=f"/{plugin_dir.name}", tags=[plugin_dir.name])
+                    print(f"✅ 成功載入插件: {plugin_dir.name}")
+                else:
+                    print(f"⚠️ 在插件 {plugin_dir.name} 中找不到 'router'。")
+            except ImportError as e:
+                print(f"❌ 載入插件 {plugin_dir.name} 失敗: {e}")
+
 
 # --- FastAPI 生命週期事件 ---
 @asynccontextmanager
@@ -80,23 +117,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 2. 執行環境檢查
     try:
-        print("步驟 1/2: 執行環境檢查...")
+        print("步驟 1/3: 執行環境檢查...")
         check_disk_space()
         check_memory()
         print("環境檢查通過。")
     except EnvironmentError as e:
         print(f"致命錯誤：環境檢查失敗，無法啟動應用程式。原因：{e}")
-        # 在實際應用中，這裡可以發送警報
         raise RuntimeError(f"環境檢查失敗: {e}") from e
 
     # 3. 初始化資料庫
     try:
-        print("步驟 2/2: 初始化資料庫...")
+        print("步驟 2/3: 初始化資料庫...")
         await initialize_database()
         print("資料庫初始化完成。")
     except Exception as e:
         print(f"致命錯誤：資料庫初始化失敗。原因：{e}")
         raise RuntimeError(f"資料庫初始化失敗: {e}") from e
+
+    # 4. 載入插件
+    print("步驟 3/3: 載入應用插件...")
+    load_plugins(app)
 
     print("--- 應用程式已成功啟動 ---")
     yield
@@ -110,150 +150,15 @@ app = FastAPI(lifespan=lifespan)
 # --- API 端點 ---
 
 # 核心端點
-@app.get("/health", status_code=200)
+@app.get("/health", status_code=200, tags=["Core"])
 async def health_check() -> dict[str, str]:
     """健康檢查端點。"""
     return {"status": "ok", "message": "服務運行中"}
 
-# MP3 轉寫服務
-@app.post("/upload", status_code=202)
-async def upload_file(file: UploadFile = File(...)) -> dict[str, str]:
-    """接收檔案上傳，儲存檔案，並建立一個新的轉寫任務。"""
-    task_id = str(uuid.uuid4())
-    filepath = UPLOAD_DIR / f"{task_id}_{file.filename}"
-
-    try:
-        # 儲存檔案
-        async with aiofiles.open(filepath, "wb") as out_file:
-            while content := await file.read(1024 * 1024):  # 1MB 區塊
-                await out_file.write(content)
-
-        # 在資料庫中建立任務紀錄
-        async with aiosqlite.connect(DATABASE_FILE) as db:
-            await db.execute(
-                "INSERT INTO transcription_tasks (id, original_filepath, status) VALUES (?, ?, ?)",
-                (task_id, str(filepath), "pending"),
-            )
-            await db.commit()
-
-        # TODO: 將 task_id 推送到真正的背景 worker 佇列
-        # 為了演示，這裡直接模擬一個成功的轉寫
-        asyncio.create_task(simulate_transcription(task_id, file.filename))
-
-    except Exception as e:
-        print(f"上傳失敗: {e}")
-        raise HTTPException(status_code=500, detail="檔案操作或資料庫錯誤。")
-
-    return {"task_id": task_id}
-
-async def simulate_transcription(task_id: str, filename: str):
-    """模擬一個耗時的轉寫過程並更新資料庫。"""
-    await asyncio.sleep(5)  # 模擬 5 秒的處理時間
-    transcribed_text = f"這是 '{filename}' 的模擬非同步轉寫結果。"
-    async with aiosqlite.connect(DATABASE_FILE) as db:
-        await db.execute(
-            "UPDATE transcription_tasks SET status = ?, result = ? WHERE id = ?",
-            ("completed", transcribed_text, task_id)
-        )
-        await db.commit()
-    print(f"任務 {task_id} 已完成轉寫。")
-
-
-@app.get("/status/{task_id}")
-async def get_task_status(task_id: str) -> dict[str, Any]:
-    """根據 ID 查詢轉寫任務的狀態和結果。"""
-    async with aiosqlite.connect(DATABASE_FILE) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM transcription_tasks WHERE id = ?", (task_id,)) as cursor:
-            task = await cursor.fetchone()
-
-    if task is None:
-        raise HTTPException(status_code=404, detail="找不到任務 ID")
-    return dict(task)
-
-
-# 金融數據分析服務
-@app.post("/analysis/build", status_code=202)
-async def start_feature_store_build_endpoint() -> dict[str, Any]:
-    """觸發一個 'build-feature-store' 的背景任務。"""
-    task_id = str(uuid.uuid4())
-    log_file_path = f"/tmp/prometheus_build_{task_id}.log"
-
-    try:
-        # 在資料庫中記錄任務
-        async with aiosqlite.connect(DATABASE_FILE) as db:
-            await db.execute(
-                "INSERT INTO analysis_tasks (id, task_type, status, log_file) VALUES (?, ?, ?, ?)",
-                (task_id, "build_feature_store", "starting", log_file_path)
-            )
-            await db.commit()
-
-        # 使用 asyncio.create_subprocess_exec 在背景啟動任務
-        # 使用絕對路徑以避免在更改 cwd 後找不到檔案
-        python_executable = str(Path(".venv/bin/python").resolve())
-        run_script_path = str(Path(PROMETHEUS_RUN_SCRIPT).resolve())
-        command = [python_executable, run_script_path, "build-feature-store"]
-
-        # 現在 shebang 行已經硬式編碼，我們只需要執行腳本即可
-        process = await asyncio.create_subprocess_exec(
-            run_script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=PROMETHEUS_PROJECT_DIR
-        )
-
-        # 建立一個背景任務來處理日誌和監控
-        asyncio.create_task(log_and_monitor_process(process, task_id, log_file_path))
-
-        message = (f"已成功啟動 'build-feature-store' 任務。任務 ID: {task_id}。"
-                   f"日誌請查看: {log_file_path}")
-        return {"status": "success", "message": message, "task_id": task_id}
-
-    except Exception as e:
-        error_msg = f"啟動分析任務時發生錯誤: {e}"
-        print(error_msg)
-        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
-
-async def log_and_monitor_process(process: asyncio.subprocess.Process, task_id: str, log_file_path: str):
-    """即時讀取子進程的輸出寫入日誌檔案，並在完成後更新資料庫。"""
-    async with aiofiles.open(log_file_path, "w") as log_file:
-        while True:
-            # 同時讀取 stdout 和 stderr
-            line = await process.stdout.readline()
-            err_line = await process.stderr.readline()
-
-            if line:
-                await log_file.write(line.decode())
-            if err_line:
-                await log_file.write(err_line.decode())
-
-            if not line and not err_line and process.returncode is not None:
-                break
-            await asyncio.sleep(0.1)
-
-    status = "completed" if process.returncode == 0 else "failed"
-    async with aiosqlite.connect(DATABASE_FILE) as db:
-        await db.execute(
-            "UPDATE analysis_tasks SET status = ? WHERE id = ?",
-            (status, task_id)
-        )
-        await db.commit()
-    print(f"分析任務 {task_id} 已執行完畢，狀態: {status} (返回碼: {process.returncode})。")
-
-
-@app.get("/analysis/status/{task_id}")
-async def get_analysis_task_status(task_id: str) -> dict[str, Any]:
-    """根據 ID 查詢分析任務的狀態。"""
-    async with aiosqlite.connect(DATABASE_FILE) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,)) as cursor:
-            task = await cursor.fetchone()
-
-    if task is None:
-        raise HTTPException(status_code=404, detail="找不到任務 ID")
-    return dict(task)
 
 # --- Uvicorn 啟動 (如果直接執行此檔案) ---
 if __name__ == "__main__":
     import uvicorn
+    # 為了方便本地測試，我們手動設定環境變數
+    # os.environ["APPS_TO_LOAD"] = "transcriber,quant"
     uvicorn.run(app, host="0.0.0.0", port=8000)

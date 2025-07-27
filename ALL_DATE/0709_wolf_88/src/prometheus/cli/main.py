@@ -18,8 +18,6 @@ def cli_analyze():
     logger.info("AI 分析師工作完成。")
 
 
-import subprocess
-import sys
 import os
 
 @app.command(name="dashboard")
@@ -76,7 +74,6 @@ def clear_results():
     """
     清除所有生成的結果、佇列、日誌和檢查點。
     """
-    import os
     import shutil
 
     logger.info("開始清除所有執行數據...")
@@ -281,9 +278,6 @@ def run_downloader(
     """
     TAIFEX 自動化數據採集器 v1.0
     """
-    import os
-    import random
-    import time
     from collections import Counter
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime, timedelta
@@ -336,7 +330,6 @@ def run_downloader(
 
 def execute_download(session, task_info, output_dir):
     """執行單一檔案下載任務，包含重試與錯誤處理。"""
-    import os
     import random
     import time
     import requests
@@ -401,8 +394,6 @@ def run_explorer(
     """
     TAIFEX 格式探勘與註冊器 v1.0
     """
-    import hashlib
-    import os
     from prometheus.core.db.schema_registry import SchemaRegistry
     from prometheus.core.utils.helpers import (
         prospect_file_content,
@@ -460,9 +451,6 @@ def run_elt(
     """
     TAIFEX ELT 加工管線 v1.0
     """
-    import os
-    from prometheus.core.db.data_warehouse import AnalyticsDataWarehouse, RawDataWarehouse
-    from prometheus.core.db.schema_registry import SchemaRegistry
 
     # Ensure parent directories for database files exist
     os.makedirs(os.path.dirname(raw_db_path), exist_ok=True)
@@ -474,7 +462,6 @@ def run_elt(
 
 
 def run_loader(input_dir, raw_db_path, schema_db_path):
-    import os
     from prometheus.core.db.data_warehouse import RawDataWarehouse
     from prometheus.core.db.schema_registry import SchemaRegistry
     from prometheus.core.utils.helpers import (
@@ -629,7 +616,6 @@ def build_feature_store():
     """
     【作戰指令】統一數據倉儲重構：建造特徵倉儲。
     """
-    import asyncio
     from prometheus.core.db.db_manager import DBManager
     # from prometheus.pipelines.p1_factor_generation import p1_factor_generation_pipeline
     # from prometheus.pipelines.p2_index_factor_generation import p2_index_factor_pipeline
@@ -681,7 +667,7 @@ def run_simulation_training(
     from prometheus.pipelines.p6_simulation_training import run_main as p6_run_main
     logger.info(f"--- 啟動 P6：因子代理模擬模型訓練管線，目標為 {target_factor} ---")
     p6_run_main(target_factor=target_factor)
-    logger.info(f"--- P6：因子代理模擬模型訓練管線執行完畢 ---")
+    logger.info("--- P6：因子代理模擬模型訓練管線執行完畢 ---")
 
 
 @pipelines_app.command("run")

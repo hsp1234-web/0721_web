@@ -20,7 +20,7 @@ async def main():
         console.print("[bold red]錯誤：找不到 FRED API 金鑰 (api_keys.fred)。請在設定中配置。[/bold red]")
         return
 
-    console.print(f"✅ FRED API 金鑰已找到。")
+    console.print("✅ FRED API 金鑰已找到。")
 
     try:
         client = FredClient(api_key=fred_api_key)

@@ -121,7 +121,7 @@ def ai_analyst_job():
     fig.write_image(EQUITY_CURVE_PATH)
 
     # 5. 生成並儲存 Markdown 報告
-    print(f"[AI-Analyst] 正在生成 Markdown 分析報告...")
+    print("[AI-Analyst] 正在生成 Markdown 分析報告...")
     report_content = generate_markdown_report(stats, EQUITY_CURVE_PATH)
 
     try:

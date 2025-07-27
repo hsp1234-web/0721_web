@@ -3,7 +3,6 @@ import sys
 import subprocess
 import threading
 from pathlib import Path
-import time
 import shutil
 
 # --- 模擬環境設定 ---
@@ -43,7 +42,7 @@ if __name__ == "__main__":
     # 5. 建立一個假的 google.colab 模組來模擬 URL 獲取
     class FakeColabOutput:
         def eval_js(self, code):
-            print(f"[SIMULATOR] google.colab.output.eval_js called.")
+            print("[SIMULATOR] google.colab.output.eval_js called.")
             return "https://abcdef-1234.colab.googleusercontent.com/"
 
     class FakeGoogle:

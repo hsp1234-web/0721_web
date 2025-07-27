@@ -285,7 +285,7 @@ def run_phoenix_heart(log_lines, archive_folder_name, timezone, project_path, ba
     finally:
         if display_manager: display_manager.stop()
         if 'log_manager' in locals() and log_manager and archive_folder_name and archive_folder_name.strip():
-            print(f"\n--- 執行日誌歸檔 (台北時區) ---")
+            print("\n--- 執行日誌歸檔 (台北時區) ---")
             try:
                 source_log_path = log_manager.log_file_path
                 archive_folder_path = base_path / archive_folder_name.strip()
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     project_path = Path(project_path_str)
     base_path = Path(base_path_str)
 
-    print(f"✅ 參數讀取完成，準備啟動鳳凰之心核心...")
+    print("✅ 參數讀取完成，準備啟動鳳凰之心核心...")
 
     # 呼叫主函數
     run_phoenix_heart(
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     project_path = Path(project_path_str)
     base_path = Path(base_path_str)
 
-    print(f"✅ 參數讀取完成，準備啟動鳳凰之心核心...")
+    print("✅ 參數讀取完成，準備啟動鳳凰之心核心...")
 
     # 呼叫主函數
     run_phoenix_heart(

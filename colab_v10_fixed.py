@@ -37,9 +37,7 @@ TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 # ==============================================================================
 import os
 import sys
-import shutil
 import subprocess
-import time
 from pathlib import Path
 
 def bootstrap_fixed():
@@ -101,7 +99,7 @@ def bootstrap_fixed():
             print("✅ 所有依賴套件已成功安裝。")
         else:
             # 修正原始碼中的錯誤路徑
-            print(f"⚠️  警告：在專案根目錄找不到 'requirements.txt'。也找不到 'requirements/colab.txt'。跳過依賴安裝。")
+            print("⚠️  警告：在專案根目錄找不到 'requirements.txt'。也找不到 'requirements/colab.txt'。跳過依賴安裝。")
 
         # --- 步驟 4: 執行主應用程式 ---
         print("\n--- 步驟 4/4: 執行主應用程式 ---")
@@ -122,7 +120,7 @@ def bootstrap_fixed():
         subprocess.run([sys.executable, "scripts/colab_run.py"], env=env, check=True)
 
     except subprocess.CalledProcessError as e:
-        print(f"\n💥 執行外部命令時發生錯誤！")
+        print("\n💥 執行外部命令時發生錯誤！")
         print(f"   命令: {' '.join(e.cmd)}")
         # 捕捉並解碼輸出
         stdout = e.stdout.strip() if e.stdout else ""
