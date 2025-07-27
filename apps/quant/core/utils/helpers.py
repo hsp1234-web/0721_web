@@ -10,10 +10,7 @@
 
 from contextlib import contextmanager
 
-try:
-    import requests_cache
-except ImportError:
-    requests_cache = None
+from contextlib import contextmanager
 from ..logging.log_manager import LogManager
 
 logger = LogManager.get_instance().get_logger("Helpers")
@@ -25,13 +22,25 @@ CACHE_NAME = ".financial_data_cache"
 CACHE_EXPIRE_AFTER = None
 
 
-def get_cached_session() -> requests_cache.CachedSession:
+def get_cached_session():
     """
     獲取一個配置好的、帶有永久快取的 Session 物件。
 
     Returns:
         requests_cache.CachedSession: 配置完成的快取 Session。
+
+    Raises:
+        ImportError: 如果 requests-cache 套件沒有被安裝。
     """
+    try:
+        import requests_cache
+    except ImportError:
+        raise ImportError(
+            "❌ 'requests-cache' 套件未安裝或找不到。\n"
+            "請透過 'pip install requests-cache' 安裝，"
+            "或確認它已包含在您的 requirements.txt 檔案中。"
+        )
+
     return requests_cache.CachedSession(
         cache_name=CACHE_NAME,
         backend="sqlite",
@@ -41,14 +50,25 @@ def get_cached_session() -> requests_cache.CachedSession:
 
 
 @contextmanager
-def temporary_disabled_cache(session: requests_cache.CachedSession):
+def temporary_disabled_cache(session):
     """
     一個上下文管理器，用於暫時禁用給定 Session 的快取功能。
     這對於實現「強制刷新」功能至關重要。
 
     Args:
-        session (requests_cache.CachedSession): 需要暫時禁用快取的 Session。
+        session: 需要暫時禁用快取的 Session 物件。
     """
+    try:
+        import requests_cache
+        if not isinstance(session, requests_cache.CachedSession):
+             # 如果傳入的不是預期的 session 類型，直接 yield，不做任何事
+            yield
+            return
+    except ImportError:
+        # 如果連 requests_cache 都沒有，也直接 yield
+        yield
+        return
+
     with session.cache_disabled():
         yield
 
