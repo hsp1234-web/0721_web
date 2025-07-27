@@ -1,0 +1,6 @@
+# 獨立的測試工具依賴
+httpx>=0.28.1,<0.29.0
+pytest>=8.4.1,<9.0.0
+pytest-asyncio
+pytest-timeout
+pytest-xprocess
