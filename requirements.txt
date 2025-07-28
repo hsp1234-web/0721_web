@@ -1,2 +1,4 @@
 Flask>=2.0
 psutil>=5.0
+typer[all]
+rich
