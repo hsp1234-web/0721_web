@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 # 在新的 src 架構下，不再需要手動修改 sys.path，我們將使用相對導入。
-from . import logic
+from src.transcriber import logic
 
 # 建立 FastAPI 應用實例
 app = FastAPI(
@@ -55,6 +55,27 @@ async def get_transcription_status(task_id: str):
         raise HTTPException(status_code=404, detail=f"找不到任務 ID: {task_id}")
 
     return JSONResponse(content=status_info)
+
+@app.get("/", summary="服務健康檢查")
+def read_root():
+    """
+    根路由，用於簡單的服務健康檢查。
+    """
+    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
+
+@app.get("/", summary="服務健康檢查")
+def read_root():
+    """
+    根路由，用於簡單的服務健康檢查。
+    """
+    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
+
+@app.get("/", summary="服務健康檢查")
+def read_root():
+    """
+    根路由，用於簡單的服務健康檢查。
+    """
+    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
 
 @app.get("/health", summary="服務健康檢查")
 def health_check():

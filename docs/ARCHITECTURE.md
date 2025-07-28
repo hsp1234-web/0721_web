@@ -1,120 +1,141 @@
-# 鳳凰之心：最終架構總藍圖
+# 鳳凰之心專案架構 v8.0
 
-這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態，涵蓋了檔案結構、業務邏輯劃分、使用的核心工具，以及完整的執行流程。
+本文件詳細說明了鳳凰之心專案的最終技術架構，其核心是圍繞一個統一的智慧啟動器 `scripts/launch.py` 來構建的。
 
----
+## 1. 全新檔案架構總覽
 
-## 一、 核心理念與工具 (Core Philosophy & Tools)
-
-我們的架構基於以下三大核心理念，並由一套精簡的工具鏈來實現：
-
-- **微服務架構 (Microservices)**: 每個 App (`quant`, `transcriber`) 都是一個獨立、可自行運行的 FastAPI 服務。
-- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境 (`.venv`)，由唯一的總開關 `launch.py` 自動管理，彼此絕不干擾。
-- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明，保證了環境的極速建立與可重複性。
-
-### 核心工具鏈:
-
-- **uv**: 我們唯一的環境管理與安裝工具。負責以極致速度建立虛擬環境 (`.venv`) 和同步 Python 套件。
-- **`launch.py`**: 專案的「總開關」，負責協調所有工具，一鍵啟動整個系統。
-- **逆向代理 (Reverse Proxy)**: 內建於 `launch.py` 中，是系統的統一流量入口，負責將請求轉發給對應的 App。
-- **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
-
----
-
-## 二、 終極檔案結構與業務邏輯歸屬
-
-這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
+新架構的核心是職責分離與入口統一。所有程式碼、腳本、依賴和工具都將被歸類到職責明確的資料夾中。
 
 ```
-/PHOENIX_HEART_PROJECT/
+/
 │
-├── 🚀 launch.py                 # 唯一的「總開關」。負責協調所有 App 的環境建立與啟動，最後啟動逆向代理。
+├── 📜 README.md                   # 更新後的專案說明，解釋新架構和啟動方式
 │
-├── 📦 apps/                      # 【所有獨立微服務的家】
+├── 📦 src/                         # 【核心原始碼】所有微服務的家
 │   │
-│   ├── 📈 quant/                 # 【量化金融 App - 一個完整的獨立專案】
-│   │   │
-│   │   ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器，掛載 API 路由。
-│   │   │
-│   │   ├── 🧠 logic/             # 核心業務邏輯層
-│   │   │   ├── data_sourcing.py  # 數據源邏輯 (FinMind, FRED, yfinance)
-│   │   │   ├── factor_engineering.py # 因子工程邏輯 (MA, RSI)
-│   │   │   ├── analysis.py       # 分析與策略邏輯 (回測服務)
-│   │   │   └── database.py       # 數據庫邏輯 (SQLite Manager)
-│   │   │
-│   │   ├── 🕸️ api/                # API 接口層
-│   │   │   └── v1/
-│   │   │       └── routes.py     # 定義所有 FastAPI 路由 (/backtest)
-│   │   │
-│   │   ├── 📜 requirements.txt     # **此 App 專屬的依賴清單**
-│   │   ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│   │   └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│   ├── 📈 quant/                   # Quant App 的 Python 套件
+│   │   ├── __init__.py
+│   │   ├── main.py                 # FastAPI 服務入口
+│   │   ├── logic/                  # 核心業務邏輯
+│   │   └── tests/                  # Quant 相關的測試案例
 │   │
-│   └── 🎤 transcriber/           # 【語音轉寫 App - 一個完整的獨立專案】
-│       │
-│       ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器
-│       │
-│       ├── 🧠 logic.py           # 核心業務邏輯 (呼叫轉寫模型)
-│       │
-│       ├── 📜 requirements.txt     # 核心依賴
-│       ├── 📜 requirements.large.txt # (可選) 大型依賴，用於真實模式測試
-│       ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│       └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│   └── 🎤 transcriber/             # Transcriber App 的 Python 套件
+│       ├── __init__.py
+│       ├── main.py                 # FastAPI 服務入口
+│       ├── logic.py                # 核心業務邏輯
+│       └── tests/                  # Transcriber 相關的測試案例
 │
-├── ⚙️ proxy/                      # 【逆向代理配置】
-│   └── proxy_config.json       # 定義路由規則 (e.g., "/quant" -> "localhost:8001")
+├── 🚀 scripts/                     # 【統一操作中心】所有使用者指令的入口
+│   │
+│   ├── launch.py                   # ✨ 唯一的「智慧啟動器」，適用於所有環境
+│   │
+│   └── phoenix_dashboard.py        # ✨ 您精美的「終端機儀表板」程式碼放在這裡
 │
-├── 📜 smart_e2e_test.sh         # 智能測試指揮官腳本，支持 mock 和 real 模式
+├── 🛠️ tools/                        # 【內建工具庫】存放專案依賴的輔助工具
+│   │
+│   └── gotty                       # GoTTY 的 Linux 執行檔，用於將儀表板 Web 化
 │
-├── 📚 docs/                       # 【專案文件】
-│   └── ARCHITECTURE.md         # (本文件) 最終的架構設計總藍圖
+├── 📋 requirements/                # 【集中依賴管理】
+│   │
+│   ├── base.txt                    # 所有服務共享的基礎依賴 (如 pytest, httpx)
+│   ├── quant.txt                   # Quant App 的特定依賴
+│   └── transcriber.txt             # Transcriber App 的特定依賴 (包含 .large)
 │
-└── 🗄️ ALL_DATE/                 # 【封存參考資料】存放舊專案作為開發參考
+├── ⚙️ proxy/                        # (不變) 逆向代理設定
+│   └── proxy_config.json
+│
+├── 📚 docs/                        # (不變) 專案文件
+│
+└── 🗄️ ALL_DATE/                     # (不變) 封存的參考資料
+    └── ...
 ```
 
----
+## 2. 儀表板整合方案詳解
 
-## 三、 統一啟動與執行流程
+精美的儀表板 (`scripts/phoenix_dashboard.py`) 是整個體驗的核心。在新的架構中，它將被賦予一個清晰的定位並與啟動流程完美整合。
 
-當您在任何環境執行 `python launch.py` 時，系統將嚴格遵循以下流程：
+### 儀表板的職責
 
-```mermaid
-sequenceDiagram
-    participant User as 👨‍💻 使用者
-    participant Launcher as 🚀 launch.py
-    participant UV as ✨ uv
-    participant QuantApp as 📈 Quant App
-    participant TranscriberApp as 🎤 Transcriber App
-    participant Proxy as 🌐 逆向代理
+`scripts/phoenix_dashboard.py` 的職責非常純粹——它就是那個視覺化儀表板本身。它負責：
 
-    User->>Launcher: 執行 `python launch.py`
-    Launcher->>Launcher: 開始遍歷 `apps` 目錄
+-   **繪製介面**：使用 ANSI Escape Codes 繪製 TUI。
+-   **監控硬體**：顯示 CPU、RAM、DISK 使用率。
+-   **觸發與監控**：協調每個微服務的環境準備、依賴安裝和測試流程。
+-   **管理後端微服務的生命週期**。
 
-    Note over Launcher, UV: --- 處理 Quant App ---
-    Launcher->>UV: 進入 `apps/quant`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>QuantApp: 在背景啟動 `main.py` (監聽 8001 埠)
+### 啟動與整合機制
 
-    Note over Launcher, UV: --- 處理 Transcriber App ---
-    Launcher->>UV: 進入 `apps/transcriber`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>TranscriberApp: 在背景啟動 `main.py` (監聽 8002 埠)
+使用者不再直接運行儀表板檔案，而是透過 `scripts/launch.py --dashboard` 來召喚它。
 
-    Note over Launcher, Proxy: --- 啟動最終服務 ---
-    Launcher->>Proxy: 所有 App 啟動成功，現在啟動內建的逆向代理
-    Proxy->>User: 系統準備就緒！顯示公開訪問網址 (http://localhost:8000)
+`launch.py` 在儀表板模式下的行為如下：
+
+1.  **呼叫翻譯官**: `launch.py` 執行一個內部指令，呼叫 `tools/gotty` 工具。
+2.  **包裹儀表板**: `gotty` 會去執行 `scripts/phoenix_dashboard.py`，並將儀表板的所有終端機畫面即時轉譯成一個網頁服務（例如，運行在 8080 埠）。
+3.  **健康檢查與重試**: `launch.py` 會耐心等待，透過智慧重試機制確認這個由 GoTTY 建立的網頁服務已經完全就緒。
+4.  **自動嵌入畫面**:
+    -   **在 Colab 中**: 一旦確認就緒，`launch.py` 會獲取 Colab 的原生代理網址，並使用 `IPython.display.IFrame` 技術，將這個動態的儀表板網頁直接嵌入到 Colab 的輸出儲存格中。
+    -   **在本地**: `launch.py` 會在終端顯示儀表板的本地網址 (`http://localhost:8080`)，並保持運行。
+
+## 3. Colab 單一儲存格最終呈現草圖
+
+### 執行前
+
+使用者只會看到一個帶有設定表單的儲存格。
+
+```
++---------------------------------------------------------------------------------+
+| ▲ 💎 鳳凰之心指揮中心：一鍵啟動                                                 |
+|---------------------------------------------------------------------------------|
+| > 完成設定後，點擊左側的 ▶️ 執行按鈕即可啟動。                                     |
+| ---                                                                             |
+| 啟動模式: [ 啟動視覺化儀表板 ▼]                                                 |
+| ... (其他可選設定) ...                                                          |
+| ---                                                                             |
+|                                                                                 |
+| [▶️] # 唯一的啟動指令，會自動讀取上方表單的設定                                  |
+|     !python scripts/launch.py --dashboard                                       |
+|                                                                                 |
++---------------------------------------------------------------------------------+
 ```
 
-### 流程總結：
+### 執行後
 
-1.  **啟動器 (`launch.py`)** 是唯一的指揮官。
-2.  它逐一「拜訪」每個 App 的家 (`apps/*`)。
-3.  在每個家裡，它命令 **uv** 快速建立一個獨立、標準化的工作環境 (`.venv`) 並安裝好所有工具 (`requirements.txt`)。
-4.  環境就緒後，它就讓這個 App 自己開始工作（在背景運行自己的 FastAPI 伺服器）。
-5.  當所有 App 都開始獨立工作後，啟動器最後會打開「總服務台」（逆向代理），讓外界可以開始通過統一的入口訪問所有服務。
+儲存格的輸出區域會自動更新，直接顯示嵌入的儀表板。
 
-這套流程確保了無論在何種環境下，整個系統的啟動過程都是標準化、可預測、且極度高效的。
+```
++---------------------------------------------------------------------------------+
+| ▼ 💎 鳳凰之心指揮中心：一鍵啟動                                                 |
+|---------------------------------------------------------------------------------|
+| ... (設定表單在此處被折疊) ...                                                  |
+|                                                                                 |
+| [🔄] # ... (啟動指令在此處被折疊) ...                                            |
+|---------------------------------------------------------------------------------|
+| [OUTPUT]                                                                        |
+|                                                                                 |
+|   ┌─ 🚀 鳳凰之心指揮中心 v8.0 ─────────────────────────────────────────────────┐   |
+|   │                                                                              │   |
+|   ├─ 🌐 系統狀態 (System Status) ────────────────────────────────────────────────┤   |
+|   │ 🟢 運行中   核心: 8   RAM: 12.1/16.0 GB (75.6%)   DISK: 25.4/100.0 GB (25.4%) │   |
+|   │                                                                              │   |
+|   ├─ 📦 應用程式狀態 (Application Status) ───────────────────────────────────────┤   |
+|   │ 📈 Quant App        [🟢 測試通過]      🎤 Transcriber App  [🔄 安裝中...]         │   |
+|   │                                                                              │   |
+|   ├─ 📜 即時日誌 (Live Logs) ────────────────────────────────────────────────────┤   |
+|   │ [10:17:25] [INFO] Quant App 測試完成: 4 passed in 5.15s                     │   |
+|   │ [10:17:21] [INFO] 正在為 Transcriber App 安裝大型依賴...                      │   |
+|   │                                                                              │   |
+|   ├─ ✨ 當前任務 (Current Task) ─────────────────────────────────────────────────┤   |
+|   │ [安裝依賴於 Transcriber]                                                     │   |
+|   │ torch 2.1.0      [━╸      ] 25% - 500.1/2000.0 MB @ 100.2 MB/s          │   |
+|   │                                                                              │   |
+|   └──────────────────────────────────────────────────────────────────────────────┘   |
+|                                                                                 |
++---------------------------------------------------------------------------------+
+```
+
+## 4. 總結：新架構的優勢
+
+-   **極致簡潔**: 使用者只需面對 `scripts/launch.py` 這一個入口，所有複雜性都被封裝在後端。
+-   **職責明確**: `src/` 專注業務，`scripts/` 專注操作，`tools/` 專注輔助，結構一目了然。
+-   **無縫體驗**: 無論是在 Ubuntu 還是 Colab，啟動服務或儀表板的指令完全一致，徹底消除了環境切換的困擾。
+-   **完美視覺**: 透過「Web 化 + 自動嵌入」的策略，精心設計的儀表板得以在 Colab 中無需點擊、即時呈現，提供了與本地開發完全一致的精美互動體驗。

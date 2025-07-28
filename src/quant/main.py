@@ -5,7 +5,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI
-from apps.quant.api.v1 import routes as v1_routes
+from src.quant.api.v1 import routes as v1_routes
 
 # --- Lifespan 事件處理 ---
 # 使用 FastAPI 推薦的 lifespan 上下文管理器來處理啟動和關閉事件

@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-鳳凰之心專案 - 智慧啟動器 v2.0 (Phoenix Heart - Smart Launcher v2.0)
+鳳凰之心專案 - 智慧啟動器 v8.0 (Phoenix Heart - Smart Launcher v8.0)
 
 此版本完全支援 `docs/ARCHITECTURE.md` 中定義的最終架構。
 
 核心功能:
-- **獨立虛擬環境**: 為 `apps/` 下的每個應用程式自動建立和管理獨立的 `.venv`。
-- **uv 加速**: 使用 `uv` 來極速建立環境和安裝依賴。
-- **智慧啟動**: 啟動所有應用程式，並可選擇性地啟動儀表板。
-- **環境一致性**: 確保在任何環境下都能有一致的啟動體驗。
+- **雙模式啟動**:
+  - **標準模式**: `python scripts/launch.py` - 啟動後端服務。
+  - **儀表板模式**: `python scripts/launch.py --dashboard` - 啟動互動式儀表板。
+- **GoTTY 整合**: 在儀表板模式下，自動使用 GoTTY 將 TUI 儀表板 Web 化。
+- **Colab IFrame 嵌入**: 在 Colab 環境中，自動將儀表板嵌入到輸出儲存格。
+- **自動化環境準備**: 使用 uv 自動為每個微服務建立獨立的虛擬環境並安裝依賴。
 
-用法:
-  - 啟動所有服務: python scripts/launch.py
-  - 顯示儀表板:  python scripts/launch.py --dashboard
 """
 import argparse
 import os
@@ -21,10 +20,14 @@ import sys
 import time
 from pathlib import Path
 import shutil
+import httpx
+from IPython.display import display, IFrame
 
 # --- 常數定義 ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-APPS_DIR = PROJECT_ROOT / "apps"
+SRC_DIR = PROJECT_ROOT / "src"
+TOOLS_DIR = PROJECT_ROOT / "tools"
+REQUIREMENTS_DIR = PROJECT_ROOT / "requirements"
 
 # --- 輔助函式 ---
 
@@ -63,7 +66,6 @@ def run_command(command, cwd=None, env=None):
                 break
             if output:
                 print(output.strip())
-                # 強制刷新輸出
                 sys.stdout.flush()
         rc = process.wait()
         if rc != 0:
@@ -83,7 +85,6 @@ def prepare_app_environment(app_path: Path, uv_executable: str):
 
     venv_path = app_path / ".venv"
     python_executable = venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
-    reqs_file = app_path / "requirements.txt"
 
     # 1. 建立虛擬環境
     if not venv_path.exists():
@@ -93,20 +94,31 @@ def prepare_app_environment(app_path: Path, uv_executable: str):
         print(f"{app_name} 的虛擬環境已存在。")
 
     # 2. 安裝依賴
-    if reqs_file.exists():
-        print(f"為 {app_name} 安裝/更新依賴...")
+    base_reqs_file = REQUIREMENTS_DIR / "base.txt"
+    app_reqs_file = REQUIREMENTS_DIR / f"{app_name}.txt"
+
+    if base_reqs_file.exists():
+        print(f"為 {app_name} 安裝基礎依賴...")
         run_command([
             uv_executable, "pip", "install",
             "--python", str(python_executable),
-            "-r", str(reqs_file)
+            "-r", str(base_reqs_file)
+        ])
+
+    if app_reqs_file.exists():
+        print(f"為 {app_name} 安裝特定依賴...")
+        run_command([
+            uv_executable, "pip", "install",
+            "--python", str(python_executable),
+            "-r", str(app_reqs_file)
         ])
     else:
-        print(f"⚠️ 警告: 在 {app_path} 中找不到 requirements.txt，跳過依賴安裝。")
+        print(f"⚠️ 警告: 在 {REQUIREMENTS_DIR} 中找不到 {app_name}.txt，跳過特定依賴安裝。")
 
     print(f"✅ {app_name} 環境準備完成!")
     return str(python_executable)
 
-def start_services(apps_to_run, args):
+def start_services(apps_to_run):
     """在背景啟動所有 FastAPI 服務"""
     print_header("啟動所有微服務")
     processes = []
@@ -117,11 +129,11 @@ def start_services(apps_to_run, args):
         print(f"啟動 {app_name} 服務於埠 {port}...")
         env = os.environ.copy()
         env["PORT"] = str(port)
-        env["PYTHONPATH"] = f"{str(PROJECT_ROOT)}:{str(APPS_DIR)}"
+        env["PYTHONPATH"] = str(PROJECT_ROOT)
 
         process = subprocess.Popen(
-            [python_executable, "-m", f"apps.{app_name}.main"],
-            cwd=PROJECT_ROOT, # 從根目錄執行
+            [python_executable, "-m", f"src.{app_name}.main"],
+            cwd=PROJECT_ROOT,
             env=env
         )
         processes.append(process)
@@ -133,60 +145,83 @@ def start_dashboard():
     """使用 gotty 啟動儀表板"""
     print_header("啟動儀表板")
     dashboard_script = PROJECT_ROOT / "scripts" / "phoenix_dashboard.py"
-    gotty_path = PROJECT_ROOT / "tools" / "gotty"
+    gotty_path = TOOLS_DIR / "gotty"
+    dashboard_port = 8080
 
     if not gotty_path.exists():
         print(f"❌ 錯誤: 找不到 gotty 工具於 {gotty_path}")
         print("請根據 README 指示下載它。")
         sys.exit(1)
 
-    # 儀表板需要一個 python 環境來執行，我們使用其中一個 App 的環境
-    # 或者可以建立一個共享的 dashboard venv
-    # 為了簡單起見，我們假設儀表板的依賴已包含在 base.txt 中
-    # 並使用系統 python 來啟動
-    python_to_run_dashboard = sys.executable
-
     command = [
         str(gotty_path),
-        "--port", "8080",
+        "--port", str(dashboard_port),
         "--title-format", "鳳凰之心儀表板",
         "--permit-write",
-        python_to_run_dashboard, str(dashboard_script)
+        sys.executable, str(dashboard_script)
     ]
-    print("🚀 使用 GoTTY 將儀表板網頁化於 http://localhost:8080")
-    try:
-        # 使用 run_command 以便在 CI/CD 環境中也能正常顯示輸出
-        run_command(command)
-    except KeyboardInterrupt:
-        print("\nGoTTY 服務已停止。")
+
+    print(f"🚀 使用 GoTTY 將儀表板網頁化於 http://localhost:{dashboard_port}")
+
+    # 在背景啟動 gotty
+    gotty_process = subprocess.Popen(command)
+
+    # 健康檢查
+    print("--- 等待儀表板服務啟動 ---")
+    is_colab = "google.colab" in sys.modules
+
+    for i in range(20): # 最多等待 20 秒
+        try:
+            response = httpx.get(f"http://localhost:{dashboard_port}", timeout=1)
+            if response.status_code == 200:
+                print("✅ 儀表板服務已就緒！")
+                if is_colab:
+                    from google.colab.output import eval_js
+                    proxy_url = eval_js(f'google.colab.kernel.proxyPort({dashboard_port})')
+                    print(f"🌍 Colab 公開網址: {proxy_url}")
+                    display(IFrame(proxy_url, width='100%', height=700))
+                return gotty_process
+        except httpx.RequestError:
+            time.sleep(1)
+            print(f"重試 {i+1}/20...")
+
+    print("❌ 錯誤: 儀表板服務啟動超時。")
+    gotty_process.terminate()
+    return None
 
 
 def main():
     """主函式"""
-    parser = argparse.ArgumentParser(description="鳳凰之心專案智慧啟動器 v2.0")
+    parser = argparse.ArgumentParser(description="鳳凰之心專案智慧啟動器 v8.0")
     parser.add_argument("--dashboard", action="store_true", help="啟動並顯示互動式儀表板")
     args = parser.parse_args()
 
     uv_executable = find_uv_executable()
 
     apps_to_run = {}
-    # 預設埠號
     ports = {"quant": 8001, "transcriber": 8002}
 
-    for app_path in APPS_DIR.iterdir():
-        if app_path.is_dir():
+    for app_path in SRC_DIR.iterdir():
+        if app_path.is_dir() and (app_path / "main.py").exists():
             app_name = app_path.name
             python_executable = prepare_app_environment(app_path, uv_executable)
             apps_to_run[app_name] = {
                 "python": python_executable,
                 "path": app_path,
-                "port": ports.get(app_name, 8000) # 給個預設值
+                "port": ports.get(app_name, 8000)
             }
 
     if args.dashboard:
-        start_dashboard()
+        dashboard_process = start_dashboard()
+        if dashboard_process:
+            print("儀表板正在運行中。按 Ctrl+C 關閉。")
+            try:
+                dashboard_process.wait()
+            except KeyboardInterrupt:
+                print("\n🛑 正在關閉儀表板...")
+                dashboard_process.terminate()
     else:
-        processes = start_services(apps_to_run, args)
+        processes = start_services(apps_to_run)
 
         def shutdown_services(signum, frame):
             print(f"\n🛑 收到訊號 {signum}，正在關閉所有服務...")

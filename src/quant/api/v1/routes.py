@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 # 確保可以從 quant 目錄導入 logic 模組
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from quant.logic import analysis, database
+from src.quant.logic import analysis, database
 
 # 建立一個 APIRouter 實例，我們可以稍後將它包含到主 App 中
 router = APIRouter(

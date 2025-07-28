@@ -29,7 +29,7 @@ import shlex
 import re
 
 # --- 常數與設定 ---
-APPS_DIR = Path("apps")
+APPS_DIR = Path("src")
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # --- 應用程式狀態枚舉 ---
