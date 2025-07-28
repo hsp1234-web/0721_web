@@ -13,6 +13,7 @@ python-multipart
 # --- Utilities ---
 # pydantic: FastAPI 使用的數據驗證庫
 pydantic
+click
 
 # 注意：為了在 'real' 模式下運行，可能需要安裝 PyTorch。
 # 我們遵循 TEST.md 的理念，不在這裡直接聲明 torch，

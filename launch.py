@@ -19,11 +19,14 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 import uvicorn
+import argparse # 匯入 argparse 模組
 
-# --- 常數與設定 ---
+# --- 核心設定 ---
 APPS_DIR = Path("apps")
 PROXY_CONFIG_FILE = Path("proxy/proxy_config.json")
 BASE_PORT = 8001
+# 專案根目錄，用於設定 PYTHONPATH
+PROJECT_ROOT = Path(__file__).parent.resolve()
 
 # --- 顏色代碼，讓輸出更美觀 ---
 class colors:
@@ -52,17 +55,23 @@ def print_info(message):
     """打印一般資訊"""
     print(f"{colors.OKCYAN}ℹ️ {message}{colors.ENDC}")
 
-def run_command(command, cwd, venv_path=None):
+def print_fail(message):
+    """打印失敗的訊息"""
+    print(f"{colors.FAIL}❌ {message}{colors.ENDC}")
+
+def run_command(command, cwd, venv_path=None, env=None):
     """執行一個子進程命令，並即時串流其輸出"""
+    env = env or os.environ.copy()
     executable = command.split()[0]
+
     if venv_path:
-        # 在 Windows 和 Linux/macOS 上尋找虛擬環境中的可執行檔
         bin_dir = "Scripts" if sys.platform == "win32" else "bin"
         executable_path = venv_path / bin_dir / executable
         if executable_path.exists():
             command = command.replace(executable, str(executable_path), 1)
 
     print_info(f"在 '{cwd}' 中執行: {colors.BOLD}{command}{colors.ENDC}")
+
     process = subprocess.Popen(
         command,
         shell=True,
@@ -71,8 +80,10 @@ def run_command(command, cwd, venv_path=None):
         cwd=cwd,
         text=True,
         encoding='utf-8',
-        errors='replace'
+        errors='replace',
+        env=env
     )
+
     while True:
         output = process.stdout.readline()
         if output == '' and process.poll() is not None:
@@ -117,10 +128,11 @@ async def prepare_app(app_path: Path):
         run_command(f"uv venv", cwd=app_path)
         print_success(f"[{app_name}] 虛擬環境準備就緒。")
 
-        # 步驟 2: 同步依賴
-        print_info(f"[{app_name}] 使用 uv 光速同步依賴...")
-        run_command(f"uv pip sync {requirements_path.name}", cwd=app_path, venv_path=venv_path)
-        print_success(f"[{app_name}] 所有依賴已同步。")
+        # 步驟 2: 安裝依賴
+        # 使用 `install -r` 而非 `sync`，以確保 `uv` 會自動處理子依賴
+        print_info(f"[{app_name}] 使用 uv 光速安裝依賴...")
+        run_command(f"uv pip install -r {requirements_path.name}", cwd=app_path, venv_path=venv_path)
+        print_success(f"[{app_name}] 所有依賴已安裝。")
 
     except subprocess.CalledProcessError as e:
         print(f"{colors.FAIL}[{app_name}] 環境準備失敗: {e}{colors.ENDC}")
@@ -243,9 +255,119 @@ async def main():
             p.wait()
         print_success("所有服務已成功關閉。再會！")
 
+async def run_tests():
+    """
+    執行所有 App 的整合測試。
+    此函式將取代原本 `smart_e2e_test.sh` 的功能。
+    """
+    print_header("🏃‍♂️ 進入開發者測試模式 🏃‍♂️")
+    ensure_uv_installed()
+
+    apps_to_test = [d for d in APPS_DIR.iterdir() if d.is_dir()]
+    print_info(f"發現了 {len(apps_to_test)} 個 App: {[p.name for p in apps_to_test]}")
+
+    test_failures = 0
+
+    for app_path in apps_to_test:
+        app_name = app_path.name
+        print_header(f"--- 開始測試 App: {app_name} ---")
+
+        venv_path = app_path / ".venv_test"
+        reqs_file = app_path / "requirements.txt"
+        reqs_large_file = app_path / "requirements.large.txt"
+        tests_dir = app_path / "tests"
+
+        if not tests_dir.is_dir() or not any(tests_dir.glob("test_*.py")):
+            print_warning(f"App '{app_name}' 沒有測試檔案，跳過。")
+            continue
+
+        try:
+            # 步驟 1: 建立隔離的測試虛擬環境
+            print_info(f"[{app_name}] 1. 建立隔離的測試虛擬環境...")
+            run_command(f"uv venv .venv_test -p {sys.executable} --seed", cwd=app_path)
+
+            # 步驟 2: 安裝通用及核心依賴
+            print_info(f"[{app_name}] 2. 安裝通用及核心依賴...")
+            run_command("uv pip install -q pytest pytest-mock ruff httpx", cwd=app_path, venv_path=venv_path)
+            if reqs_file.exists():
+                run_command(f"uv pip install -q -r {reqs_file.name}", cwd=app_path, venv_path=venv_path)
+
+            # 步驟 3: 安裝大型依賴 (模擬 'real' 模式)
+            # 在此 Python 版本中，我們總是安裝所有依賴來進行最全面的測試
+            if reqs_large_file.exists():
+                print_info(f"[{app_name}] 3. 偵測到大型依賴，正在安裝...")
+                run_command(f"uv pip install -q -r {reqs_large_file.name}", cwd=app_path, venv_path=venv_path)
+
+            # 步驟 4: 執行 Ruff 檢查
+            print_info(f"[{app_name}] 4. 執行 Ruff 程式碼品質檢查...")
+            run_command("uv run ruff check --fix --select I,F,E,W --ignore E501 .", cwd=app_path, venv_path=venv_path)
+            run_command("uv run ruff check --select I,F,E,W --ignore E501 .", cwd=app_path, venv_path=venv_path)
+            print_success(f"[{app_name}] Ruff 檢查通過。")
+
+            # 步驟 5: 執行 pytest
+            print_info(f"[{app_name}] 5. 執行 pytest...")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(PROJECT_ROOT)
+            # 傳遞環境變數以告知測試在模擬模式下運行
+            env["APP_MOCK_MODE"] = "true" # 預設為 true，與 shell 腳本行為一致
+            run_command(f"uv run pytest {tests_dir.name}", cwd=app_path, venv_path=venv_path, env=env)
+
+            print_success(f"✅ App '{app_name}' 所有測試皆已通過！")
+
+        except subprocess.CalledProcessError as e:
+            print_fail(f"❌ App '{app_name}' 的測試流程失敗於: {e.cmd}")
+            test_failures += 1
+        except Exception as e:
+            print_fail(f"❌ App '{app_name}' 的測試流程中發生未預期的錯誤: {e}")
+            test_failures += 1
+        finally:
+            # 清理測試環境
+            print_info(f"清理 {app_name} 的測試環境...")
+            import shutil
+            if venv_path.exists():
+                shutil.rmtree(venv_path)
+            print_success(f"--- App: {app_name} 測試完成 ---")
+
+
+    print_header("所有測試已完成")
+    if test_failures == 0:
+        return True
+    else:
+        print_fail(f"總共有 {test_failures} 個 App 的測試未通過。")
+        return False
+
 if __name__ == "__main__":
+    # --- 命令列參數解析 ---
+    # 說明：我們在此設定 `--dev` 旗標，用於啟動開發者測試模式。
+    #      `action='store_true'` 表示這個旗標不需要額外的值，只要出現了，其對應的變數 (`args.dev`) 就會是 True。
+    parser = argparse.ArgumentParser(description="🚀 鳳凰之心專案總開關")
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="啟用開發者模式，此模式將執行完整的端對端測試後自動關閉，而非啟動服務器。"
+    )
+    args = parser.parse_args()
+
     try:
-        asyncio.run(main())
+        if args.dev:
+            # --- 開發者模式 ---
+            # 在此模式下，我們執行測試，並根據結果退出。
+            test_successful = asyncio.run(run_tests())
+            if test_successful:
+                print_success("🎉 所有測試均已通過！系統將正常退出。")
+                sys.exit(0)
+            else:
+                print_fail("❌ 部分測試失敗。請檢查日誌。")
+                sys.exit(1)
+        else:
+            # --- 一般模式 ---
+            # 這是預設的行為，即啟動所有服務並持續運行。
+            asyncio.run(main())
+
+    except KeyboardInterrupt:
+        # 為了在 asyncio.run 還未執行時也能優雅地退出
+        print("\n" + colors.WARNING + "收到使用者中斷信號，程式正在終止..." + colors.ENDC)
+        sys.exit(0)
     except Exception as e:
-        print(f"{colors.FAIL}\n啟動過程中發生未預期的嚴重錯誤: {e}{colors.ENDC}")
+        print(f"{colors.FAIL}\n過程中發生未預期的嚴重錯誤: {e}{colors.ENDC}")
         sys.exit(1)

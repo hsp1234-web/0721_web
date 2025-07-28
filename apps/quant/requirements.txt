@@ -28,3 +28,4 @@ pydantic
 
 # tqdm: FinMind 函式庫的一個隱性依賴，用於顯示進度條
 tqdm
+click

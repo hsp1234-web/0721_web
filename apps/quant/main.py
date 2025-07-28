@@ -14,6 +14,8 @@ from fastapi import FastAPI
 # 這樣 `from quant.api.v1 import routes as v1_routes` 才能正確工作
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from contextlib import asynccontextmanager
+
 from quant.api.v1 import routes as v1_routes
 from quant.logic import database
 
@@ -23,8 +25,6 @@ app = FastAPI(
     description="一個獨立的微服務，負責執行金融數據分析、回測與策略計算。",
     version="1.0.0",
 )
-
-from contextlib import asynccontextmanager
 
 
 # --- Lifespan 事件處理 ---
