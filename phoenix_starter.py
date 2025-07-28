@@ -31,6 +31,10 @@ import re
 # --- 常數與設定 ---
 APPS_DIR = Path("apps")
 PROJECT_ROOT = Path(__file__).parent.resolve()
+# 在 /dev/shm/ (如果存在) 或專案根目錄下建立虛擬環境
+VENV_ROOT = Path("/dev/shm/phoenix_venvs") if sys.platform == "linux" and Path("/dev/shm").exists() else PROJECT_ROOT / ".venvs"
+LARGE_PACKAGES_DIR = PROJECT_ROOT / ".large_packages"
+
 
 # --- 應用程式狀態枚舉 ---
 class AppStatus:
@@ -49,7 +53,9 @@ class App:
         self.path = path
         self.name = path.name
         self.status = AppStatus.PENDING
-        self.venv_path = path / ".venv_visual" # 使用獨立的 venv
+        VENV_ROOT.mkdir(exist_ok=True)
+        self.venv_path = VENV_ROOT / self.name
+        self.large_packages_path = LARGE_PACKAGES_DIR / self.name
         self.log = []
         self.dashboard = None
 
@@ -73,20 +79,33 @@ PROGRESS_RE = re.compile(
     r"(?P<speed>[\d\.\w /s]+)"     # 速度
 )
 
-async def run_command_async(command: str, cwd: Path, app: App):
+async def run_command_async(command: str, cwd: Path, app: App, env: dict = None):
     """異步執行一個子進程命令，並將其輸出串流到 App 的日誌中"""
     is_install_command = "pip install" in command
     task_name = f"安裝依賴於 {app.name}" if is_install_command else f"執行 {command.split()[0]}"
 
+    current_env = os.environ.copy()
+    if env:
+        current_env.update(env)
+
     if app.dashboard and is_install_command:
         app.dashboard.update_current_task(task_name=task_name, progress_line="")
 
-    # ... (subprocess 建立過程保持不變)
     if sys.platform != "win32":
         args = shlex.split(command)
-        process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd)
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=cwd,
+            env=current_env)
     else:
-        process = await asyncio.create_subprocess_shell(command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd)
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=cwd,
+            env=current_env)
 
     while True:
         line = await process.stdout.readline()
@@ -98,10 +117,8 @@ async def run_command_async(command: str, cwd: Path, app: App):
 
         match = PROGRESS_RE.match(decoded_line)
         if match and app.dashboard and is_install_command:
-            # 這是進度條，更新當前任務區塊
             app.dashboard.update_current_task(progress_line=decoded_line)
         else:
-            # 這是普通日誌
             app.add_log(decoded_line)
 
     if app.dashboard and is_install_command:
@@ -114,25 +131,25 @@ async def prepare_app_environment(app: App, install_large_deps=False):
     app.set_status(AppStatus.INSTALLING)
 
     try:
-        # 1. 建立虛擬環境
+        # 1. 建立虛擬環境 (現在在 VENV_ROOT)
+        app.add_log(f"虛擬環境位置: {app.venv_path}")
         venv_cmd = f"uv venv {shlex.quote(str(app.venv_path))} --seed"
         return_code = await run_command_async(venv_cmd, cwd=PROJECT_ROOT, app=app)
         if return_code != 0:
             raise RuntimeError(f"建立虛擬環境失敗，返回碼: {return_code}")
 
         python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
-
         if not python_executable.exists():
             raise FileNotFoundError(f"在 '{app.venv_path}' 中找不到 Python 解譯器: '{python_executable}'")
 
-        # 2. 安裝通用測試依賴
+        # 2. 安裝通用測試依賴到虛擬環境
         common_deps = "pytest pytest-mock ruff httpx"
         pip_cmd = f'uv pip install --python "{python_executable}" {common_deps}'
         return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
         if return_code != 0:
             raise RuntimeError(f"安裝通用依賴失敗，返回碼: {return_code}")
 
-        # 3. 安裝 App 核心依賴
+        # 3. 安裝 App 核心依賴到虛擬環境
         reqs_file = app.path / "requirements.txt"
         if reqs_file.exists():
             pip_cmd = f'uv pip install --python "{python_executable}" -r "{reqs_file}"'
@@ -140,12 +157,14 @@ async def prepare_app_environment(app: App, install_large_deps=False):
             if return_code != 0:
                 raise RuntimeError(f"安裝核心依賴失敗，返回碼: {return_code}")
 
-        # 4. (可選) 安裝大型依賴
+        # 4. (可選) 安裝大型依賴到磁碟
         if install_large_deps:
             large_reqs_file = app.path / "requirements.large.txt"
             if large_reqs_file.exists():
-                app.add_log("偵測到大型依賴，開始安裝...")
-                pip_cmd = f'uv pip install --python "{python_executable}" -r "{large_reqs_file}"'
+                app.add_log(f"偵測到大型依賴，安裝至: {app.large_packages_path}")
+                app.large_packages_path.mkdir(parents=True, exist_ok=True)
+                # 使用 --target 直接安裝到指定目錄
+                pip_cmd = f'uv pip install --target "{app.large_packages_path}" -r "{large_reqs_file}"'
                 return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
                 if return_code != 0:
                     raise RuntimeError(f"安裝大型依賴失敗，返回碼: {return_code}")
@@ -397,52 +416,109 @@ class ANSIDashboard:
             self._write(f"{ANSI.move_cursor(22, 1)}{ANSI.SHOW_CURSOR}")
 
 
-async def run_tests_for_app(app: App):
-    """在 App 的虛擬環境中執行 pytest"""
-    app.set_status(AppStatus.TESTING)
-
-    tests_dir = app.path / "tests"
-    if not tests_dir.exists() or not any(tests_dir.glob("test_*.py")):
-        app.add_log("找不到測試檔案，跳過測試。")
-        app.set_status(AppStatus.TEST_PASSED) # 沒有測試也算通過
-        return True
+async def launch_app(app: App, install_large_deps: bool):
+    """在背景啟動一個 App"""
+    app.set_status(AppStatus.RUNNING)
 
     python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    main_py_path = app.path / "main.py"
 
-    # 設定環境變數，讓測試可以找到專案根目錄
-    os.environ['PYTHONPATH'] = str(PROJECT_ROOT)
+    if not main_py_path.exists():
+        app.add_log(f"在 {app.name} 中找不到 main.py，無法啟動。")
+        app.set_status(AppStatus.FAILED)
+        return None
 
-    test_cmd = f'uv run --python "{python_executable}" pytest "{tests_dir}"'
+    # 設定環境變數
+    env = os.environ.copy()
+    python_path_parts = [str(PROJECT_ROOT)]
+    if install_large_deps and app.large_packages_path.exists():
+        python_path_parts.append(str(app.large_packages_path))
 
-    return_code = await run_command_async(test_cmd, cwd=PROJECT_ROOT, app=app)
+    # 將虛擬環境的 site-packages 也加入
+    lib_path = app.venv_path / "lib"
+    if lib_path.exists():
+        py_version_dirs = list(lib_path.glob("python*"))
+        if py_version_dirs:
+            site_packages_path = py_version_dirs[0] / "site-packages"
+            if site_packages_path.exists():
+                python_path_parts.append(str(site_packages_path))
 
-    if return_code == 0:
-        app.set_status(AppStatus.TEST_PASSED)
-        return True
-    else:
-        app.set_status(AppStatus.TEST_FAILED)
-        return False
+    env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+    app.add_log(f"使用 PYTHONPATH 啟動: {env['PYTHONPATH']}")
+
+    # 使用 asyncio.create_subprocess_exec 來啟動，以便更好地管理進程
+    process = await asyncio.create_subprocess_exec(
+        str(python_executable), str(main_py_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env
+    )
+
+    app.add_log(f"App '{app.name}' 已在背景啟動, PID: {process.pid}")
+
+    # 異步讀取日誌，避免阻塞
+    asyncio.create_task(log_subprocess_output(process.stdout, app))
+    asyncio.create_task(log_subprocess_output(process.stderr, app))
+
+    return process
+
+async def log_subprocess_output(stream, app):
+    """從子進程的串流中讀取日誌並添加到儀表板"""
+    while True:
+        line = await stream.readline()
+        if not line:
+            break
+        app.add_log(f"[{app.name}] {line.decode().strip()}")
+
 
 async def main_logic(dashboard: ANSIDashboard = None):
     """主要的業務邏輯協調器 (修改後)"""
     apps = dashboard.apps if dashboard else discover_apps()
 
-    if not dashboard:
-        # ... (省略非 TUI 模式的 print 語句)
-        pass
-
-    is_sufficient, _, _ = check_system_resources()
-    install_large_deps = is_sufficient
-
     if dashboard:
+        dashboard.add_log_entry(f"記憶體虛擬環境根目錄: {VENV_ROOT}")
+        dashboard.add_log_entry(f"大型依賴包根目錄: {LARGE_PACKAGES_DIR}")
         for app in apps:
             app.dashboard = dashboard # 建立關聯
         dashboard.update_app_status()
 
+    is_sufficient, _, _ = check_system_resources()
+    install_large_deps = is_sufficient
+    if not is_sufficient and dashboard:
+        dashboard.add_log_entry("資源不足，將執行「模擬安裝」模式。")
+
+    # 步驟 1: 準備所有環境
     for app in apps:
-        success = await prepare_app_environment(app, install_large_deps)
-        if success:
-            await run_tests_for_app(app)
+        await prepare_app_environment(app, install_large_deps)
+
+    # 步驟 2: 啟動所有 App
+    processes = []
+    if dashboard:
+        dashboard.add_log_entry("環境準備完畢，正在啟動所有應用程式...")
+    for app in apps:
+        proc = await launch_app(app, install_large_deps)
+        if proc:
+            processes.append(proc)
+
+    if not processes and dashboard:
+        dashboard.add_log_entry("沒有可啟動的應用程式。")
+        return
+
+    if dashboard:
+        dashboard.add_log_entry("所有應用已啟動。按 Ctrl+C 終止。")
+
+    # 等待所有進程結束 (例如，透過 Ctrl+C)
+    try:
+        if processes:
+            await asyncio.gather(*[p.wait() for p in processes])
+    finally:
+        if dashboard:
+            dashboard.add_log_entry("正在終止所有應用程式進程...")
+        for p in processes:
+            try:
+                p.terminate()
+            except ProcessLookupError:
+                pass # 進程可能已經自己結束了
 
 def main():
     """主函數"""
