@@ -8,7 +8,9 @@
 import pandas as pd
 
 
-def calculate_moving_average(df: pd.DataFrame, window: int, price_col: str = 'close') -> pd.DataFrame:
+def calculate_moving_average(
+    df: pd.DataFrame, window: int, price_col: str = 'close'
+) -> pd.DataFrame:
     """
     計算移動平均線 (Moving Average)。
 
@@ -23,7 +25,9 @@ def calculate_moving_average(df: pd.DataFrame, window: int, price_col: str = 'cl
     df[f'MA_{window}'] = df[price_col].rolling(window=window).mean()
     return df
 
-def calculate_rsi(df: pd.DataFrame, window: int = 14, price_col: str = 'close') -> pd.DataFrame:
+def calculate_rsi(
+    df: pd.DataFrame, window: int = 14, price_col: str = 'close'
+) -> pd.DataFrame:
     """
     計算相對強弱指數 (RSI)。
 

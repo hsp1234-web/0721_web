@@ -7,9 +7,6 @@ import os
 # 這裡我們需要能夠導入同目錄下的 logic 模組
 # 在微服務架構中，每個 App 都是一個獨立的執行單元
 # 所以我們需要確保 Python 的導入路徑是正確的
-import sys
-from pathlib import Path
-
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse

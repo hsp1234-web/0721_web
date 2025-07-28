@@ -59,7 +59,6 @@ from pathlib import Path
 def setup_colab_environment():
     """安裝 Colab 環境需要的套件並回傳是否在 Colab 中執行"""
     try:
-        from google.colab.output import eval_js
         # 安裝 `get_ipython` 需要的套件
         subprocess.check_call([sys.executable, "-m", "pip", "-q", "install", "ipython"])
         return True
@@ -100,7 +99,7 @@ def main():
         shutil.rmtree(project_path)
 
     if not project_path.exists():
-        print(f"📂 正在從 GitHub 下載專案程式碼...")
+        print("📂 正在從 GitHub 下載專案程式碼...")
         clone_command = f"git clone --branch {要使用的版本分支或標籤} --depth 1 {程式碼倉庫網址} {project_path}"
         if not run_command(clone_command, base_path):
             print("❌ 程式碼下載失敗，啟動中止。")

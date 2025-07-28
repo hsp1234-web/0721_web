@@ -58,7 +58,9 @@ def process_audio_file(file: UploadFile) -> str:
 
         # 根據是否能使用模型來決定行為
         # os.environ.get("APP_MOCK_MODE") == "true" 是由我們的測試腳本設定的
-        if not _FASTER_WHISPER_AVAILABLE or os.environ.get("APP_MOCK_MODE") == "true" or _model is None:
+        if (not _FASTER_WHISPER_AVAILABLE
+                or os.environ.get("APP_MOCK_MODE") == "true"
+                or _model is None):
             # --- 模擬模式 ---
             tasks[task_id] = {
                 "status": "completed",

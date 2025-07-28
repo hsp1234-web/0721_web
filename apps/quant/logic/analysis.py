@@ -37,8 +37,12 @@ def run_simple_backtest(stock_id: str, start_date: str, end_date: str) -> dict:
         return {"error": f"數據獲取失敗: {e}"}
 
     # 步驟 2: 計算因子
-    price_df = factor_engineering.calculate_moving_average(price_df, window=10, price_col='close')
-    price_df = factor_engineering.calculate_moving_average(price_df, window=30, price_col='close')
+    price_df = factor_engineering.calculate_moving_average(
+        price_df, window=10, price_col='close'
+    )
+    price_df = factor_engineering.calculate_moving_average(
+        price_df, window=30, price_col='close'
+    )
     price_df.dropna(inplace=True) # 刪除包含 NaN 的行，因為移動平均線初期沒有值
 
     # 步驟 3: 生成交易信號
@@ -63,7 +67,9 @@ def run_simple_backtest(stock_id: str, start_date: str, end_date: str) -> dict:
 
     # 計算現金部分
     pos_diff = positions.diff()
-    portfolio['cash'] = initial_capital - (pos_diff.multiply(price_df['close'], axis=0)).sum(axis=1).cumsum()
+    portfolio['cash'] = initial_capital - (
+        pos_diff.multiply(price_df['close'], axis=0)
+    ).sum(axis=1).cumsum()
 
     # 總市值
     portfolio['total'] = portfolio['cash'] + portfolio[stock_id]
@@ -84,6 +90,10 @@ def run_simple_backtest(stock_id: str, start_date: str, end_date: str) -> dict:
         "final_value": final_value,
         "total_return_pct": total_return * 100,
         "trade_count": len(trades),
-        "buy_signals": trades[trades['positions'] == 1].index.strftime('%Y-%m-%d').tolist(),
-        "sell_signals": trades[trades['positions'] == -1].index.strftime('%Y-%m-%d').tolist(),
+        "buy_signals": trades[trades['positions'] == 1]
+        .index.strftime('%Y-%m-%d')
+        .tolist(),
+        "sell_signals": trades[trades['positions'] == -1]
+        .index.strftime('%Y-%m-%d')
+        .tolist(),
     }

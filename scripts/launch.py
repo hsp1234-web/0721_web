@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-鳳凰之心專案 - 智慧啟動器 (Phoenix Heart - Smart Launcher)
+鳳凰之心專案 - 智慧啟動器 v2.0 (Phoenix Heart - Smart Launcher v2.0)
+
+此版本完全支援 `docs/ARCHITECTURE.md` 中定義的最終架構。
+
+核心功能:
+- **獨立虛擬環境**: 為 `apps/` 下的每個應用程式自動建立和管理獨立的 `.venv`。
+- **uv 加速**: 使用 `uv` 來極速建立環境和安裝依賴。
+- **智慧啟動**: 啟動所有應用程式，並可選擇性地啟動儀表板。
+- **環境一致性**: 確保在任何環境下都能有一致的啟動體驗。
 
 用法:
   - 啟動所有服務: python scripts/launch.py
   - 顯示儀表板:  python scripts/launch.py --dashboard
-  - 僅準備環境:  python scripts/launch.py --prepare-only
 """
 import argparse
 import os
@@ -13,24 +20,28 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import shutil
 
 # --- 常數定義 ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SRC_PATH = PROJECT_ROOT / "src"
-VENV_PATH = PROJECT_ROOT / ".venvs"
-REQUIREMENTS_PATH = PROJECT_ROOT / "requirements"
-APPS = {
-    "quant": {"port": 8001, "status": "Not Running"},
-    "transcriber": {"port": 8002, "status": "Not Running"},
-}
+APPS_DIR = PROJECT_ROOT / "apps"
 
 # --- 輔助函式 ---
 
 def print_header(title):
     """印出帶有邊框的標題"""
-    print("\n" + "="*50)
+    print("\n" + "="*60)
     print(f" {title}")
-    print("="*50)
+    print("="*60)
+
+def find_uv_executable():
+    """尋找 uv 執行檔，若無則提示安裝"""
+    uv_executable = shutil.which("uv")
+    if not uv_executable:
+        print("❌ 錯誤: 找不到 `uv` 命令。")
+        print("請先安裝 uv: `pip install uv` 或參考官方文件。")
+        sys.exit(1)
+    return uv_executable
 
 def run_command(command, cwd=None, env=None):
     """執行一個 shell 命令並即時顯示輸出"""
@@ -52,65 +63,65 @@ def run_command(command, cwd=None, env=None):
                 break
             if output:
                 print(output.strip())
-        rc = process.poll()
+                # 強制刷新輸出
+                sys.stdout.flush()
+        rc = process.wait()
         if rc != 0:
             print(f"❌ 命令執行失敗，返回碼: {rc}")
         return rc
     except FileNotFoundError:
-        print(f"❌ 錯誤: 找不到命令 '{command[0]}'。請確保它已安裝並在系統 PATH 中。")
+        print(f"❌ 錯誤: 找不到命令 '{command[0]}'。")
         return 1
     except Exception as e:
         print(f"❌ 執行命令時發生意外錯誤: {e}")
         return 1
 
-def setup_virtualenv():
-    """建立並更新共享的虛擬環境"""
-    print_header("1. 設定虛擬環境")
-    venv_python = VENV_PATH / "base" / "bin" / "python"
-    if not venv_python.exists():
-        print(f"建立新的虛擬環境於: {VENV_PATH / 'base'}")
-        run_command([sys.executable, "-m", "venv", str(VENV_PATH / "base")])
+def prepare_app_environment(app_path: Path, uv_executable: str):
+    """為單一應用程式準備獨立的虛擬環境和依賴"""
+    app_name = app_path.name
+    print_header(f"為 {app_name} 準備環境")
+
+    venv_path = app_path / ".venv"
+    python_executable = venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    reqs_file = app_path / "requirements.txt"
+
+    # 1. 建立虛擬環境
+    if not venv_path.exists():
+        print(f"為 {app_name} 建立新的虛擬環境於: {venv_path}")
+        run_command([uv_executable, "venv", str(venv_path), "--seed"])
     else:
-        print("虛擬環境已存在。")
+        print(f"{app_name} 的虛擬環境已存在。")
 
-    # 安裝基礎依賴
-    print("\n安裝/更新基礎依賴...")
-    run_command([
-        str(venv_python), "-m", "pip", "install", "-r",
-        str(REQUIREMENTS_PATH / "base.txt")
-    ])
-
-    # 安裝各個 App 的依賴
-    for app_name in APPS:
-        print(f"\n安裝/更新 {app_name} 的依賴...")
+    # 2. 安裝依賴
+    if reqs_file.exists():
+        print(f"為 {app_name} 安裝/更新依賴...")
         run_command([
-            str(venv_python), "-m", "pip", "install", "-r",
-            str(REQUIREMENTS_PATH / f"{app_name}.txt")
+            uv_executable, "pip", "install",
+            "--python", str(python_executable),
+            "-r", str(reqs_file)
         ])
-    print("\n✅ 環境準備完成!")
-    return str(venv_python)
+    else:
+        print(f"⚠️ 警告: 在 {app_path} 中找不到 requirements.txt，跳過依賴安裝。")
 
-def start_services(python_executable, args):
+    print(f"✅ {app_name} 環境準備完成!")
+    return str(python_executable)
+
+def start_services(apps_to_run, args):
     """在背景啟動所有 FastAPI 服務"""
-    print_header("2. 啟動微服務")
+    print_header("啟動所有微服務")
     processes = []
 
-    # 從命令列參數或預設值更新 App 設定
-    APPS["quant"]["port"] = args.port_quant
-    APPS["transcriber"]["port"] = args.port_transcriber
-
-    for app_name, config in APPS.items():
+    for app_name, config in apps_to_run.items():
         port = config["port"]
+        python_executable = config["python"]
         print(f"啟動 {app_name} 服務於埠 {port}...")
         env = os.environ.copy()
         env["PORT"] = str(port)
-        env["TIMEZONE"] = args.timezone
-        # 我們需要將 src 目錄加到 PYTHONPATH，這樣 `from quant.main` 才能運作
-        env["PYTHONPATH"] = str(SRC_PATH)
+        env["PYTHONPATH"] = f"{str(PROJECT_ROOT)}:{str(APPS_DIR)}"
 
         process = subprocess.Popen(
-            [python_executable, "-m", f"{app_name}.main"],
-            cwd=SRC_PATH,
+            [python_executable, "-m", f"apps.{app_name}.main"],
+            cwd=PROJECT_ROOT, # 從根目錄執行
             env=env
         )
         processes.append(process)
@@ -118,7 +129,7 @@ def start_services(python_executable, args):
 
     return processes
 
-def start_dashboard(python_executable):
+def start_dashboard():
     """使用 gotty 啟動儀表板"""
     print_header("啟動儀表板")
     dashboard_script = PROJECT_ROOT / "scripts" / "phoenix_dashboard.py"
@@ -129,16 +140,22 @@ def start_dashboard(python_executable):
         print("請根據 README 指示下載它。")
         sys.exit(1)
 
+    # 儀表板需要一個 python 環境來執行，我們使用其中一個 App 的環境
+    # 或者可以建立一個共享的 dashboard venv
+    # 為了簡單起見，我們假設儀表板的依賴已包含在 base.txt 中
+    # 並使用系統 python 來啟動
+    python_to_run_dashboard = sys.executable
+
     command = [
         str(gotty_path),
         "--port", "8080",
         "--title-format", "鳳凰之心儀表板",
         "--permit-write",
-        python_executable, str(dashboard_script)
+        python_to_run_dashboard, str(dashboard_script)
     ]
-    print(f"🚀 使用 GoTTY 將儀表板網頁化於 http://localhost:8080")
-    # GoTTY 會佔用前景，所以我們直接執行它
+    print("🚀 使用 GoTTY 將儀表板網頁化於 http://localhost:8080")
     try:
+        # 使用 run_command 以便在 CI/CD 環境中也能正常顯示輸出
         run_command(command)
     except KeyboardInterrupt:
         print("\nGoTTY 服務已停止。")
@@ -146,36 +163,36 @@ def start_dashboard(python_executable):
 
 def main():
     """主函式"""
-    parser = argparse.ArgumentParser(description="鳳凰之心專案智慧啟動器")
-    # 功能性參數
+    parser = argparse.ArgumentParser(description="鳳凰之心專案智慧啟動器 v2.0")
     parser.add_argument("--dashboard", action="store_true", help="啟動並顯示互動式儀表板")
-    parser.add_argument("--prepare-only", action="store_true", help="僅設定環境和安裝依賴，然後退出")
-
-    # 服務設定參數
-    parser.add_argument("--port-quant", type=int, default=8001, help="設定 Quant 服務的埠號")
-    parser.add_argument("--port-transcriber", type=int, default=8002, help="設定 Transcriber 服務的埠號")
-    parser.add_argument("--timezone", type=str, default="Asia/Taipei", help="設定服務的時區")
-
     args = parser.parse_args()
 
-    python_executable = setup_virtualenv()
+    uv_executable = find_uv_executable()
 
-    if args.prepare_only:
-        print("\n環境準備完成，根據 --prepare-only 指示退出。")
-        sys.exit(0)
+    apps_to_run = {}
+    # 預設埠號
+    ports = {"quant": 8001, "transcriber": 8002}
+
+    for app_path in APPS_DIR.iterdir():
+        if app_path.is_dir():
+            app_name = app_path.name
+            python_executable = prepare_app_environment(app_path, uv_executable)
+            apps_to_run[app_name] = {
+                "python": python_executable,
+                "path": app_path,
+                "port": ports.get(app_name, 8000) # 給個預設值
+            }
 
     if args.dashboard:
-        # 注意: 儀表板目前不支援動態埠號，它依賴於固定的內部設定
-        start_dashboard(python_executable)
+        start_dashboard()
     else:
-        processes = start_services(python_executable, args)
+        processes = start_services(apps_to_run, args)
 
         def shutdown_services(signum, frame):
             print(f"\n🛑 收到訊號 {signum}，正在關閉所有服務...")
             for p in processes:
-                if p.poll() is None: # 如果程序還在運行
+                if p.poll() is None:
                     p.terminate()
-            # 等待所有進程終止
             for p in processes:
                 try:
                     p.wait(timeout=5)
@@ -185,22 +202,18 @@ def main():
             print("✅ 所有服務已成功關閉。")
             sys.exit(0)
 
-        # 註冊訊號處理器
         import signal
         signal.signal(signal.SIGTERM, shutdown_services)
         signal.signal(signal.SIGINT, shutdown_services)
 
         print_header("所有服務已在背景啟動")
-        print(f"主程序 PID: {os.getpid()}。發送 SIGTERM 或 SIGINT (Ctrl+C) 到此 PID 以關閉所有服務。")
+        print(f"主程序 PID: {os.getpid()}。按 Ctrl+C 以關閉所有服務。")
 
-        # 保持主程序運行以等待訊號
         try:
             while True:
-                # 檢查子程序狀態
                 for p in processes:
                     if p.poll() is not None:
                         print(f"⚠️ 警告: 子程序 {p.args} (PID: {p.pid}) 已意外終止。")
-                        # 可以在此處添加重啟邏輯
                 time.sleep(10)
         except Exception as e:
             print(f"主迴圈發生錯誤: {e}")

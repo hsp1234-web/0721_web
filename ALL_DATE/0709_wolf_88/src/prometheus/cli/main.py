@@ -18,9 +18,6 @@ def cli_analyze():
     logger.info("AI 分析師工作完成。")
 
 
-import subprocess
-import sys
-import os
 
 @app.command(name="dashboard")
 def cli_dashboard(
@@ -76,7 +73,6 @@ def clear_results():
     """
     清除所有生成的結果、佇列、日誌和檢查點。
     """
-    import os
     import shutil
 
     logger.info("開始清除所有執行數據...")
@@ -144,8 +140,12 @@ def show_results():
 
 @results_app.command("generate-report")
 def generate_report(
-    xml_path: str = typer.Option("output/reports/report.xml", help="JUnit XML 報告的路徑"),
-    md_path: str = typer.Option("TEST_REPORT.md", help="要生成的 Markdown 報告的路徑"),
+    xml_path: str = typer.Option(
+        "output/reports/report.xml", help="JUnit XML 報告的路徑"
+    ),
+    md_path: str = typer.Option(
+        "TEST_REPORT.md", help="要生成的 Markdown 報告的路徑"
+    ),
 ):
     """
     從 JUnit XML 檔案產生 Markdown 報告。
@@ -260,7 +260,9 @@ def add_tasks(
                 "type": "backtest",
                 "strategy": "SMA_Crossover",
                 "symbol": random.choice(["BTC/USDT", "ETH/USDT", "XRP/USDT"]),
-                "params": {"fast": random.randint(5, 15), "slow": random.randint(20, 40)},
+                "params": {
+                    "fast": random.randint(5, 15), "slow": random.randint(20, 40)
+                },
                 "batch_id": batch_id,
             }
             ctx.queue.put(task)

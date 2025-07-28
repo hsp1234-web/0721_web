@@ -2,7 +2,6 @@ import duckdb
 import os
 import pandas as pd
 import numpy as np
-import pandas_ta
 
 def main():
     db_path = "data/analytics_warehouse/factors.duckdb"
@@ -23,9 +22,9 @@ def main():
 
         # 比較計算結果與儲存的結果
         # 使用 np.isclose 來處理浮點數比較
-        comparison = pd.Series(
-            np.isclose(df['factor_mom_20d'], df['expected_mom_20d'], atol=1e-6, equal_nan=True)
-        )
+        comparison = pd.Series(np.isclose(
+            df['factor_mom_20d'], df['expected_mom_20d'], atol=1e-6, equal_nan=True
+        ))
 
         # 忽略 NaN 值（滾動窗口導致的）
         comparison = comparison.dropna()

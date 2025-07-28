@@ -97,7 +97,9 @@ class DBManager:
             return pd.DataFrame() # 返回空的 DataFrame
 
         try:
-            df = pd.read_sql_query("SELECT * FROM backtest_results ORDER BY run_timestamp DESC", self.conn)
+            df = pd.read_sql_query(
+                "SELECT * FROM backtest_results ORDER BY run_timestamp DESC", self.conn
+            )
             return df
         except Exception as e:
             print(f"讀取回測結果時發生錯誤: {e}")

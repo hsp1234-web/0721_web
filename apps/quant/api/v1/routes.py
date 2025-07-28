@@ -23,9 +23,15 @@ router = APIRouter(
 # --- Pydantic 模型定義 ---
 # 使用 Pydantic 來定義請求主體的結構和驗證規則
 class BacktestRequest(BaseModel):
-    stock_id: str = Field(..., description="要進行回測的股票代號", json_schema_extra={"example": "2330.TW"})
-    start_date: str = Field(..., description="回測開始日期", json_schema_extra={"example": "2023-01-01"})
-    end_date: str = Field(..., description="回測結束日期", json_schema_extra={"example": "2024-01-01"})
+    stock_id: str = Field(...,
+                           description="要進行回測的股票代號",
+                           json_schema_extra={"example": "2330.TW"})
+    start_date: str = Field(...,
+                             description="回測開始日期",
+                             json_schema_extra={"example": "2023-01-01"})
+    end_date: str = Field(...,
+                           description="回測結束日期",
+                           json_schema_extra={"example": "2024-01-01"})
 
 # --- API 路由定義 ---
 

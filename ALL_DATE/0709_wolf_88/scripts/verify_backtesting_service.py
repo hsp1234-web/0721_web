@@ -14,7 +14,9 @@ from prometheus.services.backtesting_service import BacktestingService
 
 # 定義測試數據檔案的路徑
 # 使用 Path(__file__) 來確保無論從哪裡執行腳本，路徑都是正確的
-TEST_DATA_PATH = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "sample_spy_data.csv"
+TEST_DATA_PATH = (
+    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "sample_spy_data.csv"
+)
 
 def run_verification():
     """
@@ -69,7 +71,9 @@ def run_verification():
     print("--------------------")
 
     # 驗證報告的完整性和基本合理性
-    required_keys = ["sharpe_ratio", "total_return", "max_drawdown", "win_rate", "is_valid"]
+    required_keys = [
+        "sharpe_ratio", "total_return", "max_drawdown", "win_rate", "is_valid"
+    ]
     if all(key in results for key in required_keys) and results["is_valid"]:
         print("\n✔ [驗證通過] 績效報告包含所有必要欄位，且策略被標記為有效。")
         # 進行一個非常寬鬆的合理性檢查
