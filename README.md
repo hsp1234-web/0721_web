@@ -1,78 +1,102 @@
 # 🚀 鳳凰之心專案 (Phoenix Heart Project)
 
-歡迎來到鳳凰之心專案！本專案已經過重構，採用了現代化的微服務架構，旨在提供清晰、可維護且易於部署的開發體驗。
+本專案旨在提供一套統一、簡潔且高效的微服務架構，使其能夠在本地開發環境（如 Ubuntu）和雲端演示環境（Google Colab）中無縫運行，並完整重現其精美的視覺化儀表板體驗。
 
-## ✨ 核心理念
+## ✨ 核心特性
 
-- **統一入口**: 所有操作都從 `scripts/launch.py` 開始。
-- **職責分離**: 原始碼、腳本、依賴和工具各歸其位。
-- **環境無關**: 在本地 (Ubuntu/macOS) 和雲端 (Colab) 提供一致的體驗。
-- **視覺化管理**: 提供一個精美的終端儀表板來監控和互動。
+- **單一入口**: 所有操作皆由 `scripts/launch.py` 智慧化處理，無需關心環境差異。
+- **架構清晰**: 原始碼、腳本、依賴與工具嚴格分離，易於理解和維護。
+- **無縫環境切換**: 在本地開發和 Colab 演示之間提供完全一致的指令與體驗。
+- **即時視覺化**: 透過 `GoTTY` 技術，將終端儀表板完美呈現於網頁，在 Colab 中可直接嵌入顯示。
 
-## 📂 檔案結構概覽
+## 📂 新專案結構
 
 ```
 /
 │
-├── 📜 README.md           # 就是你正在看的這個檔案
+├── 📜 README.md           # 您正在閱讀的說明文件
 │
-├── 📦 src/                 # 【核心原始碼】所有微服務的家
-│   ├── 📈 quant/           # Quant App 的 Python 套件
-│   └── 🎤 transcriber/     # Transcriber App 的 Python 套件
+├── 🚀 scripts/             # 【統一操作中心】
+│   ├── launch.py           # ✨ 唯一的「智慧啟動器」，負責所有啟動任務
+│   ├── phoenix_dashboard.py# ✨ 儀表板的原始碼
+│   └── run_tests.sh        # ✨ 唯一的「整合測試器」
 │
-├── 🚀 scripts/             # 【統一操作中心】所有使用者指令的入口
-│   ├── launch.py           # ✨ 唯一的「智慧啟動器」
-│   ├── phoenix_dashboard.py# ✨ 終端儀表板的程式碼
-│   └── run_tests.sh        # ✨ 統一的整合測試器
+├── 📦 src/                 # 【核心原始碼】
+│   ├── 📈 quant/           # Quant 服務 (包含其 tests/)
+│   └── 🎤 transcriber/     # Transcriber 服務 (包含其 tests/)
 │
 ├── 📋 requirements/       # 【集中依賴管理】
-│   ├── base.txt            # 所有服務共享的基礎依賴
-│   ├── quant.txt           # Quant App 的特定依賴
-│   └── transcriber.txt     # Transcriber App 的特定依賴
+│   ├── base.txt
+│   ├── quant.txt
+│   ├── transcriber.txt
+│   └── test.txt            # 測試專用的依賴
 │
-├── 🛠️ tools/               # 【內建工具庫】
-│   └── gotty               # 用於將儀表板 Web 化的工具
-│
-├── ⚙️ proxy/               # (不變) 逆向代理設定
-│
-└── 🗄️ ALL_DATE/           # (不變) 封存的參考資料
+└── 🛠️ tools/               # 【內建輔助工具】
+    └── gotty               # 將終端轉換為 Web 服務的利器
 ```
 
-## 🚀 快速上手
+---
 
-所有操作都透過 `scripts/launch.py` 進行。它會自動為您處理虛擬環境和依賴安裝。
+## ☁️ 在 Google Colab 中使用 (推薦)
 
-### 1. 啟動後端服務
+Colab 提供了最簡單、最流暢的「啟動即看見」體驗。
 
-這將在背景啟動 `quant` 和 `transcriber` 兩個微服務。
+**步驟 1: 準備專案**
+
+在您的 Colab 筆記本的第一個儲存格中，使用 `git clone` 下載本專案。
+
+```python
+!git clone <您的專案 Git 倉庫網址>
+%cd <專案目錄名稱>
+```
+
+**步驟 2: 一鍵啟動儀表板**
+
+在第二個儲存格中，執行以下單一指令：
+
+```python
+!python scripts/launch.py --dashboard
+```
+
+執行完畢後，**「鳳凰之心指揮中心」儀表板將會自動出現在輸出格中**。您無需點擊任何連結，即可開始在這個熟悉的視覺化介面中進行所有操作。
+
+---
+
+## 💻 在本地環境開發與測試
+
+智慧啟動器同樣簡化了本地的開發流程。
+
+### 啟動微服務
+
+這將在本地建立一個獨立的 Python 虛擬環境，安裝所有依賴，並在背景啟動 `quant` 和 `transcriber` 兩個微服務。
 
 ```bash
-python scripts/launch.py
+python3 scripts/launch.py
 ```
 
-服務將分別運行在 `http://localhost:8001` (quant) 和 `http://localhost:8002` (transcriber)。按 `Ctrl+C` 可以優雅地關閉所有服務。
+- **Quant 服務**: `http://localhost:8001`
+- **Transcriber 服務**: `http://localhost:8002`
+- 按 `Ctrl+C` 可優雅地關閉所有服務。
 
-### 2. 啟動互動式儀表板
+### 啟動本地儀表板
 
-這將啟動一個基於網頁的終端儀表板，您可以在其中即時監控服務狀態並執行測試。
+如果您想在本地使用儀表板，請執行：
 
 ```bash
-python scripts/launch.py --dashboard
+python3 scripts/launch.py --dashboard
 ```
 
-啟動後，請在瀏覽器中開啟 `http://localhost:8080` 來查看儀表板。
+腳本將會提供一個本地網址 (預設為 `http://localhost:8080`)，請在瀏覽器中開啟它。
 
-### 3. 執行整合測試
+### 執行完整測試
 
-如果您只想運行測試套件，請使用 `run_tests.sh` 腳本。
+我們提供了一個統一的測試腳本，它會自動處理環境準備、服務啟動、執行測試和事後清理。
 
 ```bash
 bash scripts/run_tests.sh
 ```
 
-此腳本會：
-1.  呼叫 `launch.py --prepare-only` 來自動安裝所有必要的依賴。
-2.  使用 `pytest` 執行 `src/` 目錄下的所有測試。
+此腳本會自動執行 `src/` 和 `tests/` 目錄下的所有測試，並在結束後妥善關閉所有因測試而啟動的服務。
 
 ---
-感謝您使用新架構！
+感謝您使用「鳳凰之心」新架構！
