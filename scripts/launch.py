@@ -90,15 +90,21 @@ def setup_virtualenv():
     print("\n✅ 環境準備完成!")
     return str(venv_python)
 
-def start_services(python_executable):
+def start_services(python_executable, args):
     """在背景啟動所有 FastAPI 服務"""
     print_header("2. 啟動微服務")
     processes = []
+
+    # 從命令列參數或預設值更新 App 設定
+    APPS["quant"]["port"] = args.port_quant
+    APPS["transcriber"]["port"] = args.port_transcriber
+
     for app_name, config in APPS.items():
         port = config["port"]
         print(f"啟動 {app_name} 服務於埠 {port}...")
         env = os.environ.copy()
         env["PORT"] = str(port)
+        env["TIMEZONE"] = args.timezone
         # 我們需要將 src 目錄加到 PYTHONPATH，這樣 `from quant.main` 才能運作
         env["PYTHONPATH"] = str(SRC_PATH)
 
@@ -141,16 +147,15 @@ def start_dashboard(python_executable):
 def main():
     """主函式"""
     parser = argparse.ArgumentParser(description="鳳凰之心專案智慧啟動器")
-    parser.add_argument(
-        "--dashboard",
-        action="store_true",
-        help="啟動並顯示互動式儀表板"
-    )
-    parser.add_argument(
-        "--prepare-only",
-        action="store_true",
-        help="僅設定環境和安裝依賴，然後退出"
-    )
+    # 功能性參數
+    parser.add_argument("--dashboard", action="store_true", help="啟動並顯示互動式儀表板")
+    parser.add_argument("--prepare-only", action="store_true", help="僅設定環境和安裝依賴，然後退出")
+
+    # 服務設定參數
+    parser.add_argument("--port-quant", type=int, default=8001, help="設定 Quant 服務的埠號")
+    parser.add_argument("--port-transcriber", type=int, default=8002, help="設定 Transcriber 服務的埠號")
+    parser.add_argument("--timezone", type=str, default="Asia/Taipei", help="設定服務的時區")
+
     args = parser.parse_args()
 
     python_executable = setup_virtualenv()
@@ -160,22 +165,47 @@ def main():
         sys.exit(0)
 
     if args.dashboard:
+        # 注意: 儀表板目前不支援動態埠號，它依賴於固定的內部設定
         start_dashboard(python_executable)
     else:
-        processes = start_services(python_executable)
+        processes = start_services(python_executable, args)
+
+        def shutdown_services(signum, frame):
+            print(f"\n🛑 收到訊號 {signum}，正在關閉所有服務...")
+            for p in processes:
+                if p.poll() is None: # 如果程序還在運行
+                    p.terminate()
+            # 等待所有進程終止
+            for p in processes:
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print(f"PID {p.pid} 未能終止，強制結束。")
+                    p.kill()
+            print("✅ 所有服務已成功關閉。")
+            sys.exit(0)
+
+        # 註冊訊號處理器
+        import signal
+        signal.signal(signal.SIGTERM, shutdown_services)
+        signal.signal(signal.SIGINT, shutdown_services)
+
         print_header("所有服務已在背景啟動")
-        print("您可以按 Ctrl+C 來終止所有服務。")
+        print(f"主程序 PID: {os.getpid()}。發送 SIGTERM 或 SIGINT (Ctrl+C) 到此 PID 以關閉所有服務。")
+
+        # 保持主程序運行以等待訊號
         try:
             while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n🛑 收到使用者中斷信號，正在關閉所有服務...")
-            for process in processes:
-                process.terminate()
-            # 等待所有進程終止
-            for process in processes:
-                process.wait()
-            print("✅ 所有服務已成功關閉。")
+                # 檢查子程序狀態
+                for p in processes:
+                    if p.poll() is not None:
+                        print(f"⚠️ 警告: 子程序 {p.args} (PID: {p.pid}) 已意外終止。")
+                        # 可以在此處添加重啟邏輯
+                time.sleep(10)
+        except Exception as e:
+            print(f"主迴圈發生錯誤: {e}")
+        finally:
+            shutdown_services(0, None)
 
 if __name__ == "__main__":
     main()

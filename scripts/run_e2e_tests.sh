@@ -39,7 +39,8 @@ sleep 5 # Give servers time to start
 # Step 3: Run E2E tests
 echo
 echo "--- Running E2E tests ---"
-python3 "$PROJECT_ROOT/e2e_test.py"
+VENV_PYTHON="$PROJECT_ROOT/.venvs/base/bin/python"
+"$VENV_PYTHON" "$PROJECT_ROOT/e2e_test.py"
 
 # Step 4: Stop services
 echo

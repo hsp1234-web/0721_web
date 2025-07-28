@@ -53,12 +53,22 @@ app.include_router(v1_routes.router)
 def read_root():
     return {"message": "歡迎來到量化金融服務 API"}
 
-@app.get("/health", summary="服務健康檢查")
+@app.get("/health", summary="服務健康檢查與組態回報")
 def health_check():
     """
     一個簡單的健康檢查端點，用於確認服務是否正在運行。
+    同時回報當前運行的組態參數。
     """
-    return {"status": "ok", "message": "量化金融服務運行中"}
+    port = os.environ.get("PORT", "未設定")
+    timezone = os.environ.get("TIMEZONE", "未設定")
+    return {
+        "status": "ok",
+        "message": "量化金融服務運行中",
+        "config": {
+            "port": port,
+            "timezone": timezone
+        }
+    }
 
 # --- 伺服器啟動函式 ---
 def start():
