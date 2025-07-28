@@ -261,4 +261,19 @@ async def main():
         sys.stdout = 舊的_stdout
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 在 Colab/Jupyter 環境中，事件迴圈已經在運行。
+    # 直接呼叫 asyncio.run() 會導致 RuntimeError。
+    # 我們需要取得現有的迴圈，或在沒有迴圈時才建立一個新的。
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # 'RuntimeError: There is no current event loop...'
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 將 main 協程提交給迴圈執行
+    if loop.is_running():
+        # 如果迴圈已在運行 (如 Colab)，建立一個 task
+        loop.create_task(main())
+    else:
+        # 如果迴圈不在運行 (如標準 Python 直譯器)，使用 run_until_complete
+        loop.run_until_complete(main())
