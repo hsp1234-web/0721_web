@@ -1,93 +1,120 @@
-# 鳳凰之心架構設計
+# 鳳凰之心：最終架構總藍圖
 
-本文檔詳細描述了「鳳凰之心」專案的軟體架構、設計原則和核心組件。
+這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態，涵蓋了檔案結構、業務邏輯劃分、使用的核心工具，以及完整的執行流程。
 
-## 1. 設計哲學
+---
 
-- **關注點分離 (Separation of Concerns)**: 每個組件（應用、日誌、監控）都有明確且單一的職責。
-- **可擴展性 (Scalability)**: 新的功能模組（Apps）可以作為獨立的單元進行開發和部署，而無需修改核心系統。
-- **可維護性 (Maintainability)**: 清晰、一致的結構和編碼風格，使得理解、修改和除錯變得更加容易。
-- **環境適應性 (Adaptability)**: 專案設計旨在同時簡化在本地開發、Colab 雲端執行和生產環境部署的流程。
+## 一、 核心理念與工具 (Core Philosophy & Tools)
 
-## 2. 高層架構圖
+我們的架構基於以下三大核心理念，並由一套精簡的工具鏈來實現：
+
+- **微服務架構 (Microservices)**: 每個 App (`quant`, `transcriber`) 都是一個獨立、可自行運行的 FastAPI 服務。
+- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境 (`.venv`)，由唯一的總開關 `launch.py` 自動管理，彼此絕不干擾。
+- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明，保證了環境的極速建立與可重複性。
+
+### 核心工具鏈:
+
+- **uv**: 我們唯一的環境管理與安裝工具。負責以極致速度建立虛擬環境 (`.venv`) 和同步 Python 套件。
+- **`launch.py`**: 專案的「總開關」，負責協調所有工具，一鍵啟動整個系統。
+- **逆向代理 (Reverse Proxy)**: 內建於 `launch.py` 中，是系統的統一流量入口，負責將請求轉發給對應的 App。
+- **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
+
+---
+
+## 二、 終極檔案結構與業務邏輯歸屬
+
+這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
 
 ```
-+--------------------------------------------------+
-|      使用者 (透過瀏覽器或 Colab)                 |
-+------------------------+-------------------------+
-                         |
-                         v
-+--------------------------------------------------+
-|      Colab 環境 / 本地開發環境                   |
-|                                                  |
-|  +--------------------------------------------+  |
-|  |     啟動器 (colab_run.py)                  |  |
-|  +----------------------+---------------------+  |
-|                         | 啟動                  |
-|                         v                       |
-|  +--------------------------------------------+  |
-|  |     核心應用 (main.py) - FastAPI           |  |
-|  |                                            |  |
-|  |  +-----------------+  +------------------+  |  |
-|  |  |   API 路由器     |  |   模板引擎        |  |
-|  |  +-------+---------+  +------------------+  |  |
-|  |          | 動態加載                      |  |
-|  |          v                               |  |
-|  |  +-------------------------------------+   |  |
-|  |  |      apps/ 目錄                     |   |  |
-|  |  | +-----------+ +-----------+         |   |  |
-|  |  | | transcriber | |  quant  | ...     |   |  |
-|  |  | +-----------+ +-----------+         |   |  |
-|  |  +-------------------------------------+   |  |
-|  +--------------------------------------------+  |
-+--------------------------------------------------+
+/PHOENIX_HEART_PROJECT/
+│
+├── 🚀 launch.py                 # 唯一的「總開關」。負責協調所有 App 的環境建立與啟動，最後啟動逆向代理。
+│
+├── 📦 apps/                      # 【所有獨立微服務的家】
+│   │
+│   ├── 📈 quant/                 # 【量化金融 App - 一個完整的獨立專案】
+│   │   │
+│   │   ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器，掛載 API 路由。
+│   │   │
+│   │   ├── 🧠 logic/             # 核心業務邏輯層
+│   │   │   ├── data_sourcing.py  # 數據源邏輯 (FinMind, FRED, yfinance)
+│   │   │   ├── factor_engineering.py # 因子工程邏輯 (MA, RSI)
+│   │   │   ├── analysis.py       # 分析與策略邏輯 (回測服務)
+│   │   │   └── database.py       # 數據庫邏輯 (SQLite Manager)
+│   │   │
+│   │   ├── 🕸️ api/                # API 接口層
+│   │   │   └── v1/
+│   │   │       └── routes.py     # 定義所有 FastAPI 路由 (/backtest)
+│   │   │
+│   │   ├── 📜 requirements.txt     # **此 App 專屬的依賴清單**
+│   │   ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
+│   │   └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│   │
+│   └── 🎤 transcriber/           # 【語音轉寫 App - 一個完整的獨立專案】
+│       │
+│       ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器
+│       │
+│       ├── 🧠 logic.py           # 核心業務邏輯 (呼叫轉寫模型)
+│       │
+│       ├── 📜 requirements.txt     # 核心依賴
+│       ├── 📜 requirements.large.txt # (可選) 大型依賴，用於真實模式測試
+│       ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
+│       └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│
+├── ⚙️ proxy/                      # 【逆向代理配置】
+│   └── proxy_config.json       # 定義路由規則 (e.g., "/quant" -> "localhost:8001")
+│
+├── 📜 smart_e2e_test.sh         # 智能測試指揮官腳本，支持 mock 和 real 模式
+│
+├── 📚 docs/                       # 【專案文件】
+│   └── ARCHITECTURE.md         # (本文件) 最終的架構設計總藍圖
+│
+└── 🗄️ ALL_DATE/                 # 【封存參考資料】存放舊專案作為開發參考
 ```
 
-## 3. 核心組件詳解
+---
 
-### 3.1. `WEB/` - 專案根目錄
+## 三、 統一啟動與執行流程
 
-所有與專案相關的程式碼、文件和資源都存放在這個目錄下，保持了專案的整潔和獨立性。
+當您在任何環境執行 `python launch.py` 時，系統將嚴格遵循以下流程：
 
-### 3.2. `colab_run.py` - Colab 啟動器
+```mermaid
+sequenceDiagram
+    participant User as 👨‍💻 使用者
+    participant Launcher as 🚀 launch.py
+    participant UV as ✨ uv
+    participant QuantApp as 📈 Quant App
+    participant TranscriberApp as 🎤 Transcriber App
+    participant Proxy as 🌐 逆向代理
 
-- **職責**: 作為在 Google Colab 環境中啟動整個應用的入口點。它負責處理 Colab 特有的設定，並啟動核心的 FastAPI 應用。
-- **特色**: 內建一個純文字的儀表板，可以在 Colab 的輸出單元格中即時顯示系統狀態、日誌和資源使用情況，提供了卓越的互動式監控體驗。
+    User->>Launcher: 執行 `python launch.py`
+    Launcher->>Launcher: 開始遍歷 `apps` 目錄
 
-### 3.3. `main.py` - 核心應用
+    Note over Launcher, UV: --- 處理 Quant App ---
+    Launcher->>UV: 進入 `apps/quant`，執行 `uv venv`
+    UV-->>Launcher: 建立或確認 `.venv` 存在
+    Launcher->>UV: 執行 `uv pip sync requirements.txt`
+    UV-->>Launcher: 光速安裝/同步依賴
+    Launcher->>QuantApp: 在背景啟動 `main.py` (監聽 8001 埠)
 
-- **職責**: 這是基於 FastAPI 的核心 Web 伺服器。它負責：
-    - 初始化日誌系統。
-    - 設定模板引擎以渲染 HTML 頁面。
-    - 動態掃描 `apps/` 目錄，並將所有子應用的 API 路由掛載到主應用中。
-- **生命週期管理**: 使用 FastAPI 的 `lifespan` 事件來確保在伺服器啟動時和關閉時能正確地執行初始化和清理任務。
+    Note over Launcher, UV: --- 處理 Transcriber App ---
+    Launcher->>UV: 進入 `apps/transcriber`，執行 `uv venv`
+    UV-->>Launcher: 建立或確認 `.venv` 存在
+    Launcher->>UV: 執行 `uv pip sync requirements.txt`
+    UV-->>Launcher: 光速安裝/同步依賴
+    Launcher->>TranscriberApp: 在背景啟動 `main.py` (監聽 8002 埠)
 
-### 3.4. `apps/` - 可插拔業務模組
+    Note over Launcher, Proxy: --- 啟動最終服務 ---
+    Launcher->>Proxy: 所有 App 啟動成功，現在啟動內建的逆向代理
+    Proxy->>User: 系統準備就緒！顯示公開訪問網址 (http://localhost:8000)
+```
 
-- **職責**: 存放所有獨立的業務邏輯單元。每個子目錄都代表一個功能模組（例如，`transcriber` 負責語音轉錄，`quant` 負責數據分析）。
-- **設計**: 每個 App 都是一個獨立的 FastAPI `APIRouter`，可以擁有自己的路徑、模型和邏輯。這種設計使得新增或移除功能變得非常簡單，只需添加或刪除對應的資料夾即可。
+### 流程總結：
 
-### 3.5. `templates/` - UI 模板
+1.  **啟動器 (`launch.py`)** 是唯一的指揮官。
+2.  它逐一「拜訪」每個 App 的家 (`apps/*`)。
+3.  在每個家裡，它命令 **uv** 快速建立一個獨立、標準化的工作環境 (`.venv`) 並安裝好所有工具 (`requirements.txt`)。
+4.  環境就緒後，它就讓這個 App 自己開始工作（在背景運行自己的 FastAPI 伺服器）。
+5.  當所有 App 都開始獨立工作後，啟動器最後會打開「總服務台」（逆向代理），讓外界可以開始通過統一的入口訪問所有服務。
 
-- **職責**: 存放所有 Jinja2 HTML 模板。目前主要包含 `dashboard.html`，這是使用者與應用互動的主介面。
-
-### 3.6. `docs/` - 文件中心
-
-- **職責**: 存放所有專案相關的說明文件，包括架構設計 (`ARCHITECTURE.md`)、Colab 使用指南 (`Colab_Guide.md`) 和測試日誌 (`TEST.md`)。
-
-### 3.7. `requirements.txt` - 依賴清單
-
-- **職責**: 統一定義了專案在所有環境下運作所需的 Python 套件。
-
-## 4. 啟動流程
-
-1.  **使用者** 在 Colab 儲存格中執行 `colab_run.py` 的啟動程式碼。
-2.  **`colab_run.py`** 開始執行：
-    - 建立並啟動其內建的儀表板 UI。
-    - 在一個獨立的背景執行緒中，使用 `subprocess` 啟動 `main.py`。
-3.  **`main.py`** 開始執行：
-    - 設定日誌系統，將日誌同時輸出到控制台和檔案。
-    - 掃描 `apps/` 目錄，找到所有子應用並加載它們的 API 路由。
-    - 啟動 `uvicorn` 伺服器，開始監聽 HTTP 請求。
-4.  **`colab_run.py`** 偵測到 `main.py` 成功啟動後，會獲取 Colab 分配的公開 URL，並將其顯示在儀表板上。
-5.  **使用者** 點擊儀表板上的連結，即可在瀏覽器中開啟並使用 Web 應用。
+這套流程確保了無論在何種環境下，整個系統的啟動過程都是標準化、可預測、且極度高效的。
