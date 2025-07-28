@@ -1,0 +1,9 @@
+# 這是所有服務共享的基礎依賴
+fastapi
+uvicorn
+pydantic
+
+# 測試框架
+pytest
+pytest-mock # 用於模擬物件
+httpx # 用於在測試中發送 HTTP 請求

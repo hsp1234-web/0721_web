@@ -1,6 +1,7 @@
 # Virtual Environment
 .venv/
 venv/
+.venvs/
 env/
 
 # Python cache
@@ -25,6 +26,9 @@ dist/
 .test_venv/
 .e2e_venv/
 test_final_archive/
+.pytest_cache/
+htmlcov/
+.coverage
 
 # Logs
 *.log
@@ -38,3 +42,6 @@ test_final_archive/
 # OS-specific
 .DS_Store
 Thumbs.db
+
+# Project-specific
+.large_packages/
