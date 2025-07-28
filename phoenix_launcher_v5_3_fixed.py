@@ -209,71 +209,120 @@ async def 執行模擬測試(公開網址, 計時):
     return 全部成功, f"{'✅ 全數通過' if 全部成功 else '❌ 部分失敗'} ({sum(結果)}/{len(結果)})"
 
 # --- 主執行流程 ---
-async def main():
-    import nest_asyncio
-    nest_asyncio.apply()
+async def run_async_tasks(公開網址, 計時器實例, 完整日誌_過程):
+    """執行所有需要非同步操作的任務，例如 API 測試。"""
+    from io import StringIO
+    from IPython.display import display, Markdown
 
+    舊的_stdout = sys.stdout
+    日誌串流 = StringIO()
+    sys.stdout = 日誌串流
+
+    測試結果, 測試摘要 = await 執行模擬測試(公開網址, 計時器實例)
+
+    sys.stdout = 舊的_stdout
+    完整日誌_測試 = 日誌串流.getvalue()
+    print(完整日誌_測試)
+
+    return 測試結果, 測試摘要, 完整日誌_測試
+
+def main_sync():
+    """程式主進入點，協調同步與非同步任務。"""
     計時器實例 = 計時器()
     基礎路徑 = Path("/content") if Path("/content").exists() else Path.cwd()
 
+    # --- Part 1: 同步執行所有準備工作 ---
     if not 準備執行環境(基礎路徑, 計時器實例): return
 
     from io import StringIO
     from IPython.display import display, Markdown
-    舊的_stdout = sys.stdout; 日誌串流 = StringIO(); sys.stdout = 日誌串流
+
+    # 清理 Colab 輸出
     try:
-        try: from IPython.display import clear_output; clear_output(wait=True)
-        except ImportError: pass
-        專案路徑 = 基礎路徑 / 專案資料夾名稱
-        if not 準備專案程式碼(基礎路徑, 專案路徑, 計時器實例): return
-        os.chdir(專案路徑); 印出成功(f"工作目錄已切換至: {os.getcwd()}")
-        if not 準備依賴環境(專案路徑, 計時器實例): return
-        啟動的程序 = 啟動應用程式(專案路徑, 計時器實例)
-        if not 啟動的程序: return
+        from IPython.display import clear_output
+        clear_output(wait=True)
+    except ImportError:
+        pass
 
-        sys.stdout = 舊的_stdout; 完整日誌_過程 = 日誌串流.getvalue(); print(完整日誌_過程)
-        日誌串流 = StringIO(); sys.stdout = 日誌串流
+    # 為了捕捉過程日誌，我們暫時重定向 stdout
+    舊的_stdout = sys.stdout
+    日誌串流 = StringIO()
+    sys.stdout = 日誌串流
 
-        公開網址 = 生成並顯示網址(計時器實例)
-        測試結果, 測試摘要 = await 執行模擬測試(公開網址, 計時器實例)
+    專案路徑 = 基礎路徑 / 專案資料夾名稱
+    if not 準備專案程式碼(基礎路徑, 專案路徑, 計時器實例):
+        sys.stdout = 舊的_stdout
+        print(日誌串流.getvalue())
+        return
 
-        sys.stdout = 舊的_stdout; 完整日誌_測試 = 日誌串流.getvalue(); print(完整日誌_測試)
+    os.chdir(專案路徑)
+    印出成功(f"工作目錄已切換至: {os.getcwd()}")
 
-        總結報告 = f"### ✅ 鳳凰之心系統已成功啟動！\n\n**模擬測試結果**: **{測試摘要}**\n\n**各服務正在背景運行中 (PIDs: {', '.join(str(p.pid) for p in 啟動的程序)})**\n"
-        for 名稱, url in 公開網址.items(): 總結報告 += f"- **{名稱}**: [{url}]({url})\n"
-        display(Markdown("---"), Markdown(總結報告))
+    if not 準備依賴環境(專案路徑, 計時器實例):
+        sys.stdout = 舊的_stdout
+        print(日誌串流.getvalue())
+        return
 
-        if 日誌歸檔資料夾:
-            歸檔路徑 = 基礎路徑 / 日誌歸檔資料夾; 歸檔路徑.mkdir(exist_ok=True)
-            時間戳 = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            檔名 = 歸檔路徑 / f"作戰日誌_{時間戳}.md"; ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            with 檔名.open("w", encoding="utf-8") as f:
-                f.write(f"# 作戰日誌 {時間戳}\n\n## 一、設定摘要\n- **倉庫**: {程式碼倉庫網址} (版本: {要使用的版本分支或標籤})\n- **安裝模式**: {安裝模式}\n\n")
-                f.write(f"## 二、啟動總結\n{總結報告}\n\n{計時器實例.產生報告()}\n\n")
-                f.write(f"## 三、詳細執行日誌\n```log\n{ansi_escape.sub('', 完整日誌_過程 + 完整日誌_測試)}\n```")
-            印出成功(f"本次作戰日誌已歸檔至: {檔名}")
+    啟動的程序 = 啟動應用程式(專案路徑, 計時器實例)
+    if not 啟動的程序:
+        sys.stdout = 舊的_stdout
+        print(日誌串流.getvalue())
+        return
 
-        while True: time.sleep(3600)
+    # 恢復 stdout，並印出至今為止的日誌
+    sys.stdout = 舊的_stdout
+    完整日誌_過程 = 日誌串流.getvalue()
+    print(完整日誌_過程)
+
+    # --- Part 2: 執行網址生成與非同步測試 ---
+    公開網址 = 生成並顯示網址(計時器實例)
+
+    # 安全地執行非同步任務
+    import nest_asyncio
+    nest_asyncio.apply()
+    測試結果, 測試摘要, 完整日誌_測試 = asyncio.run(run_async_tasks(公開網址, 計時器實例, 完整日誌_過程))
+
+    # --- Part 3: 產生最終報告並歸檔 ---
+    總結報告 = f"### ✅ 鳳凰之心系統已成功啟動！\n\n**模擬測試結果**: **{測試摘要}**\n\n**各服務正在背景運行中 (PIDs: {', '.join(str(p.pid) for p in 啟動的程序)})**\n"
+    for 名稱, url in 公開網址.items():
+        總結報告 += f"- **{名稱}**: [{url}]({url})\n"
+    display(Markdown("---"), Markdown(總結報告))
+
+    if 日誌歸檔資料夾:
+        歸檔路徑 = 基礎路徑 / 日誌歸檔資料夾
+        歸檔路徑.mkdir(exist_ok=True)
+        時間戳 = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        檔名 = 歸檔路徑 / f"作戰日誌_{時間戳}.md"
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        with 檔名.open("w", encoding="utf-8") as f:
+            f.write(f"# 作戰日誌 {時間戳}\n\n## 一、設定摘要\n- **倉庫**: {程式碼倉庫網址} (版本: {要使用的版本分支或標籤})\n- **安裝模式**: {安裝模式}\n\n")
+            f.write(f"## 二、啟動總結\n{總結報告}\n\n{計時器實例.產生報告()}\n\n")
+            f.write(f"## 三、詳細執行日誌\n```log\n{ansi_escape.sub('', 完整日誌_過程 + 完整日誌_測試)}\n```")
+        印出成功(f"本次作戰日誌已歸檔至: {檔名}")
+
+    # --- Part 4: 保持 Colab 儲存格活躍 ---
+    印出資訊("系統已啟動，進入監控模式。中斷執行 (Ctrl+C) 以關閉所有服務。")
+    try:
+        while True:
+            for p in 啟動的程序:
+                if p.poll() is not None:
+                    印出警告(f"警告：偵測到進程 PID {p.pid} 已終止。請檢查日誌檔案。")
+            time.sleep(60)
+    except KeyboardInterrupt:
+        印出警告("\n收到手動中斷信號，正在嘗試關閉所有背景服務...")
+        for p in 啟動的程序:
+            p.terminate()
+        # 等待一小段時間讓程序終止
+        time.sleep(2)
+        for p in 啟動的程序:
+            if p.poll() is None: # 如果還在運行
+                p.kill() # 強制終止
+        印出成功("所有背景服務已關閉。")
     except Exception as e:
-        sys.stdout = 舊的_stdout
-        import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
     finally:
-        sys.stdout = 舊的_stdout
+        印出成功("鳳凰之心啟動器已結束。")
 
 if __name__ == "__main__":
-    # 在 Colab/Jupyter 環境中，事件迴圈已經在運行。
-    # 直接呼叫 asyncio.run() 會導致 RuntimeError。
-    # 我們需要取得現有的迴圈，或在沒有迴圈時才建立一個新的。
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:  # 'RuntimeError: There is no current event loop...'
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    # 將 main 協程提交給迴圈執行
-    if loop.is_running():
-        # 如果迴圈已在運行 (如 Colab)，建立一個 task
-        loop.create_task(main())
-    else:
-        # 如果迴圈不在運行 (如標準 Python 直譯器)，使用 run_until_complete
-        loop.run_until_complete(main())
+    main_sync()
