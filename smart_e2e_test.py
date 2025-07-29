@@ -247,7 +247,8 @@ def test_database_driven_flow():
     if not all(s == "running" for s in apps_status.values()):
         print_fail(f"並非所有 App 狀態皆為 'running': {apps_status}")
         return False
-    if action_url != "http://localhost:8000/dashboard":
+    # 在新架構下，非 Colab 環境的預設 URL 是 8005
+    if action_url != "http://localhost:8005/":
         print_fail(f"action_url 不正確: {action_url}")
         return False
     print_success("狀態表驗證成功。")

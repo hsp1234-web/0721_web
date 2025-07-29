@@ -94,8 +94,8 @@ def main():
     api_url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
     print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
 
-    # 讀取 HTML 模板
-    dashboard_template_path = project_path / "run" / "dashboard.html"
+    # 讀取 HTML 模板 (使用相對路徑，因為我們已經 chdir)
+    dashboard_template_path = Path("run") / "dashboard.html"
     with open(dashboard_template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
