@@ -91,10 +91,11 @@ for app_path in "${APPS[@]}"; do
     VENV_DIR="$app_path/.venv_test"
     REQS_FILE="$app_path/requirements.txt"
     REQS_LARGE_FILE="$app_path/requirements.large.txt"
-    TESTS_DIR="$app_path/tests"
+    # 將測試目錄指向新的 `tests` 根目錄下的對應 App 目錄
+    TESTS_DIR="tests/$app_name"
 
     if [ ! -d "$TESTS_DIR" ] || [ -z "$(find "$TESTS_DIR" -name 'test_*.py')" ]; then
-        print_warn "App '$app_name' 沒有測試檔案，跳過。"
+        print_warn "在 'tests/$app_name' 中找不到 '$app_name' 的測試檔案，跳過。"
         continue
     fi
 

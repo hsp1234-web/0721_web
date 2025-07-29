@@ -28,48 +28,52 @@
 ```
 /PHOENIX_HEART_PROJECT/
 │
-├── 🚀 launch.py                 # 唯一的「總開關」。負責協調所有 App 的環境建立與啟動，最後啟動逆向代理。
+├── 🚀 launch.py                   # 唯一的「總開關」，一鍵啟動所有服務。
+├── 🚀 phoenix_starter.py          # 視覺化的「鳳凰之心指揮中心」啟動器。
 │
-├── 📦 apps/                      # 【所有獨立微服務的家】
+├── 📦 apps/                        # 【所有獨立微服務的家】
 │   │
-│   ├── 📈 quant/                 # 【量化金融 App - 一個完整的獨立專案】
-│   │   │
-│   │   ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器，掛載 API 路由。
-│   │   │
-│   │   ├── 🧠 logic/             # 核心業務邏輯層
-│   │   │   ├── data_sourcing.py  # 數據源邏輯 (FinMind, FRED, yfinance)
-│   │   │   ├── factor_engineering.py # 因子工程邏輯 (MA, RSI)
-│   │   │   ├── analysis.py       # 分析與策略邏輯 (回測服務)
-│   │   │   └── database.py       # 數據庫邏輯 (SQLite Manager)
-│   │   │
-│   │   ├── 🕸️ api/                # API 接口層
-│   │   │   └── v1/
-│   │   │       └── routes.py     # 定義所有 FastAPI 路由 (/backtest)
-│   │   │
-│   │   ├── 📜 requirements.txt     # **此 App 專屬的依賴清單**
-│   │   ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│   │   └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│   ├── 📈 quant/                   # 【量化金融 App】
+│   │   ├── 🛰️ main.py               # FastAPI 應用主入口。
+│   │   ├── 🧠 logic/               # 核心業務邏輯。
+│   │   │   ├── analysis.py         # 分析計算模組。
+│   │   │   ├── data_sourcing.py    # 數據源處理模組。
+│   │   │   ├── database.py         # 資料庫互動模組。
+│   │   │   └── factor_engineering.py # 因子工程模組。
+│   │   ├── 🕸️ api/                  # API 接口層。
+│   │   │   └── v1/                 # API 版本 v1。
+│   │   │       └── endpoints.py    # API 端點定義。
+│   │   └── 📜 requirements.txt       # Python 核心依賴。
 │   │
-│   └── 🎤 transcriber/           # 【語音轉寫 App - 一個完整的獨立專案】
-│       │
-│       ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器
-│       │
-│       ├── 🧠 logic.py           # 核心業務邏輯 (呼叫轉寫模型)
-│       │
-│       ├── 📜 requirements.txt     # 核心依賴
-│       ├── 📜 requirements.large.txt # (可選) 大型依賴，用於真實模式測試
-│       ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│       └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+│   └── 🎤 transcriber/             # 【語音轉寫 App】
+│       ├── 🛰️ main.py               # FastAPI 應用主入口。
+│       ├── 🧠 logic.py             # 核心業務邏輯。
+│       ├── 📜 requirements.txt       # Python 核心依賴。
+│       └── 📜 requirements.large.txt # (可選) 大型 AI 模型依賴。
 │
-├── ⚙️ proxy/                      # 【逆向代理配置】
-│   └── proxy_config.json       # 定義路由規則 (e.g., "/quant" -> "localhost:8001")
+├── 🧪 tests/                       # 【品質保證中心：所有測試的家】
+│   │
+│   ├── 📈 quant/                   # 【量化金融 App 的測試】
+│   │   └── test_api.py           # API 層級的整合測試。
+│   │
+│   └── 🎤 transcriber/             # 【語音轉寫 App 的測試】
+│       └── test_api.py           # API 層級的整合測試 (包含模擬與 E2E)。
 │
-├── 📜 smart_e2e_test.sh         # 智能測試指揮官腳本，支持 mock 和 real 模式
+├── ⚙️ proxy/                        # 【逆向代理配置】
+│   └── proxy_config.json         # 路由規則設定檔，定義如何轉發請求。
 │
-├── 📚 docs/                       # 【專案文件】
-│   └── ARCHITECTURE.md         # (本文件) 最終的架構設計總藍圖
+├── 📜 smart_e2e_test.sh           # 智能測試指揮官腳本。
 │
-└── 🗄️ ALL_DATE/                 # 【封存參考資料】存放舊專案作為開發參考
+├── 📚 docs/                         # 【專案文件】
+│   ├── ARCHITECTURE.md           # (本文件) 最終的架構設計總藍圖。
+│   ├── Colab_Guide.md            # 在 Google Colab 上運行的指南。
+│   ├── MISSION_DEBRIEFING.md     # 專案的任務報告與總結。
+│   └── TEST.md                   # 關於測試策略的詳細說明。
+│
+├── 🗄️ ALL_DATE/                   # 【封存參考資料】
+│   └── ...                       # (包含多個舊專案與參考資料，此處省略)
+│
+└── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
 
 ---
