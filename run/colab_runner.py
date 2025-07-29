@@ -129,7 +129,7 @@ def main():
         api_process = subprocess.Popen(api_command, env=env, stdout=stdout_target, stderr=subprocess.STDOUT)
         print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。")
 
-        gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
+        gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", sys.executable, "launch.py"]
         gotty_process = subprocess.Popen(gotty_command, env=env, stdout=gotty_stdout_target, stderr=subprocess.STDOUT)
         print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。")
 

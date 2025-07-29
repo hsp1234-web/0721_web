@@ -32,10 +32,13 @@ def update_state_file():
         json.dump(_state, f)
 
 def add_log(message):
-    _state["logs"].append(f"[{time.strftime('%H:%M:%S')}] {message}")
+    log_entry = f"[{time.strftime('%H:%M:%S')}] {message}"
+    _state["logs"].append(log_entry)
     if len(_state["logs"]) > 20:
         _state["logs"].pop(0)
     update_state_file()
+    # 將日誌也輸出到 stdout，以便測試時可以捕獲
+    print(log_entry, file=sys.stdout)
 
 def set_app_status(app_name, status):
     _state["apps"][app_name]["status"] = status
@@ -83,19 +86,35 @@ def get_final_link_panel():
 # --- 核心啟動邏輯 ---
 # --- 核心啟動邏輯 ---
 async def launch_app(app_name, port):
-    """僅負責啟動單個應用。"""
+    """啟動單個應用，並支援快速測試模式。"""
+    set_app_status(app_name, "starting")
+
+    # 檢查是否啟用快速測試模式
+    if os.getenv("FAST_TEST_MODE") == "true":
+        await asyncio.sleep(2) # 模擬短暫的啟動延遲
+        set_app_status(app_name, "running")
+        add_log(f"App '{app_name}' in fast test mode, skipping actual launch.")
+        return
+
+    # --- 真實啟動邏輯 ---
     APPS_DIR = Path("apps")
     app_path = APPS_DIR / app_name
     try:
-        set_app_status(app_name, "starting")
         env = os.environ.copy()
         env["PORT"] = str(port)
+
         # 使用當前環境的 Python 直譯器
         # 在除錯時，可以將 stderr=subprocess.STDOUT，以捕獲啟動錯誤
-        subprocess.Popen([sys.executable, "main.py"], cwd=app_path, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.Popen(
+            [sys.executable, "main.py"],
+            cwd=app_path,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT
+        )
 
         # 等待服務啟動
-        await asyncio.sleep(5)
+        await asyncio.sleep(10) # 增加等待時間以確保服務完全啟動
         set_app_status(app_name, "running")
 
     except Exception as e:
@@ -136,7 +155,8 @@ def main_tui():
     backend_thread.start()
 
     # 主執行緒負責 TUI 渲染
-    with Live(layout, screen=True, redirect_stderr=False) as live:
+    # 在 `Live` 的 `console` 參數中傳入 `console` 物件，以確保所有輸出都導向同一個主控台
+    with Live(layout, screen=True, redirect_stderr=False, console=console) as live:
         try:
             while backend_thread.is_alive():
                 layout["header"].update(Panel("🚀 鳳凰之心 - 系統啟動監控面板 🚀", style="bold magenta"))
@@ -155,12 +175,10 @@ def main_tui():
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    # 檢查是否在非互動式環境中
-    if os.environ.get("TERM") == "dumb" or not sys.stdout.isatty():
-        # 在純腳本模式下，直接、同步地執行核心邏輯
-        print("--- 正在以純腳本模式啟動 ---")
-        asyncio.run(main_logic())
-        print("--- 純腳本模式啟動完成 ---")
-    else:
-        # 在互動式模式下，啟動 TUI
-        main_tui()
+    # 記錄目前的 TERM 環境變數，以便除錯
+    add_log(f"環境變數 TERM = {os.environ.get('TERM')}")
+    add_log(f"sys.stdout.isatty() = {sys.stdout.isatty()}")
+
+    # 無論如何都強制啟動 TUI 模式
+    add_log("強制以 TUI 模式啟動...")
+    main_tui()
