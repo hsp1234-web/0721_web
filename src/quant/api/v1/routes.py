@@ -16,7 +16,6 @@ from src.quant.logic import analysis, database
 
 # 建立一個 APIRouter 實例，我們可以稍後將它包含到主 App 中
 router = APIRouter(
-    prefix="/v1",  # 所有這個 router 的路由都會有 /v1 的前綴
     tags=["Quantitative Analysis V1"],  # 在 OpenAPI 文檔中為這組路由分組
 )
 
@@ -73,3 +72,10 @@ async def get_backtest_results():
         return results_df.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"讀取回測結果時發生內部錯誤: {e}")
+
+@router.get("/health", summary="服務健康檢查")
+async def health_check():
+    """
+    一個簡單的健康檢查端點，用於確認服務是否正在運行。
+    """
+    return {"status": "ok", "message": "量化金融服務運行中"}

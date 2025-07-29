@@ -1,7 +1,16 @@
-fastapi
-uvicorn
-pytest
+# FastAPI and related dependencies
+fastapi==0.111.1
+uvicorn==0.22.0
+starlette==0.37.2
+anyio==4.9.0
+
+# Testing dependencies
+pytest==8.4.1
 pytest-mock
 ruff
-httpx
+
+# HTTP client
+httpx==0.28.1
+
+# System utilities
 psutil

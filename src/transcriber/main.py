@@ -21,36 +21,38 @@ app = FastAPI(
     version="1.0.0",
 )
 
+from fastapi import Depends
+
+...
+
 @app.post("/upload", summary="上傳音訊檔案以進行轉寫")
-async def upload_audio(file: UploadFile = File(...)):
+async def upload_audio(
+    file: UploadFile = File(...),
+    process_audio_file: callable = Depends(logic.process_audio_file)
+):
     """
     接收使用者上傳的音訊檔案，並啟動轉寫任務。
-
-    - **file**: 必要參數，使用者上傳的音訊檔案。
-
-    返回一個 JSON 物件，其中包含新建立的任務 ID。
     """
+
     if not file:
         raise HTTPException(status_code=400, detail="沒有提供檔案。")
 
-    # 使用業務邏輯層來處理檔案
-    task_id = logic.process_audio_file(file)
+    task_id = process_audio_file(file)
 
     return JSONResponse(
-        status_code=202,  # 202 Accepted: 請求已被接受處理，但處理尚未完成
+        status_code=202,
         content={"message": "檔案已成功上傳並開始處理。", "task_id": task_id}
     )
 
 @app.get("/status/{task_id}", summary="查詢轉寫任務的狀態與結果")
-async def get_transcription_status(task_id: str):
+async def get_transcription_status(
+    task_id: str,
+    get_task_status: callable = Depends(logic.get_task_status)
+):
     """
     根據任務 ID 查詢轉寫任務的狀態。
-
-    - **task_id**: 必要參數，從 `/upload` 端點獲取的任務 ID。
-
-    如果任務完成，將在 `result` 欄位中包含轉寫文字。
     """
-    status_info = logic.get_task_status(task_id)
+    status_info = get_task_status(task_id)
     if status_info.get("status") == "not_found":
         raise HTTPException(status_code=404, detail=f"找不到任務 ID: {task_id}")
 
@@ -91,10 +93,12 @@ def start():
     我們從環境變數讀取埠號，以便 launch.py 可以為每個 App 分配不同埠號。
     """
     port = int(os.environ.get("PORT", 8002)) # 預設為 8002
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    # The app is passed as a string 'src.transcriber.main:app' to uvicorn
+    # to ensure consistent behavior between test and production.
+    uvicorn.run("src.transcriber.main:app", host="0.0.0.0", port=port, log_level="info", reload=True)
 
 if __name__ == "__main__":
     # 這使得我們可以獨立運行這個 App 進行測試
-    # 在終端機中執行 `python apps/transcriber/main.py`
+    # 在終端機中執行 `python -m src.transcriber.main`
     print("正在以獨立模式啟動語音轉寫伺服器...")
     start()

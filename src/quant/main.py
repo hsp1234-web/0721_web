@@ -37,22 +37,20 @@ app.include_router(v1_routes.router, prefix="/api/v1")
 async def read_root():
     """
     根路由，用於簡單的服務健康檢查。
-    同時回報當前運行的組態參數。
     """
-    port = os.environ.get("PORT", "未設定")
-    timezone = os.environ.get("TIMEZONE", "未設定")
-    return {
-        "status": "ok",
-        "service": "鳳凰之心 - 量化分析服務",
-        "port": port,
-        "timezone": timezone,
-    }
+    return {"status": "ok", "message": "歡迎來到量化金融服務 API"}
 
 # --- 主程式入口 ---
+def start():
+    """
+    使用 uvicorn 啟動伺服器。
+    """
+    port = int(os.environ.get("PORT", 8001)) # 預設為 8001
+    uvicorn.run("src.quant.main:app", host="0.0.0.0", port=port, log_level="info", reload=True)
+
 if __name__ == "__main__":
     """
     當此腳本被直接執行時，啟動 Uvicorn 伺服器。
-    我們從環境變數讀取埠號，以便 launch.py 可以為每個 App 分配不同埠號。
     """
-    port = int(os.environ.get("PORT", 8001)) # 預設為 8001
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    print("正在以獨立模式啟動量化分析伺服器...")
+    start()

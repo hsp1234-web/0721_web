@@ -132,7 +132,7 @@ def start_services(apps_to_run):
         env["PYTHONPATH"] = str(PROJECT_ROOT)
 
         process = subprocess.Popen(
-            [python_executable, "-m", f"src.{app_name}.main"],
+            [python_executable, str(config["path"] / "main.py")],
             cwd=PROJECT_ROOT,
             env=env
         )
