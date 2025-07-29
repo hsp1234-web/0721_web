@@ -160,8 +160,8 @@ async def launch_app(app_path: Path, port: int):
 
     process = subprocess.Popen(
         [venv_python, main_py_path],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=env
     )
     print_success(f"App '{app_name}' 已在背景啟動，監聽埠: {port}, PID: {process.pid}")
