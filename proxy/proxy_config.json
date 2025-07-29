@@ -1,5 +1,8 @@
 {
     "routes": {
+        "/": {
+            "target": "http://localhost:8003"
+        },
         "/quant": {
             "target": "http://localhost:8001"
         },

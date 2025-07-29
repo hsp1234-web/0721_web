@@ -19,10 +19,11 @@
 
 - **`phoenix_starter.py` (推薦)**: 專案的**視覺化啟動器**。一鍵完成資源檢查、智慧型安裝、執行測試，並提供精美的儀表板全程監控。
 - **`launch.py`**: 專案的**主啟動腳本 (無介面)**，適合在伺服器或自動化腳本中執行。
-- **`core_utils/safe_installer.py`**: 專案的**安全安裝模組**。它取代了傳統的 `pip install -r`，逐一套件進行安裝，並在每一步都進行資源檢查。
-- **`core_utils/resource_monitor.py`**: 專案的**資源監控模組**，提供檢查記憶體與磁碟的底層能力。
-- **`config/resource_settings.yml`**: **全域設定中心**，所有資源閾值（記憶體、磁碟）都在此統一定義，方便您根據不同主機環境進行調整。
-- **`logs/`**: **日誌中心**，所有安裝與啟動過程的詳細日誌都儲存在此，方便追蹤與除錯。
+- **`smart_e2e_test.py`**: 新一代**智能測試指揮官 (Python版)**。它以平行化的方式執行所有端對端測試，並整合了 `pytest-xdist` 和 `pytest-timeout` 來實現快速、穩健的測試。
+- **`colab_dashboard_test.ipynb`**: **Colab 驗證儀表板**。一個提供給使用者的 Jupyter Notebook，用於在 Colab 環境中一鍵完成專案的測試與驗證。
+- **`core_utils/`**: 核心工具模組，包含 `safe_installer.py` (安全安裝器) 和 `resource_monitor.py` (資源監控器)。
+- **`config/resource_settings.yml`**: **全域資源設定中心**。
+- **`logs/`**: **日誌中心**，所有安裝與啟動過程的詳細日誌都儲存在此。
 - **uv**: 我們唯一的環境管理與安裝工具，由安全安裝模組在底層呼叫。
 - **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
 
@@ -89,7 +90,8 @@ python launch.py
 │
 ├── 🚀 phoenix_starter.py          # 【推薦】視覺化啟動器，整合所有功能。
 ├── 🚀 launch.py                   # 【無介面】主啟動腳本，適合伺服器環境。
-├── 📜 smart_e2e_test.sh           # 智能測試腳本，由安全安裝模組驅動。
+├── 🧪 smart_e2e_test.py            # 【推薦】新一代 Python 智能測試腳本 (平行、穩定)。
+├── 🚀 colab_dashboard_test.ipynb   # 【交付】Colab 一鍵測試與驗證儀表板。
 │
 ├── 📦 apps/                        # 【所有獨立微服務的家】
 │   ├── 📈 quant/                   #  - 量化金融 App
