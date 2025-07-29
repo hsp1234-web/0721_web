@@ -4,6 +4,7 @@
 """
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -23,8 +24,6 @@ app = FastAPI(
     description="一個獨立的微服務，負責執行金融數據分析、回測與策略計算。",
     version="1.0.0",
 )
-
-from contextlib import asynccontextmanager
 
 
 # --- Lifespan 事件處理 ---

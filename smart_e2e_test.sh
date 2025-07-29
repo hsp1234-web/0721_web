@@ -117,7 +117,8 @@ for app_path in "${APPS[@]}"; do
     uv pip install -q -p "$PYTHON_EXEC" pytest pytest-mock ruff httpx
 
     print_info "[$app_name] 3. 啟動智慧型安全安裝程序..."
-    python3 -m core_utils.safe_installer "$app_name" "$REQS_FILE" "$PYTHON_EXEC"
+    uv pip install -q -p "$PYTHON_EXEC" uv pyyaml psutil
+    $PYTHON_EXEC -m core_utils.safe_installer "$app_name" "$REQS_FILE" "$PYTHON_EXEC"
 
     # 根據測試模式決定是否安裝大型依賴
     if [ "$TEST_MODE" == "real" ]; then
