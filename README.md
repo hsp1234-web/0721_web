@@ -20,7 +20,10 @@
 - **`phoenix_starter.py` (推薦)**: 專案的**視覺化啟動器**。一鍵完成資源檢查、智慧型安裝、執行測試，並提供精美的儀表板全程監控。
 - **`launch.py`**: 專案的**主啟動腳本 (無介面)**，適合在伺服器或自動化腳本中執行。
 - **`smart_e2e_test.py`**: 新一代**智能測試指揮官 (Python版)**。它以平行化的方式執行所有端對端測試，並整合了 `pytest-xdist` 和 `pytest-timeout` 來實現快速、穩健的測試。
-- **`colab_dashboard_test.ipynb`**: **Colab 驗證儀表板**。一個提供給使用者的 Jupyter Notebook，用於在 Colab 環境中一鍵完成專案的測試與驗證。
+- **`run/colab_runner.py`**: **Colab 全自動化啟動器**。專為在 Google Colab 中提供無縫體驗而設計。它能解決 Colab 的「服務孤島」問題，實現「一鍵執行，自動開啟」：
+    - **智慧型背景服務**：在後端啟動一個能自我監控狀態的 API 服務。
+    - **可靠的後端輪詢**：`colab_runner.py` 在後端與 API 服務可靠地通訊，等待服務就緒。
+    - **自動開啟**：一旦服務準備就緒，腳本會自動為您在新分頁中開啟操作儀表板，無需任何手動操作。
 - **`core_utils/`**: 核心工具模組，包含 `safe_installer.py` (安全安裝器) 和 `resource_monitor.py` (資源監控器)。
 - **`config/resource_settings.yml`**: **全域資源設定中心**。
 - **`logs/`**: **日誌中心**，所有安裝與啟動過程的詳細日誌都儲存在此。

@@ -78,52 +78,67 @@ def main():
         env = os.environ.copy()
         env["STATE_FILE"] = str(state_file_path)
 
-        api_command = [sys.executable, "-m", "uvicorn", "apps.dashboard_api.main:app", "--port", "8004", "--host", "0.0.0.0"]
-        api_process = subprocess.Popen(api_command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。")
+        api_log_path = project_path / "api.log"
+        gotty_log_path = project_path / "gotty.log"
 
-        gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
-        gotty_process = subprocess.Popen(gotty_command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。")
+        with open(api_log_path, "w") as api_log, open(gotty_log_path, "w") as gotty_log:
+            api_command = [sys.executable, "-m", "uvicorn", "apps.dashboard_api.main:app", "--port", "8004", "--host", "0.0.0.0"]
+            api_process = subprocess.Popen(api_command, env=env, stdout=api_log, stderr=subprocess.STDOUT)
+            print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。日誌 -> {api_log_path}")
 
-        # --- 步驟 4: 顯示儀表板和輪詢腳本 ---
-        print("\n4. 正在載入終極儀表板...")
+            gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
+            gotty_process = subprocess.Popen(gotty_command, env=env, stdout=gotty_log, stderr=subprocess.STDOUT)
+            print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。日誌 -> {gotty_log_path}")
 
-        # 使用 google.colab.output 來處理端口轉發，確保 iframe 能被載入
+        # --- 步驟 4: 顯示 GoTTY 並啟動後端輪詢 ---
+        print("\n4. 正在載入 GoTTY 日誌儀表板...")
         from google.colab import output
+        import httpx
+
+        placeholder_html = HTML("<div id='action-button-placeholder'></div>")
+        display(placeholder_html)
+
         output.serve_kernel_port_as_iframe(8080, height=600)
 
-        # 注入 Javascript 來輪詢 API 並創建按鈕
-        js_code = f"""
-            const apiUrl = 'http://localhost:8004/api/get-action-url';
-            const maxRetries = 20;
-            let retryCount = 0;
-            const statusDiv = document.createElement('div');
-            document.body.appendChild(statusDiv);
+        # --- 步驟 5: 後端輪詢 API 並動態生成操作按鈕 ---
+        print("\n5. 啟動後端輪詢程序，等待儀表板 URL 就緒...")
+        api_url = "http://localhost:8004/api/get-action-url"
+        max_retries = 20
 
-            const intervalId = setInterval(async () => {{
-                retryCount++;
-                statusDiv.innerHTML = `<p>正在自動嘗試獲取操作連結 (第 ${{retryCount}}/${{maxRetries}} 次)...</p>`;
-                try {{
-                    const response = await fetch(apiUrl);
-                    if (response.ok) {{
-                        const data = await response.json();
-                        if (data.status === 'success') {{
-                            clearInterval(intervalId);
-                            statusDiv.innerHTML = `<a href="${{data.url}}" target="_blank" style="display:inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; border-radius: 8px;">🚀 點此開啟主操作儀表板 🚀</a>`;
-                        }}
-                    }}
-                }} catch (e) {{ /*忽略連接錯誤*/ }}
-                if (retryCount >= maxRetries) {{
-                    clearInterval(intervalId);
-                    statusDiv.innerHTML = `<p>❌ 獲取操作連結超時。</p>`;
-                }}
-            }}, 5000);
-        """
-        display(Javascript(js_code))
+        final_url = None
+        for i in range(max_retries):
+            print(f"   🔄 正在嘗試獲取操作連結... (第 {i+1}/{max_retries} 次)")
+            try:
+                with httpx.Client() as client:
+                    response = client.get(api_url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "success" and data.get("url"):
+                        final_url = data["url"]
+                        print(f"✅ 成功獲取儀表板 URL: {final_url}")
+                        break
+            except httpx.RequestError:
+                pass
+            time.sleep(5)
 
-        # --- 步驟 5: 等待使用者手動終止 ---
-        print("\n5. 所有服務已啟動。")
+        # --- 步驟 6: 根據輪詢結果更新前端 ---
+        if final_url:
+            js_code = f'''
+                const placeholder = document.getElementById('action-button-placeholder');
+                placeholder.innerHTML = `<a href="{final_url}" target="_blank" style="display:inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; border-radius: 8px;">🚀 點此開啟主操作儀表板 🚀</a>`;
+            '''
+            display(Javascript(js_code))
+            print("\n✅ 操作按鈕已成功顯示在上方。")
+        else:
+            js_code = """
+                const placeholder = document.getElementById('action-button-placeholder');
+                placeholder.innerHTML = `<p style="color: red;">❌ 獲取操作連結超時，請檢查 API 服務日誌。</p>`;
+            """
+            display(Javascript(js_code))
+            print("\n❌ 獲取儀表板 URL 失敗。")
+
+        # --- 步驟 7: 等待使用者手動終止 ---
+        print("\n\n所有服務已啟動。您可以透過上方 GoTTY 視窗查看即時日誌。")
         try:
             while True: time.sleep(60)
         except KeyboardInterrupt:
