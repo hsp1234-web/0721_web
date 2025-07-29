@@ -1,6 +1,6 @@
-# 鳳凰之心 v9.1：最終架構總藍圖
+# 鳳凰之心 v9.2：最終架構總藍圖
 
-這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態 v9.1，涵蓋了檔案結構、智慧型安裝流程、以及核心工具的協同工作方式。
+這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態 v9.2，涵蓋了檔案結構、智慧型安裝流程、以及核心工具的協同工作方式。
 
 ---
 
@@ -26,7 +26,7 @@
 
 ---
 
-## 二、 終極檔案結構與業務邏輯歸屬 (v9.1)
+## 二、 終極檔案結構與業務邏輯歸屬 (v9.2 - 完整版)
 
 這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
 
@@ -39,13 +39,27 @@
 │
 ├── 📦 apps/                        # 【所有獨立微服務的家】
 │   ├── 📈 quant/                   #  - 量化金融 App
+│   │   ├── api/                  #    - API 接口層
+│   │   │   └── v1/               #      - API 版本 v1
+│   │   │       └── routes.py     #        - FastAPI 路由定義
+│   │   ├── logic/                #    - 核心業務邏輯
+│   │   │   ├── analysis.py       #      - 分析與策略邏輯
+│   │   │   ├── data_sourcing.py  #      - 數據源邏輯
+│   │   │   ├── database.py       #      - 資料庫邏輯
+│   │   │   └── factor_engineering.py #  - 因子工程邏輯
+│   │   ├── main.py               #    - App 的 FastAPI 入口
+│   │   └── requirements.txt      #    - Python 核心依賴
+│   │
 │   └── 🎤 transcriber/             #  - 語音轉寫 App
-│       └── ... (每個 App 內部包含 main.py, logic, requirements.txt 等)
+│       ├── main.py               #    - App 的 FastAPI 入口
+│       ├── logic.py              #    - 核心業務邏輯
+│       ├── requirements.txt      #    - Python 核心依賴
+│       └── requirements.large.txt#    - (可選) 大型 AI 模型依賴
 │
 ├── 🛠️ core_utils/                 # 【核心工具模組】
 │   ├── __init__.py               #  - 將此目錄標記為 Python 套件。
-│   ├── 🔬 resource_monitor.py      #  - 資源監控模組：提供檢查系統資源的函式。
-│   └── 🛡️ safe_installer.py       #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
+│   ├── resource_monitor.py       #  - 資源監控模組：提供檢查系統資源的函式。
+│   └── safe_installer.py         #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
 │
 ├── ⚙️ config/                     # 【全域設定中心】
 │   └── resource_settings.yml     #  - 在此定義記憶體/磁碟閾值等監控參數。
@@ -54,14 +68,21 @@
 │   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處 (log檔會被自動忽略)。
 │
 ├── 🧪 tests/                       # 【品質保證中心】
-│   ├── 📈 quant/                   #  - 量化金融 App 的測試。
-│   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試。
+│   ├── 📈 quant/                   #  - 量化金融 App 的測試
+│   │   └── test_api.py           #    - API 層級的整合測試
+│   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試
+│       └── test_api.py           #    - API 層級的整合測試 (包含模擬與 E2E)
 │
 ├── ⚙️ proxy/                        # 【逆向代理配置】
 │   └── proxy_config.json         #  - 路由規則設定檔。
 │
 ├── 📚 docs/                         # 【專案文件】
-│   └── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖。
+│   ├── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖
+│   ├── Colab_Guide.md            #  - Google Colab 運行指南
+│   ├── MISSION_DEBRIEFING.md     #  - 專案任務報告
+│   └── TEST.md                   #  - 測試策略說明
+│
+├── 🗄️ ALL_DATE/                   # 【舊專案封存 (參考用)】
 │
 └── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
