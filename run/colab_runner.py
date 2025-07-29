@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 Colab GoTTY 混合動力啟動器 v10.0 (診斷版)                       ║
+# ║      🚀 Colab 資料庫驅動儀表板 v13.0 (Rich 版)                     ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   設計哲學：                                                         ║
-# ║       一個絕對可靠的啟動器，不僅要能工作，還要能在失敗時提供清晰的   ║
-# ║       診斷資訊，確保使用者總能了解系統的真實狀態。                   ║
+# ║   採用 rich 套件，提供美觀、流暢、不閃爍的即時儀表板。             ║
+# ║   後端作為守護進程持續運行，前端顯示迴圈永不中斷。                 ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心終極啟動器 v10.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 Rich 啟動器 v13.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -25,13 +24,11 @@ PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
 FORCE_REPO_REFRESH = True #@param {type:"boolean"}
 #@markdown ---
-#@markdown ### **Part 2: 除錯設定**
-#@markdown > **啟用後，將顯示所有詳細日誌，用於問題診斷。**
+#@markdown ### **Part 2: 模式設定**
+#@markdown > **用於快速驗證或完整部署。**
 #@markdown ---
-#@markdown **開啟除錯模式 (DEBUG_MODE)**
-DEBUG_MODE = True #@param {type:"boolean"}
 #@markdown **快速測試模式 (FAST_TEST_MODE)**
-#@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。取消勾選以執行完整的真實部署。
+#@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。
 FAST_TEST_MODE = True #@param {type:"boolean"}
 
 #@markdown ---
@@ -47,42 +44,83 @@ import shutil
 import subprocess
 from pathlib import Path
 import time
-import stat
-import httpx
-from IPython.display import display, HTML, Javascript
+import sqlite3
+import json
+from IPython.display import display, HTML, Javascript, clear_output
+
+# 安裝 Rich
+try:
+    import rich
+except ImportError:
+    print("安裝 rich 套件...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rich"], check=True)
+    print("✅ rich 安裝完成。")
+
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+console = Console()
+
+def make_layout() -> Layout:
+    """建立儀表板的版面配置"""
+    layout = Layout(name="root")
+    layout.split(
+        Layout(name="header", size=3),
+        Layout(ratio=1, name="main"),
+        Layout(size=5, name="footer"),
+    )
+    layout["main"].split_row(Layout(name="side"), Layout(name="body", ratio=2))
+    layout["side"].split(Layout(name="status_panel"), Layout(name="system_panel"))
+    return layout
+
+def get_app_status_table(apps_status: dict) -> Table:
+    """建立應用程式狀態表格"""
+    table = Table(title="微服務狀態", expand=True)
+    table.add_column("Icon", justify="center", style="cyan")
+    table.add_column("服務名稱", style="magenta")
+    table.add_column("狀態", justify="right", style="green")
+
+    status_map = {"pending": "⚪", "starting": "🟡", "running": "🟢", "failed": "🔴"}
+    for app, status in apps_status.items():
+        icon = status_map.get(status, "❓")
+        table.add_row(icon, app.capitalize(), status)
+    return table
+
+def get_log_panel(log_rows: list) -> Panel:
+    """建立日誌面板"""
+    log_text = ""
+    for ts, level, msg in reversed(log_rows):
+        ts_str = str(ts).split(" ")[1][:8] if ts else ""
+        level_color = {"INFO": "green", "ERROR": "red", "CRITICAL": "bold red"}.get(level, "white")
+        log_text += f"[grey50]{ts_str}[/] [{level_color}]{level}[/] [white]{msg}[/]\n"
+    return Panel(log_text, title="📜 即時日誌 (最新 10 筆)", border_style="cyan")
+
+base_path = Path("/content")
 
 def main():
-    try:
-        base_path = Path("/content")
-        project_path = base_path / PROJECT_FOLDER_NAME
-        state_file_path = project_path / "phoenix_state.json"
+    # --- 全域路徑與變數 ---
+    project_path = base_path / PROJECT_FOLDER_NAME
+    db_file = project_path / "state.db"
 
-        print("🚀 鳳凰之心終極啟動器 v10.0")
-        print("="*80)
-
-        # --- 步驟 1: 準備專案 ---
-        print("1. 準備專案目錄...")
+    # --- 步驟 1: 準備專案 ---
+    console.rule("[bold green]🚀 鳳凰之心 Rich 啟動器 v13.0[/bold green]")
+    with console.status("[bold yellow]1. 準備專案目錄...[/]", spinner="earth"):
         if FORCE_REPO_REFRESH and project_path.exists():
             shutil.rmtree(project_path)
         if not project_path.exists():
             git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", "-q", REPOSITORY_URL, str(project_path)]
             subprocess.run(git_command, check=True, cwd=base_path)
         os.chdir(project_path)
-        print(f"✅ 專案準備完成於: {os.getcwd()}")
+    console.log(f"✅ 專案準備完成於: {os.getcwd()}")
 
-        # --- 步驟 2: 安裝 GoTTY 和核心依賴 ---
-        print("\n2. 安裝 GoTTY 和核心 Python 依賴...")
-        gotty_path = Path("/usr/local/bin/gotty")
-        if not gotty_path.exists():
-            print("   正在下載並安裝 GoTTY...")
-            subprocess.run("wget -q https://github.com/yudai/gotty/releases/download/v1.0.1/gotty_linux_amd64.tar.gz -O gotty.tar.gz", shell=True, check=True)
-            subprocess.run("tar -xzf gotty.tar.gz", shell=True, check=True)
-            subprocess.run(["mv", "gotty", str(gotty_path)], check=True)
-            gotty_path.chmod(gotty_path.stat().st_mode | stat.S_IEXEC)
-        print("   ✅ GoTTY 已就緒。")
-        print("   - 正在安裝所有 App 的依賴項到主環境...")
+    # --- 步驟 2: 安裝核心依賴 ---
+    with console.status("[bold yellow]2. 安裝核心 Python 依賴...[/]", spinner="dots"):
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         all_reqs_path = project_path / "all_requirements.txt"
-        # 合併所有 requirements.txt
         with open(all_reqs_path, "w") as outfile:
             for app_dir in (project_path / "apps").iterdir():
                 if app_dir.is_dir():
@@ -91,109 +129,93 @@ def main():
                         with open(req_file) as infile:
                             outfile.write(infile.read())
                         outfile.write("\n")
-
-        # 升級 pip
-        print("   - 正在升級 pip...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # 安裝所有依賴 + 核心依賴
-        print("   - 正在安裝所有 App 的依賴項...")
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(all_reqs_path)], check=True)
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rich", "uvicorn", "httpx"], check=True)
-        print("✅ 所有依賴安裝完成。")
+    console.log("✅ 所有依賴安裝完成。")
 
-        # --- 步驟 3: 在背景啟動所有服務 ---
-        print("\n3. 觸發背景服務啟動程序...")
-        env = os.environ.copy()
-        env["STATE_FILE"] = str(state_file_path)
-        if FAST_TEST_MODE:
-            env["FAST_TEST_MODE"] = "true"
-            print("\n🚀 快速測試模式已啟用。")
+    # --- 步驟 3: 在背景啟動後端主力部隊 ---
+    console.log("3. 觸發背景服務啟動程序...")
+    env = os.environ.copy()
+    env["DB_FILE"] = str(db_file)
+    if FAST_TEST_MODE:
+        env["FAST_TEST_MODE"] = "true"
+        console.log("   - 🚀 快速測試模式已啟用。")
 
-        # 根據除錯模式決定輸出目標
-        stdout_target = subprocess.DEVNULL
-        if DEBUG_MODE:
-            print("\n🔍 除錯模式已啟用，所有日誌將被記錄。")
-            log_dir = project_path / "logs"
-            log_dir.mkdir(exist_ok=True)
-            api_log_path = log_dir / "api.log"
-            gotty_log_path = log_dir / "gotty.log"
-            stdout_target = open(api_log_path, "w")
-            gotty_stdout_target = open(gotty_log_path, "w")
-            print(f"   - API 服務日誌將寫入: {api_log_path}")
-            print(f"   - GoTTY/Launch.py 日誌將寫入: {gotty_log_path}")
-        else:
-            gotty_stdout_target = subprocess.DEVNULL
+    log_file = project_path / "logs" / "launch.log"
+    log_file.parent.mkdir(exist_ok=True)
 
+    with open(log_file, "w") as f:
+        launch_process = subprocess.Popen(
+            [sys.executable, "launch.py"],
+            env=env, stdout=f, stderr=subprocess.STDOUT
+        )
+    console.log(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
+    console.log(f"   - 日誌將寫入: {log_file}")
 
-        api_command = [sys.executable, "-m", "uvicorn", "apps.dashboard_api.main:app", "--port", "8004", "--host", "0.0.0.0"]
-        api_process = subprocess.Popen(api_command, env=env, stdout=stdout_target, stderr=subprocess.STDOUT)
-        print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。")
+    # --- 步驟 4: 啟動前端戰情顯示器 ---
+    console.log("\n4. 正在啟動前端戰情顯示器...")
+    time.sleep(2)
 
-        gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
-        gotty_process = subprocess.Popen(gotty_command, env=env, stdout=gotty_stdout_target, stderr=subprocess.STDOUT)
-        print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。")
+    layout = make_layout()
 
-        # --- 步驟 4: 顯示 GoTTY 並啟動後端輪詢 ---
-        print("\n4. 正在載入 GoTTY 日誌儀表板...")
-        from google.colab import output
-        import httpx
-
-        placeholder_html = HTML("<div id='action-button-placeholder'></div>")
-        display(placeholder_html)
-
-        output.serve_kernel_port_as_iframe(8080, height=600)
-
-        # --- 步驟 5: 後端輪詢 API 並動態生成操作按鈕 ---
-        print("\n5. 啟動後端輪詢程序，等待儀表板 URL 就緒...")
-        api_url = "http://localhost:8004/api/get-action-url"
-        max_retries = 30 # 延長重試次數以應對較慢的啟動
-
-        final_url = None
-        for i in range(max_retries):
-            print(f"   🔄 正在嘗試獲取操作連結... (第 {i+1}/{max_retries} 次)")
-            try:
-                with httpx.Client() as client:
-                    response = client.get(api_url, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("status") == "success" and data.get("url"):
-                        final_url = data["url"]
-                        print(f"✅ 成功獲取儀表板 URL: {final_url}")
-                        break
-            except httpx.RequestError:
-                pass
-            time.sleep(5)
-
-        # --- 步驟 6: 根據輪詢結果更新前端 ---
-        if final_url:
-            js_code = f'''
-                const placeholder = document.getElementById('action-button-placeholder');
-                placeholder.innerHTML = `<br><a href="{final_url}" target="_blank" style="display:inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; border-radius: 8px;">🚀 點此開啟主操作儀表板 🚀</a>`;
-            '''
-            display(Javascript(js_code))
-            print("\n✅ 操作按鈕已成功顯示在上方。")
-        else:
-            js_code = """
-                const placeholder = document.getElementById('action-button-placeholder');
-                placeholder.innerHTML = `<br><p style="color: red;">❌ 獲取操作連結超時，請檢查 GoTTY 日誌儀表板中的錯誤訊息。</p>`;
-            """
-            display(Javascript(js_code))
-            print("\n❌ 獲取儀表板 URL 失敗。")
-
-        # --- 步驟 7: 等待使用者手動終止 ---
-        print("\n\n所有服務已啟動。您可以透過上方 GoTTY 視窗查看即時日誌。")
+    with Live(layout, screen=True, redirect_stderr=False, vertical_overflow="visible") as live:
         try:
-            while True: time.sleep(60)
-        except KeyboardInterrupt:
-            print("\n\n🛑 偵測到手動中斷！正在終止所有背景服務...")
-            api_process.terminate()
-            gotty_process.terminate()
-            print("✅ 所有背景服務已被終止。")
+            while True:
+                try:
+                    conn = sqlite3.connect(db_file)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
+                    status_row = cursor.fetchone()
+                    cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
+                    log_rows = cursor.fetchall()
+                    conn.close()
 
-    except Exception as e:
-        print(f"\n💥 啟動程序發生未預期的嚴重錯誤: {e}")
-        import traceback
-        traceback.print_exc()
+                    if not status_row:
+                        time.sleep(1)
+                        continue
+                except sqlite3.OperationalError as e:
+                    if "no such table" in str(e):
+                        time.sleep(1)
+                        continue
+                    raise
+
+                stage, apps_status_json, action_url, cpu, ram = status_row
+                apps_status = json.loads(apps_status_json) if apps_status_json else {}
+
+                # 更新 Header
+                header_text = Text("🚀 鳳凰之心 - 作戰指揮中心 🚀", justify="center", style="bold magenta")
+                layout["header"].update(Panel(header_text, border_style="green"))
+
+                # 更新 App 狀態
+                layout["status_panel"].update(get_app_status_table(apps_status))
+
+                # 更新系統狀態
+                system_table = Table(title="📊 系統資源", expand=True)
+                system_table.add_column("項目", style="cyan")
+                system_table.add_column("數值", justify="right", style="green")
+                system_table.add_row("CPU", f"{cpu or 0.0:.1f}%")
+                system_table.add_row("RAM", f"{ram or 0.0:.1f}%")
+                layout["system_panel"].update(Panel(system_table, border_style="yellow"))
+
+                # 更新日誌
+                layout["body"].update(get_log_panel(log_rows))
+
+                # 更新 Footer (連結和狀態)
+                footer_text = f"當前階段: [bold yellow]{stage.upper()}[/]"
+                if action_url:
+                    footer_text += f"\n\n[bold green]✅ 啟動完成！[/] 點擊連結開啟主儀表板: [link={action_url}]{action_url}[/link]"
+                elif stage in ["failed", "critical_failure"]:
+                    footer_text += "\n\n[bold red]❌ 啟動失敗。請檢查日誌以了解詳情。[/]"
+                layout["footer"].update(Panel(Text(footer_text, justify="center"), border_style="red"))
+
+                live.refresh()
+                time.sleep(1)
+
+        except KeyboardInterrupt:
+            console.log("\n\n🛑 偵測到手動中斷！正在終止後端服務...")
+            launch_process.terminate()
+            console.log("✅ 後端服務已被終止。")
+        except Exception as e:
+            console.print_exception(show_locals=True)
 
 if __name__ == "__main__":
     main()

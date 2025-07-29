@@ -72,88 +72,64 @@
 
 *   **`phoenix_starter.py` / `launch.py`**: 專案的兩大入口。前者提供視覺化儀表板，後者適用於無介面的自動化環境。它們是所有智慧流程的總指揮。
 *   **`smart_e2e_test.py`**: 新一代的 Python 測試指揮官。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
-*   **`run/colab_runner.py`**: 專為 Google Colab 設計的混合動力啟動器。它巧妙地結合了 `gotty` 的即時日誌流和 Web API 的結構化狀態，為 Colab 用戶提供無縫的監控與操作體驗。
+*   **`run/colab_runner.py`**: 專為 Google Colab 設計的 Rich 儀表板啟動器。它使用 `rich` 套件提供一個美觀、即時的儀表板，並透過讀寫分離的資料庫驅動架構，確保了前端顯示和後端服務的穩定運行。
 *   **`core_utils/`**: 專案的「引擎室」。`safe_installer.py` 負責執行原子化的安全安裝，而 `resource_monitor.py` 則在每一步安裝前進行資源健康檢查，是實現「空間瓶頸」解決方案的關鍵。
 *   **`docs/TEST.md`**: 與本架構文件相輔相成的測試策略藍圖，詳細說明了如何使用 `smart_e2e_test.py` 以及其背後的測試模式。
 
 ---
 
-## 三、 Colab 全自動化啟動器 (`run/colab_runner.py`)
+## 三、 Colab 啟動器最終架構：資料庫驅動方案 (v12)
 
-`run/colab_runner.py` 是專為 Google Colab 設計的啟動器，其核心目標是提供一個「一鍵執行，自動開啟」的無縫體驗，徹底解決在 Colab 環境中部署和存取服務的典型痛點。
+在經歷了數次迭代後，我們最終確定了一套以穩定性為最高原則的架構，旨在徹底解決先前 GoTTY/API 方案的複雜性與不確定性。
 
-### 遇到的問題：從「服務孤島」到「依賴缺失」
+### 核心概念：讀寫分離
 
-在 Colab 中運行複雜的後端服務時，我們面臨一系列挑戰：
+我們將**「做事」與「顯示」**完全分離。後端程序專心執行任務並將所有狀態與日誌寫入一個獨立的資料庫；前端的 Colab 儲存格則專心從該資料庫讀取最新狀態並負責呈現在畫面上。兩者透過資料庫溝通，互不干擾。
 
-1.  **服務孤島化**：GoTTY 或其他 Web 服務雖然在 Colab 雲端主機上成功運行，但它們被完全隔離在 Colab 的內部網路中，外部世界（例如您的瀏覽器）無法直接連線。
-2.  **缺少對外橋樑**：即使服務正在運行，程式本身若沒有主動建立一座從「您的瀏覽器」通往「Colab 內部服務」的橋樑（即一個公開的 URL），您就只能看到服務已啟動的日誌訊息，卻無法實際存取它。
-3.  **依賴環境不匹配**：GoTTY 執行的 `python launch.py` 與 `colab_runner.py` 本身處於不同的子進程環境。`colab_runner.py` 安裝的依賴，`launch.py` 無法直接使用，導致 `launch.py` 因缺少如 `uv`, `rich` 等關鍵套件而崩潰，無法產生最終的狀態檔案。
-4.  **靜態狀態讀取**：後端的 API 服務只在被請求時才去讀取狀態檔案，如果檔案尚未生成，API 無法提供最新狀態，導致前端輪詢超時。
-
-### 全自動化解決方案：經過完整測試的智慧型混合動力架構
-
-為了徹底解決以上所有問題，我們設計並驗證了一套全自動化的解決方案，其工作流程如下：
+### 架構草圖
 
 ```mermaid
-sequenceDiagram
-    participant User as 👨‍💻 使用者
-    participant Colab_Python as 🐍 Colab 主腳本 (colab_runner.py)
-    participant API_Service as ⚙️ API 服務 (dashboard_api)
-    participant Launch_Process as 🚀 主要啟動流程 (launch.py)
-    participant Colab_Frontend as 📄 Colab 前端 (瀏覽器)
-
-    User->>Colab_Python: 點擊「執行」按鈕
-    Colab_Python->>Colab_Python: 1. 安裝所有核心依賴 (包括 rich, httpx, uv)
-    Colab_Python->>API_Service: 2. 在背景啟動 API 服務
-    API_Service->>API_Service: 內部啟動背景任務，開始監控 "phoenix_state.json"
-    Colab_Python->>Launch_Process: 3. 透過 GoTTY 啟動主流程 (現在擁有所需依賴)
-
-    Colab_Python->>Colab_Frontend: 4. 顯示 GoTTY iframe 和 "等待中..." 訊息
-
-    loop 後端可靠輪詢
-        Colab_Python->>API_Service: GET /api/get-action-url
-        alt API 狀態為 "pending"
-            API_Service-->>Colab_Python: 回應 {status: "pending"}
-            Colab_Python->>Colab_Python: 等待 5 秒後重試
-        else API 狀態為 "success"
-            API_Service-->>Colab_Python: 回應 {status: "success", url: "..."}
-            break
-        end
+graph TD
+    A[👨‍💻 您 (使用者)] --> B{Colab 儲存格 (前端顯示器)};
+    B -- 每秒讀取狀態 --> C[(state.db)];
+    C -- 持續寫入狀態與日誌 --> D[🚀 背景程序 (後端主力部隊)];
+    B -- 清除並重繪畫面 --> B;
+    subgraph "唯一的真相來源"
+        C
     end
-
-    Colab_Python->>Colab_Python: 成功獲取到最終 URL
-    Colab_Python->>Colab_Frontend: 5. 執行 JavaScript，將 "等待中..." 替換為 "🚀 點此開啟" 按鈕
+    subgraph "執行安裝、啟動等所有任務"
+        D
+    end
 ```
 
-#### 核心步驟詳解：
+### 執行步驟
 
-1.  **完備的依賴注入**：
-    *   `colab_runner.py` 現在會在第一時間安裝**所有**核心服務所需的主環境依賴，包括 `fastapi`, `uvicorn`, `rich`, `httpx`, 和 `uv`。這確保了後續由 GoTTY 啟動的 `launch.py` 能夠找到它需要的所有工具。
+1.  **建立「真相堡壘」：資料庫**
+    *   **選擇工具**：使用 **SQLite**。它是一個單一檔案的資料庫，不需額外安裝伺服器，非常適合 Colab 環境。
+    *   **設計結構**：在資料庫中建立兩張簡單的表：
+        *   `status_table`：用來存放即時狀態。例如，只有一筆紀錄，包含 `cpu_usage`, `ram_usage`, `current_stage` (目前階段) 等欄位。後端會不斷更新這一筆紀錄。
+        *   `log_table`：用來存放歷史日誌。包含 `timestamp`, `level`, `message` 等欄位。後端會不斷插入新的日誌紀錄。
 
-2.  **智慧型 API 服務**：
-    *   啟動的 `dashboard_api` 服務內建一個**背景監控任務**。它會像雷達一樣，每秒都在主動檢查 `phoenix_state.json` 狀態檔案是否就緒，並將結果即時更新到記憶體中。
+2.  **打造「主力部隊」：背景程序 (`launch.py`)**
+    *   **唯一職責**：依序執行所有工作，例如：安裝依賴、啟動 App、執行分析...等。
+    *   在任務的每個階段，將最新的狀態（CPU、RAM、進度）更新到資料庫的 `status_table`。
+    *   將所有產生的日誌（無論成功、失敗或除錯訊息）插入到資料庫的 `log_table`。
+    *   **重要原則**：這個腳本**不應該**使用 `print()` 來顯示儀表板畫面。它的所有輸出都只針對資料庫。
 
-3.  **可靠的後端輪詢**：
-    *   `colab_runner.py` 的主體部分在後端輪詢 `dashboard_api`。由於 API 服務是主動監控狀態的，一旦 `launch.py` 成功執行並寫入檔案，API 能立刻感知到變化，並在下一次輪詢時將最新的 URL 提供給 `colab_runner.py`。
+3.  **設定「戰情顯示器」：前端迴圈 (`run/colab_runner.py`)**
+    *   **唯一職責**：以固定頻率（例如每秒一次）重複執行以下操作。
+        *   連接到 SQLite 資料庫。
+        *   從 `status_table` 讀取最新的即時狀態。
+        *   從 `log_table` 讀取最新的幾筆日誌（例如最新的 10 條）。
+        *   使用 `rich.Live` 和 `rich.Layout` 來建立一個美觀、即時更新的儀表板。
+        *   將讀取到的狀態和日誌，填充到 `Layout` 的各個 `Panel` 中。
+    *   **重要原則**：這個迴圈不處理任何核心業務邏輯，它只是一個單純的「畫家」。
 
-4.  **動態前端注入**：
-    *   一旦 `colab_runner.py` 成功獲取到 URL，它會立刻動態生成一小段 JavaScript，並將其「推送」到 Colab 前端，生成一個可點擊的按鈕，實現「自動開啟」的無縫體驗。
+### 核心優勢
 
-這個經過多輪測試和迭代的架構，從依賴注入、狀態監控到前後端通訊，完整地解決了所有已知問題，確保了流程的端到端穩定性和可靠性。
-
-### V11 新增功能：快速測試模式 (`FAST_TEST_MODE`)
-
-為了在不犧牲真實部署穩定性的前提下，極大地提高開發和除錯效率，我們引入了「快速測試模式」。
-
--   **目的**：快速驗證 `colab_runner.py` -> `launch.py` -> `dashboard_api` 之間的核心通訊與協調邏輯，而無需等待耗時的依賴安裝過程。
--   **啟用方式**：在 `colab_runner.py` 的 Colab 表單中，勾選「快速測試模式」（預設開啟）。
--   **工作原理**：
-    1.  `colab_runner.py` 會設定一個環境變數 `FAST_TEST_MODE="true"`。
-    2.  `launch.py` 在執行時會偵測到這個變數。
-    3.  它將**跳過**所有實際的 `uv venv` 建立、`pip install` 和 `main.py` 啟動的步驟。
-    4.  取而代之，它會立即將所有 App 的狀態標記為 `running`，並在幾秒鐘內就產生最終的 `phoenix_state.json` 檔案。
--   **效果**：使用者可以在半分鐘內就看到最終的儀表板按鈕，從而快速確認核心流程是否正常工作。當需要進行包含完整依賴安裝的真實部署時，只需取消勾選該選項即可。
+*   **極致穩定**：前端顯示的崩潰，完全不影響後端核心任務的執行。真相永遠保存在資料庫中。
+*   **架構簡潔**：沒有任何額外的網路服務 (GoTTY, API, WebSocket)，只有 Python 和 SQLite，除錯和維護成本降至最低。
+*   **數據完整**：所有事件和狀態都被完整記錄，任務結束後可輕易從資料庫匯出完整的執行報告，用於分析或歸檔。
 
 ---
 
