@@ -153,3 +153,12 @@ sequenceDiagram
 4.  只有當所有 App 的依賴都安全安裝完畢後，啟動器才會繼續執行後續的服務啟動流程。
 
 這套流程將原本簡單的安裝過程，升級為一個具備**容錯、監控、可追溯、可配置**能力的專業級部署系統。
+
+### 在 Colab 中的運作流程
+
+為了在 Google Colab 環境中提供無縫的 TUI 體驗，我們引入了 `ttyd` 作為「網頁投影機」。當使用者在 Colab 中執行 `phoenix_starter.py` 時，系統會自動：
+1.  下載並安裝 `ttyd`。
+2.  使用 `ttyd` 來包裹並執行 `phoenix_starter.py`。
+3.  將 `ttyd` 產生的網頁介面嵌入到 Colab 的輸出儲存格中。
+
+如此一來，使用者便可以在 Colab 中直接與 `phoenix_starter.py` 的 TUI 介面進行互動，如同在本地終端機一樣。
