@@ -1,63 +1,46 @@
-# 鳳凰之心 v9.2：最終架構總藍圖
+# 鳳凰之心 v9.2：權威性架構藍圖
 
-這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態 v9.2，涵蓋了檔案結構、智慧型安裝流程、以及核心工具的協同工作方式。
-
----
-
-## 一、 核心理念與工具 (Core Philosophy & Tools)
-
-我們的架構基於以下四大核心理念：
-
-- **微服務架構 (Microservices)**: 每個 App (`quant`, `transcriber`) 都是一個獨立、可自行運行的 FastAPI 服務。
-- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境，由主啟動腳本自動管理，彼此絕不干擾。
-- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明。
-- **智慧型資源管理 (Intelligent Resource Management)**: 在安裝**每一個**套件前，系統都會即時檢查記憶體與磁碟資源，確保不會因資源耗盡而中斷，並將所有操作記錄在案。
-
-### 核心工具鏈:
-
-- **`phoenix_starter.py`**: 視覺化啟動器。
-- **`launch.py`**: 主啟動腳本 (無介面)。
-- **`core_utils/safe_installer.py`**: 安全安裝模組。
-- **`core_utils/resource_monitor.py`**: 資源監控模組。
-- **`config/resource_settings.yml`**: 全域設定中心。
-- **`logs/`**: 日誌中心。
-- **uv**: 底層安裝工具。
-- **FastAPI**: Web 框架。
+這份文件是一份權威性的技術藍圖，旨在精準反映專案 v9.2 的最終形態。它不僅描繪了檔案結構和自動化流程，更深入闡述了其背後應對現代化開發挑戰的設計哲學。
 
 ---
 
-## 二、 終極檔案結構與業務邏輯歸屬 (v9.2 - 完整版)
+## 一、 設計哲學：應對 CI/CD 的三重困境
 
-這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
+我們的架構是為了解決在現代持續整合與部署 (CI/CD) 環境中普遍存在的三大核心瓶頸而設計的：
+
+1.  **空間瓶頸 (硬碟空間耗盡)**: 在資源受限的容器化環境中，傳統「一次性安裝所有依賴」的流程極易導致硬碟空間不足而失敗。
+2.  **時間瓶頸 (CPU 資源浪費)**: 單線程的循序測試無法充分利用多核心 CPU，導致測試時間過長，嚴重拖慢開發迭代速度。
+3.  **穩定性瓶頸 (流程意外掛起)**: 單一測試案例的意外卡死（如 API 等待、死循環）會導致整個 CI/CD 流程被無限期阻塞，無法自動報告錯誤。
+
+為此，我們確立了三大核心解決策略，它們共同構建了一個快速、穩健且高效的系統：
+
+-   **策略一：原子化隔離與即時清理 (解決空間瓶頸)**
+    我們將每個測試任務視為一個「原子」單元。測試前，僅為其建立一個包含最小依賴集的專用虛擬環境；測試結束後，立即徹底刪除該環境，將硬碟空間 100% 釋放。這確保了資源峰值佔用永遠在可控範圍內。
+
+-   **策略二：輕量級多核心平行處理 (解決時間瓶頸)**
+    我們透過 `multiprocessing` 實現應用級平行 (同時測試多個 App)，並利用 `pytest-xdist` 在每個 App 內部實現測試級平行。這套輕量級方案能在不增加空間負擔的前提下，壓榨 CPU 性能，大幅縮短測試總耗時。
+
+-   **策略三：主動式超時強制中斷 (解決穩定性瓶頸)**
+    我們為每一個測試案例都設定了一個「生命時鐘」（透過 `pytest-timeout`）。任何超時的測試都會被自動中斷並標記為失敗，確保 CI/CD 流程永遠不會被單一故障點所阻塞。
+
+---
+
+## 二、 v9.2 終極檔案結構與核心工具鏈
+
+這是專案的最終檔案結構，精準反映了所有關鍵組件及其職責。
 
 ```
 /PHOENIX_HEART_PROJECT/
 │
 ├── 🚀 phoenix_starter.py          # 【推薦】視覺化啟動器，整合所有功能。
 ├── 🚀 launch.py                   # 【無介面】主啟動腳本，適合伺服器環境。
-├── 📜 smart_e2e_test.sh           # 智能測試腳本，由安全安裝模組驅動。
+├── 🧪 smart_e2e_test.py            # 【測試】新一代 Python 智能測試指揮官 (平行/穩定)。
 │
 ├── 📦 apps/                        # 【所有獨立微服務的家】
 │   ├── 📈 quant/                   #  - 量化金融 App
-│   │   ├── api/                  #    - API 接口層
-│   │   │   └── v1/               #      - API 版本 v1
-│   │   │       └── routes.py     #        - FastAPI 路由定義
-│   │   ├── logic/                #    - 核心業務邏輯
-│   │   │   ├── analysis.py       #      - 分析與策略邏輯
-│   │   │   ├── data_sourcing.py  #      - 數據源邏輯
-│   │   │   ├── database.py       #      - 資料庫邏輯
-│   │   │   └── factor_engineering.py #  - 因子工程邏輯
-│   │   ├── main.py               #    - App 的 FastAPI 入口
-│   │   └── requirements.txt      #    - Python 核心依賴
-│   │
 │   └── 🎤 transcriber/             #  - 語音轉寫 App
-│       ├── main.py               #    - App 的 FastAPI 入口
-│       ├── logic.py              #    - 核心業務邏輯
-│       ├── requirements.txt      #    - Python 核心依賴
-│       └── requirements.large.txt#    - (可選) 大型 AI 模型依賴
 │
 ├── 🛠️ core_utils/                 # 【核心工具模組】
-│   ├── __init__.py               #  - 將此目錄標記為 Python 套件。
 │   ├── resource_monitor.py       #  - 資源監控模組：提供檢查系統資源的函式。
 │   └── safe_installer.py         #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
 │
@@ -65,91 +48,96 @@
 │   └── resource_settings.yml     #  - 在此定義記憶體/磁碟閾值等監控參數。
 │
 ├── 📝 logs/                        # 【日誌中心】
-│   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處 (log檔會被自動忽略)。
+│   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處。
 │
 ├── 🧪 tests/                       # 【品質保證中心】
 │   ├── 📈 quant/                   #  - 量化金融 App 的測試
-│   │   └── test_api.py           #    - API 層級的整合測試
 │   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試
-│       └── test_api.py           #    - API 層級的整合測試 (包含模擬與 E2E)
 │
-├── ⚙️ proxy/                        # 【逆向代理配置】
-│   └── proxy_config.json         #  - 路由規則設定檔。
+├── 🏃 run/                         # 【執行器】
+│   └── colab_runner.py           #  - Colab 混合動力啟動器。
 │
 ├── 📚 docs/                         # 【專案文件】
-│   ├── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖
-│   ├── Colab_Guide.md            #  - Google Colab 運行指南
-│   ├── MISSION_DEBRIEFING.md     #  - 專案任務報告
-│   └── TEST.md                   #  - 測試策略說明
+│   ├── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖。
+│   ├── Colab_Guide.md            #  - Google Colab 運行指南。
+│   ├── TEST.md                   #  - 現代化測試策略藍圖 (Pythonic)。
+│   └── MISSION_DEBRIEFING.md     #  - 專案任務報告。
 │
-├── 🗄️ ALL_DATE/                   # 【舊專案封存 (參考用)】
+├── 🗄️ ALL_DATE/                   # 【舊專案封存 (僅供參考)】
 │
 └── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
 
+### **核心工具鏈詳解:**
+
+*   **`phoenix_starter.py` / `launch.py`**: 專案的兩大入口。前者提供視覺化儀表板，後者適用於無介面的自動化環境。它們是所有智慧流程的總指揮。
+*   **`smart_e2e_test.py`**: 新一代的 Python 測試指揮官。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
+*   **`run/colab_runner.py`**: 專為 Google Colab 設計的混合動力啟動器。它巧妙地結合了 `gotty` 的即時日誌流和 Web API 的結構化狀態，為 Colab 用戶提供無縫的監控與操作體驗。
+*   **`core_utils/`**: 專案的「引擎室」。`safe_installer.py` 負責執行原子化的安全安裝，而 `resource_monitor.py` 則在每一步安裝前進行資源健康檢查，是實現「空間瓶頸」解決方案的關鍵。
+*   **`docs/TEST.md`**: 與本架構文件相輔相成的測試策略藍圖，詳細說明了如何使用 `smart_e2e_test.py` 以及其背後的測試模式。
+
 ---
 
-## 三、 智慧型啟動與安裝流程
+## 三、 全鏈路自動化流程圖
 
-當您執行 `python launch.py` 或 `python phoenix_starter.py` 時，系統將嚴格遵循以下更為精密的流程：
+這張圖描繪了從使用者啟動到測試完成的完整自動化鏈路，體現了我們設計哲學中的所有核心策略。
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
-    participant Starter as 🚀 啟動器<br>(launch.py / phoenix_starter.py)
-    participant Config as ⚙️ config/resource_settings.yml
-    participant SafeInstaller as 🛡️ 安全安裝模組
-    participant Monitor as 🔬 資源監控模組
-    participant Logger as 📝 日誌中心
-    participant UV as ✨ uv
-    participant AppVenv as 📦 App .venv
+    participant Starter as 🚀 啟動器<br>(launch.py)
+    participant SafeInstaller as 🛡️ 安全安裝器
+    participant TestCommander as 🧪 測試指揮官<br>(smart_e2e_test.py)
+    participant AppPool as 🏊‍♂️ 應用測試池
 
-    User->>Starter: 執行啟動命令
-    Starter->>Starter: 檢查並安裝核心依賴 (uv, psutil, pyyaml)
+    User->>Starter: python launch.py
+
+    Starter->>SafeInstaller: 執行原子化安全安裝
 
     loop 為每個 App
-        Starter->>AppVenv: 建立獨立的 .venv
-
-        Note over Starter, SafeInstaller: 委派安裝任務
-        Starter->>SafeInstaller: run(app_name, reqs.txt, venv_path)
-
-        SafeInstaller->>Config: 讀取資源閾值設定
-        SafeInstaller->>Logger: 建立 install_[app_name]_[time].log
-
-        loop 讀取 requirements.txt 中的每個套件
-            SafeInstaller->>Monitor: 檢查記憶體與磁碟
-            Monitor-->>SafeInstaller: 回報資源狀況 (OK / FAILED)
-            SafeInstaller->>Logger: 將檢查結果寫入日誌
-
-            alt 資源充足 (OK)
-                SafeInstaller->>Logger: 記錄「開始安裝...」
-                SafeInstaller->>UV: install [package]
-                UV-->>SafeInstaller: 回報安裝結果
-                SafeInstaller->>Logger: 將安裝結果寫入日誌
-            else 資源不足 (FAILED)
-                SafeInstaller->>Logger: 記錄「資源不足，中止安裝！」
-                SafeInstaller-->>Starter: 拋出例外
-                Starter-->>User: 顯示錯誤並終止
-            end
-        end
-        SafeInstaller-->>Starter: 回報所有套件安裝成功
+        SafeInstaller->>SafeInstaller: 1. 建立隔離環境
+        SafeInstaller->>SafeInstaller: 2. 逐一安全安裝依賴
+        SafeInstaller->>SafeInstaller: 3. 測試完成後清理環境
     end
 
-    Starter->>Starter: 啟動所有 App 的 FastAPI 伺服器
-    Starter->>User: 顯示成功訊息與訪問網址
+    alt 所有 App 安裝成功
+        Starter->>TestCommander: 觸發平行化測試
+    else 安裝失敗
+        Starter-->>User: 報告錯誤並中止
+    end
+
+    TestCommander->>AppPool: 建立多進程池 (multiprocessing)
+
+    par 為每個 App 平行執行
+        AppPool->>TestCommander: 分配一個進程
+        TestCommander->>TestCommander: 執行 pytest -n auto --timeout=300
+        Note right of TestCommander: 在進程內部，pytest-xdist<br>再次將測試案例<br>分配到所有 CPU 核心
+    end
+
+    alt 所有測試通過
+        TestCommander-->>User: 🎉 報告所有測試成功
+    else 任何測試失敗
+        TestCommander-->>User: ❌ 報告失敗詳情
+    end
 ```
 
-### 流程總結：
+### **流程詳解:**
 
-1.  **啟動器 (Starter)** 負責高層協調，它首先確保 `uv`, `psutil`, `pyyaml` 等核心工具已就緒。
-2.  對於每個微服務 App，啟動器不再親自執行安裝，而是將任務**委派**給**安全安裝模組 (`safe_installer.py`)**。
-3.  **安全安裝模組**接手後：
-    a.  首先從**設定中心 (`config.yml`)** 讀取最新的資源監控標準。
-    b.  然後為這次安裝任務在**日誌中心 (`logs/`)** 中建立一個專屬的日誌檔案。
-    c.  它**逐一**讀取 `requirements.txt` 中的套件，而不是一次性全部處理。
-    d.  在安裝**每一個**套件前，它都會命令**資源監控模組 (`resource_monitor.py`)** 進行一次全面的資源健康檢查。
-    e.  所有檢查和安裝步驟，無論成功或失敗，都會被詳細地記錄在日誌檔案中。
-    f.  如果任何一步資源檢查失敗，安裝模組會立即中止任務並拋出錯誤，防止系統崩潰。
-4.  只有當所有 App 的依賴都安全安裝完畢後，啟動器才會繼續執行後續的服務啟動流程。
+1.  **啟動與安全安裝**:
+    *   使用者執行 `launch.py` (或視覺化的 `phoenix_starter.py`)，啟動整個流程。
+    *   啟動器首先調用**安全安裝器 (`safe_installer.py`)**。
+    *   安全安裝器嚴格遵循「原子化隔離」策略，為 `apps/` 目錄下的每一個應用，獨立地建立虛擬環境、安裝依賴，並在完成後徹底清理。
 
-這套流程將原本簡單的安裝過程，升級為一個具備**容錯、監控、可追溯、可配置**能力的專業級部署系統。
+2.  **觸發智能測試**:
+    *   只有當所有 App 的依賴都成功安裝後，啟動器才會繼續，調用**測試指揮官 (`smart_e2e_test.py`)**。
+    *   這確保了測試流程永遠在一個乾淨、確定的環境中開始。
+
+3.  **兩級平行化測試**:
+    *   **第一級平行 (應用級)**: 測試指揮官首先利用 `multiprocessing` 建立一個進程池，為每個 App 分配一個獨立的進程，實現了不同 App 之間的並行測試。
+    *   **第二級平行 (測試級)**: 在每個獨立的 App 測試進程中，`pytest` 被以 `-n auto` 模式調用，這會觸發 `pytest-xdist`，將該 App 內部的所有測試案例，再次分配到所有可用的 CPU 核心上。
+    *   同時，`--timeout=300` 參數為每個測試案例提供了堅實的穩定性保障。
+
+4.  **結果報告**:
+    *   測試指揮官會等待所有平行任務完成，收集結果，並向使用者報告最終的成功或失敗狀態。
+
+這個流程將我們的三大核心策略——**原子化隔離、多核心平行處理、主動式超時中斷**——無縫地整合到一個連貫、高效的自動化工作流中。
