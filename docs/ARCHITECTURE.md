@@ -72,7 +72,7 @@
 
 *   **`phoenix_starter.py` / `launch.py`**: 專案的兩大入口。前者提供視覺化儀表板，後者適用於無介面的自動化環境。它們是所有智慧流程的總指揮。
 *   **`smart_e2e_test.py`**: 新一代的 Python 測試指揮官。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
-*   **`run/colab_runner.py`**: 專為 Google Colab 設計的混合動力啟動器。它巧妙地結合了 `gotty` 的即時日誌流和 Web API 的結構化狀態，為 Colab 用戶提供無縫的監控與操作體驗。
+*   **`run/colab_runner.py`**: 專為 Google Colab 設計的 Rich 儀表板啟動器。它使用 `rich` 套件提供一個美觀、即時的儀表板，並透過讀寫分離的資料庫驅動架構，確保了前端顯示和後端服務的穩定運行。
 *   **`core_utils/`**: 專案的「引擎室」。`safe_installer.py` 負責執行原子化的安全安裝，而 `resource_monitor.py` 則在每一步安裝前進行資源健康檢查，是實現「空間瓶頸」解決方案的關鍵。
 *   **`docs/TEST.md`**: 與本架構文件相輔相成的測試策略藍圖，詳細說明了如何使用 `smart_e2e_test.py` 以及其背後的測試模式。
 
@@ -121,8 +121,8 @@ graph TD
         *   連接到 SQLite 資料庫。
         *   從 `status_table` 讀取最新的即時狀態。
         *   從 `log_table` 讀取最新的幾筆日誌（例如最新的 10 條）。
-        *   呼叫 `clear_output(wait=True)` 清空舊畫面。
-        *   用 `print()` 將剛剛讀取到的狀態和日誌，格式化並繪製成使用者看到的儀表板。
+        *   使用 `rich.Live` 和 `rich.Layout` 來建立一個美觀、即時更新的儀表板。
+        *   將讀取到的狀態和日誌，填充到 `Layout` 的各個 `Panel` 中。
     *   **重要原則**：這個迴圈不處理任何核心業務邏輯，它只是一個單純的「畫家」。
 
 ### 核心優勢
