@@ -45,7 +45,7 @@ def set_app_status(app_name, status):
     add_log(f"App '{app_name}' status changed to '{status}'")
 
 # --- TUI 渲染 ---
-console = Console(force_terminal=True)
+console = Console(force_terminal=True, record=True)
 layout = Layout()
 
 layout.split(
