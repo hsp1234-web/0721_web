@@ -19,6 +19,9 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 import uvicorn
+from core_utils.shared_log_queue import add_log
+from contextlib import redirect_stdout
+import io
 
 # --- 常數與設定 ---
 APPS_DIR = Path("apps")
@@ -37,20 +40,28 @@ class colors:
     BOLD = '\033[1m'
 
 def print_header(message):
-    """打印帶有標題格式的訊息"""
-    print(f"\n{colors.HEADER}{colors.BOLD}🚀 {message} 🚀{colors.ENDC}")
+    """打印帶有標題格式的訊息並記錄"""
+    clean_message = f"🚀 {message} 🚀"
+    add_log(f"[INFO] {clean_message}")
+    print(f"\n{colors.HEADER}{colors.BOLD}{clean_message}{colors.ENDC}")
 
 def print_success(message):
-    """打印成功的訊息"""
-    print(f"{colors.OKGREEN}✅ {message}{colors.ENDC}")
+    """打印成功的訊息並記錄"""
+    clean_message = f"✅ {message}"
+    add_log(f"[SUCCESS] {clean_message}")
+    print(f"{colors.OKGREEN}{clean_message}{colors.ENDC}")
 
 def print_warning(message):
-    """打印警告訊息"""
-    print(f"{colors.WARNING}⚠️ {message}{colors.ENDC}")
+    """打印警告訊息並記錄"""
+    clean_message = f"⚠️ {message}"
+    add_log(f"[WARNING] {clean_message}")
+    print(f"{colors.WARNING}{clean_message}{colors.ENDC}")
 
 def print_info(message):
-    """打印一般資訊"""
-    print(f"{colors.OKCYAN}ℹ️ {message}{colors.ENDC}")
+    """打印一般資訊並記錄"""
+    clean_message = f"ℹ️ {message}"
+    add_log(f"[INFO] {clean_message}")
+    print(f"{colors.OKCYAN}{clean_message}{colors.ENDC}")
 
 def run_command(command, cwd, venv_path=None):
     """執行一個子進程命令，並即時串流其輸出"""
@@ -139,7 +150,24 @@ async def prepare_app(app_path: Path):
 
         # 步驟 2: 使用 safe_installer 安全安裝依賴
         print_info(f"[{app_name}] 啟動智慧型安全安裝程序...")
-        install_packages(app_name, str(requirements_path), str(python_executable))
+
+        # 我們需要捕獲 safe_installer 的日誌輸出
+        safe_installer_cmd = [
+            sys.executable, "-m", "core_utils.safe_installer",
+            app_name, str(requirements_path), str(python_executable)
+        ]
+        result = subprocess.run(safe_installer_cmd, capture_output=True, text=True, encoding='utf-8')
+
+        # 將日誌逐行加入佇列
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                add_log(f"[{app_name.upper()}_LOG] {line}")
+        if result.returncode != 0:
+            for line in result.stderr.strip().split('\n'):
+                if line:
+                    add_log(f"[{app_name.upper()}_ERROR] {line}")
+            raise SystemExit(f"安全安裝程序失敗: {app_name}")
+
         print_success(f"[{app_name}] 所有依賴已成功安裝。")
 
     except (subprocess.CalledProcessError, SystemExit) as e:
@@ -147,7 +175,7 @@ async def prepare_app(app_path: Path):
         raise
 
 async def launch_app(app_path: Path, port: int):
-    """在背景啟動一個 App"""
+    """在背景啟動一個 App，並將其日誌導入共享佇列"""
     app_name = app_path.name
     print_header(f"正在啟動 App: {app_name}")
 
@@ -160,11 +188,43 @@ async def launch_app(app_path: Path, port: int):
 
     process = subprocess.Popen(
         [venv_python, main_py_path],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
         env=env
     )
-    print_success(f"App '{app_name}' 已在背景啟動，監聽埠: {port}, PID: {process.pid}")
+
+    # 建立一個協程來非同步讀取日誌
+    async def log_reader():
+        while True:
+            line = await asyncio.to_thread(process.stdout.readline)
+            if not line:
+                break
+            clean_line = line.strip()
+            if clean_line:
+                add_log(f"[{app_name.upper()}_LOG] {clean_line}")
+
+        # 檢查最終返回碼
+        process.wait()
+        if process.returncode != 0:
+            add_log(f"[{app_name.upper()}_ERROR] App 意外終止，返回碼: {process.returncode}")
+
+    asyncio.create_task(log_reader())
+
+    # 給 App 一點時間來啟動
+    await asyncio.sleep(2)
+
+    # 假設如果 App 在 2 秒後沒有崩潰，就是成功啟動了
+    if process.poll() is None:
+        # 使用與設計圖一致的日誌格式
+        add_log(f"[INFO] {app_name.capitalize()} App is now RUNNING.")
+        print_success(f"App '{app_name}' 已在背景啟動，監聽埠: {port}, PID: {process.pid}")
+    else:
+        add_log(f"[ERROR] {app_name.capitalize()} App FAILED to start.")
+        print_warning(f"App '{app_name}' 可能啟動失敗。")
+
     return process
 
 # --- 逆向代理 ---
@@ -219,11 +279,19 @@ async def reverse_proxy(request: Request):
 
 async def main():
     """主協調函式"""
+    add_log("[INFO] Phoenix Heart monitoring system initialized.")
+    add_log("[INFO] Starting backend services...")
     print_header("鳳凰之心專案啟動程序開始")
     ensure_uv_installed()
     ensure_core_deps()
 
-    apps_to_launch = [d for d in APPS_DIR.iterdir() if d.is_dir()]
+    # 將 monitor app 與其他 app 分開處理，確保它最後啟動
+    other_apps = [d for d in APPS_DIR.iterdir() if d.is_dir() and d.name != 'monitor']
+    monitor_app_path = APPS_DIR / 'monitor'
+
+    apps_to_launch = other_apps
+    if monitor_app_path.exists():
+        apps_to_launch.append(monitor_app_path)
 
     # 準備所有 App 的環境
     for app_path in apps_to_launch:
@@ -243,9 +311,13 @@ async def main():
     listen_port = proxy_config["listen_port"]
     print_header(f"所有 App 已在背景啟動，正在啟動主逆向代理...")
     print_success(f"系統已就緒！統一訪問入口: http://localhost:{listen_port}")
+    print_info(f"  - 監控儀表板請訪問: http://localhost:{listen_port}/")
     print_info(f"  - 量化服務請訪問: http://localhost:{listen_port}/quant/...")
     print_info(f"  - 轉寫服務請訪問: http://localhost:{listen_port}/transcriber/...")
     print_warning("按 Ctrl+C 終止所有服務。")
+
+    # 發送一個特殊的成功標記到日誌
+    add_log("[SUCCESS] 所有服務已成功啟動。")
 
     try:
         config = uvicorn.Config(proxy_app, host="0.0.0.0", port=listen_port, log_level="warning")
