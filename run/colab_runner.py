@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab 資料庫驅動儀表板 v12.0 (穩定版)                        ║
+# ║      🚀 Colab HTML 動態儀表板 v14.0                                ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   設計哲學：                                                         ║
-# ║       一個絕對穩定的架構，將「做事」與「顯示」徹底分離。後端專心     ║
-# ║       更新資料庫，前端專心讀取資料庫並渲染，互不干擾。               ║
+# ║   採用動態生成 HTML+CSS 的方式，提供像素級精準的儀表板。           ║
+# ║   後端作為守護進程持續運行，前端顯示迴圈永不中斷。                 ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心資料庫啟動器 v12.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 HTML 啟動器 v14.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -47,16 +46,102 @@ from pathlib import Path
 import time
 import sqlite3
 import json
-from IPython.display import display, HTML, Javascript, clear_output
+from IPython.display import display, HTML, clear_output
+
+def render_dashboard_html(status_row, log_rows):
+    """根據資料庫狀態生成儀表板的 HTML"""
+    stage, apps_status_json, action_url, cpu, ram = status_row
+    apps_status = json.loads(apps_status_json) if apps_status_json else {}
+
+    # CSS 樣式
+    css = """
+    <style>
+        .dashboard-container { background-color: transparent; font-family: 'Fira Code', 'Noto Sans TC', monospace; color: #FFFFFF; padding: 1em; }
+        .panel { border: 1px solid #FFFFFF; margin-bottom: 1em; }
+        .panel-title { font-weight: bold; padding: 0.5em; border-bottom: 1px solid #FFFFFF; }
+        .panel-content { padding: 0.5em; }
+        .flex-container { display: flex; gap: 1em; }
+        .left-column { flex: 1; }
+        .right-column { flex: 2; }
+        .log-entry { margin-bottom: 0.5em; }
+        .log-level-WARNING { color: #fbbc04; }
+        .log-level-ERROR, .log-level-CRITICAL { color: #ea4335; }
+        .footer { text-align: center; padding-top: 1em; border-top: 1px solid #FFFFFF; }
+        a { color: #34a853; font-weight: bold; }
+        table { width: 100%; }
+    </style>
+    """
+
+    # --- HTML 生成邏輯 ---
+    def get_app_status_rows():
+        rows = ""
+        status_map = {
+            "running": "<span>🟢</span> Running",
+            "pending": "<span>🟡</span> Pending",
+            "starting": "<span>🟡</span> Starting",
+            "failed": "<span>🔴</span> Failed"
+        }
+        for app, status in apps_status.items():
+            display_status = status_map.get(status, f"<span>❓</span> {status}")
+            rows += f"<tr><td>{app.capitalize()}</td><td>{display_status}</td></tr>"
+        return rows
+
+    def get_log_entries():
+        entries = ""
+        for ts, level, msg in reversed(log_rows):
+            ts_str = str(ts).split(" ")[1][:8] if ts else "--------"
+            level_class = f"log-level-{level}" if level in ["WARNING", "ERROR", "CRITICAL"] else ""
+            entries += f'<div class="log-entry"><span class="{level_class}">{ts_str} [{level.ljust(8)}] {msg}</span></div>'
+        return entries
+
+    def get_footer_content():
+        if action_url:
+            return f'✅ 啟動完成！操作儀表板連結: <a href="{action_url}" target="_blank">{action_url}</a>'
+        if stage in ["failed", "critical_failure"]:
+            return '<span class="log-level-ERROR">❌ 啟動失敗。請檢查日誌。</span>'
+        return f"⏳ 當前階段: {stage.upper()}"
+
+    html = f"""
+    <div class="dashboard-container">
+        <div class="flex-container">
+            <div class="left-column">
+                <div class="panel">
+                    <div class="panel-title">微服務狀態</div>
+                    <div class="panel-content">
+                        <table>{get_app_status_rows()}</table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">系統資源</div>
+                    <div class="panel-content">
+                        <table>
+                            <tr><td>CPU</td><td>{cpu or 0.0:.1f}%</td></tr>
+                            <tr><td>RAM</td><td>{ram or 0.0:.1f}%</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="right-column">
+                <div class="panel">
+                    <div class="panel-title">即時日誌</div>
+                    <div class="panel-content">{get_log_entries()}</div>
+                </div>
+            </div>
+        </div>
+        <div class="footer">{get_footer_content()}</div>
+    </div>
+    """
+    return css + html
+
+base_path = Path("/content")
 
 def main():
     # --- 全域路徑與變數 ---
-    base_path = Path("/content")
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
 
     # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心資料庫啟動器 v12.0")
+    print("🚀 鳳凰之心 HTML 啟動器 v14.0")
     print("="*80)
     print("1. 準備專案目錄...")
     if FORCE_REPO_REFRESH and project_path.exists():
@@ -69,9 +154,7 @@ def main():
 
     # --- 步驟 2: 安裝核心依賴 ---
     print("\n2. 安裝核心 Python 依賴...")
-    # 升級 pip
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 安裝所有 App 的依賴
     all_reqs_path = project_path / "all_requirements.txt"
     with open(all_reqs_path, "w") as outfile:
         for app_dir in (project_path / "apps").iterdir():
@@ -98,75 +181,37 @@ def main():
     with open(log_file, "w") as f:
         launch_process = subprocess.Popen(
             [sys.executable, "launch.py"],
-            env=env,
-            stdout=f,
-            stderr=subprocess.STDOUT
+            env=env, stdout=f, stderr=subprocess.STDOUT
         )
     print(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
     print(f"   - 日誌將寫入: {log_file}")
 
     # --- 步驟 4: 啟動前端戰情顯示器 ---
     print("\n4. 正在啟動前端戰情顯示器...")
-    time.sleep(2) # 等待資料庫初始化
+    time.sleep(2)
 
     try:
         while True:
+            try:
+                conn = sqlite3.connect(db_file)
+                cursor = conn.cursor()
+                cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
+                status_row = cursor.fetchone()
+                cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
+                log_rows = cursor.fetchall()
+                conn.close()
+
+                if not status_row:
+                    time.sleep(1)
+                    continue
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e):
+                    time.sleep(1)
+                    continue
+                raise
+
             clear_output(wait=True)
-            conn = sqlite3.connect(db_file)
-            cursor = conn.cursor()
-
-            # 讀取狀態
-            cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
-            status_row = cursor.fetchone()
-
-            # 讀取日誌
-            cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
-            log_rows = cursor.fetchall()
-
-            conn.close()
-
-            if not status_row:
-                print("⏳ 等待資料庫狀態初始化...")
-                time.sleep(1)
-                continue
-
-            stage, apps_status_json, action_url, cpu, ram = status_row
-            apps_status = json.loads(apps_status_json) if apps_status_json else {}
-
-            # --- 繪製儀表板 ---
-            print("╔══════════════════════════════════════════════════════════════════════════════╗")
-            print("║                          🚀 鳳凰之心 - 作戰指揮中心 🚀                          ║")
-            print("╠══════════════════════════════════════════════════════════════════════════════╣")
-            print(f"║ 狀態: {stage.upper():<15} | CPU: {cpu or 0.0:>5.1f}% | RAM: {ram or 0.0:>5.1f}%             ║")
-            print("╠═══════════════════════════╤══════════════════════════════════════════════════╣")
-            print("║         服務狀態          │                   即時日誌 (最新 10 筆)              ║")
-            print("╟───────────────────────────┘                                                  ║")
-
-            app_lines = []
-            for app, status in apps_status.items():
-                status_map = {"pending": "⚪", "starting": "🟡", "running": "🟢", "failed": "🔴"}
-                icon = status_map.get(status, "❓")
-                app_lines.append(f"║ {icon} {app.capitalize():<25} ║")
-
-            for i in range(10):
-                app_line = app_lines[i] if i < len(app_lines) else "║" + " "*27 + "║"
-                log_line = log_rows[i] if i < len(log_rows) else ("", "", "")
-                ts, level, msg = log_line
-                ts_str = str(ts).split(" ")[1][:8] if ts else ""
-                log_text = f" {ts_str} [{level}] {msg}"
-                print(f"{app_line}{log_text:<57}║")
-
-            print("╚══════════════════════════════════════════════════════════════════════════════╝")
-
-            if action_url:
-                print(f"\n✅ 啟動完成！點擊以下連結開啟主操作儀表板：")
-                print(f"   👉 {action_url}")
-                break # 結束迴圈
-
-            if stage in ["failed", "critical_failure"]:
-                print("\n❌ 啟動失敗。請檢查日誌以了解詳情。")
-                break
-
+            display(HTML(render_dashboard_html(status_row, log_rows)))
             time.sleep(1)
 
     except KeyboardInterrupt:
@@ -174,7 +219,6 @@ def main():
         launch_process.terminate()
         print("✅ 後端服務已被終止。")
     except Exception as e:
-        print(f"\n💥 前端顯示器發生未預期的嚴重錯誤: {e}")
         import traceback
         traceback.print_exc()
 
