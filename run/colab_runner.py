@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 Colab 動態儀表板執行器 v2.0                                     ║
+# ║   🚀 Colab 混合模式啟動器 v3.0                                     ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
 # ║   設計哲學：                                                         ║
-# ║       遵循「不洗版」動態儀表板設計模式，在 Colab 輸出儲存格中         ║
-# ║       直接渲染一個即時、高頻刷新的狀態儀表板，提供極致的使用者體驗。   ║
+# ║       在 Colab 端提供輕量的文字動畫以緩解等待焦慮，在完成核心準備後， ║
+# ║       將使用者無縫引導至功能完整的 Web UI 監控儀表板。               ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心動態儀表板 v2.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心啟動器 v3.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -24,14 +24,6 @@ TARGET_BRANCH_OR_TAG = "4.1.2" #@param {type:"string"}
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
 FORCE_REPO_REFRESH = True #@param {type:"boolean"}
-
-#@markdown ---
-#@markdown ### **Part 2: E2E 測試參數**
-#@markdown > **設定端對端測試的運行模式。**
-#@markdown ---
-#@markdown **測試模式 (TEST_MODE)**
-#@markdown > **`mock` 模式運行速度快，不下載大型依賴；`real` 模式進行完整功能驗證。**
-TEST_MODE = "mock" #@param ["mock", "real"]
 
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
@@ -47,115 +39,98 @@ import subprocess
 from pathlib import Path
 import time
 import threading
+from IPython.display import clear_output
 
-# --- 執行緒安全地執行核心任務 ---
-def main_task(stats, log_manager):
+class Spinner:
+    """一個簡單的文字旋轉動畫類"""
+    def __init__(self, message="處理中..."):
+        self._message = message
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+    def _spin(self):
+        spinner_chars = ['/', '-', '\\', '|']
+        i = 0
+        while not self._stop_event.is_set():
+            sys.stdout.write(f'\r{spinner_chars[i % len(spinner_chars)]} {self._message}')
+            sys.stdout.flush()
+            time.sleep(0.1)
+            i += 1
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self, final_message="完成！"):
+        self._stop_event.set()
+        self._thread.join(timeout=1)
+        # 清除旋轉動畫並打印最終訊息
+        sys.stdout.write(f'\r{"✅ " + final_message:<50}\n')
+        sys.stdout.flush()
+
+def run_task_with_spinner(task_func, message):
+    """用一個旋轉動畫來執行一個耗時任務"""
+    spinner = Spinner(message)
+    spinner.start()
     try:
-        base_path = Path("/content")
-        project_path = base_path / PROJECT_FOLDER_NAME
-
-        # --- 步驟 1: 下載專案 ---
-        stats['current_task'] = "下載專案程式碼..."
-        stats['repo_status'] = "🟡 執行中..."
-        log_manager.log("開始準備專案資料夾。")
-        if FORCE_REPO_REFRESH and project_path.exists():
-            log_manager.log(f"偵測到強制刷新，正在刪除舊資料夾: {project_path}", "WARN")
-            shutil.rmtree(project_path)
-
-        if not project_path.exists():
-            log_manager.log(f"從 GitHub (分支/標籤: {TARGET_BRANCH_OR_TAG}) 拉取程式碼...")
-            git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", REPOSITORY_URL, str(project_path)]
-            subprocess.run(git_command, check=True, capture_output=True, text=True, encoding='utf-8', cwd=base_path)
-            log_manager.log("程式碼成功下載！")
-        else:
-            log_manager.log(f"資料夾 '{project_path.name}' 已存在，跳過下載。")
-        stats['repo_status'] = "🟢 完成"
-        os.chdir(project_path)
-        log_manager.log(f"工作目錄已切換至: {os.getcwd()}")
-
-        # --- 步驟 2: 安裝依賴 ---
-        stats['current_task'] = "安裝核心依賴..."
-        stats['deps_status'] = "🟡 執行中..."
-        log_manager.log("安裝 psutil, pyyaml, uv...")
-        # 移除 -q 參數以看到進度
-        subprocess.run([sys.executable, "-m", "pip", "install", "psutil", "pyyaml", "uv", "nest_asyncio", "httpx"], check=True, capture_output=True, text=True)
-        log_manager.log("核心依賴安裝完成。")
-        stats['deps_status'] = "🟢 完成"
-
-        # --- 步驟 3: E2E 測試 ---
-        stats['current_task'] = f"以 '{TEST_MODE}' 模式執行端對端測試..."
-        stats['test_status'] = "🟡 執行中..."
-        log_manager.log(f"啟動 smart_e2e_test.py (模式: {TEST_MODE})")
-        test_env = os.environ.copy()
-        test_env["TEST_MODE"] = TEST_MODE
-        result = subprocess.run(["python", "smart_e2e_test.py"], env=test_env, capture_output=True, text=True)
-
-        for line in result.stdout.strip().split('\n'):
-            log_manager.log(f"[E2E_TEST] {line}")
-        if result.returncode != 0:
-             for line in result.stderr.strip().split('\n'):
-                log_manager.log(f"[E2E_TEST] {line}", "ERROR")
-             raise RuntimeError("端對端測試失敗，請檢查日誌。")
-
-        log_manager.log("端對端測試成功通過！")
-        stats['test_status'] = "🟢 完成"
-
-        # --- 步驟 4: 啟動後端服務 ---
-        stats['current_task'] = "啟動後端服務..."
-        stats['service_status'] = "🟡 執行中..."
-        log_manager.log("匯入 nest_asyncio 並啟動 launch.py...")
-        import nest_asyncio
-        from multiprocessing import Process
-
-        # 這裡我們不能直接 import launch，因為它會立即執行
-        # 我們需要一種方式來在子進程中執行它
-        def run_launcher_process():
-            # 在子進程中，我們可以安全地 import 和執行
-            from launch import main as launch_main
-            import asyncio
-            asyncio.run(launch_main())
-
-        server_process = Process(target=run_launcher_process, daemon=True)
-        server_process.start()
-        log_manager.log("背景服務啟動程序已觸發。等待服務上線...")
-
-        # 簡單的健康檢查
-        time.sleep(20) # 給足夠的時間讓所有服務啟動
-        proxy_url = "http://localhost:8000"
-        import httpx
-        response = httpx.get(proxy_url)
-        if response.status_code == 200:
-            log_manager.log("儀表板服務健康檢查通過！")
-            stats['service_status'] = f"🟢 運行中 (點擊 {proxy_url} 訪問)"
-            stats['current_task'] = "所有服務已就緒！"
-        else:
-            raise RuntimeError(f"服務健康檢查失敗，狀態碼: {response.status_code}")
-
+        task_func()
+        spinner.stop()
     except Exception as e:
-        log_manager.log(f"發生錯誤: {e}", "ERROR")
-        # 更新所有失敗的狀態
-        for key, value in stats.items():
-            if value.endswith("執行中..."):
-                stats[key] = "🔴 失敗"
-        stats['current_task'] = "任務因錯誤而終止！"
+        spinner.stop(f"失敗！錯誤: {e}")
+        raise
 
+def main():
+    clear_output(wait=True)
+    print("🚀 鳳凰之心混合模式啟動程序...")
+    print("="*80)
 
-# --- 啟動程序 ---
+    base_path = Path("/content")
+    project_path = base_path / PROJECT_FOLDER_NAME
+
+    # --- 步驟 1: 下載專案 ---
+    def task_clone_repo():
+        if FORCE_REPO_REFRESH and project_path.exists():
+            shutil.rmtree(project_path)
+        if not project_path.exists():
+            git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", "-q", REPOSITORY_URL, str(project_path)]
+            subprocess.run(git_command, check=True, cwd=base_path)
+    run_task_with_spinner(task_clone_repo, "正在準備並下載專案程式碼...")
+
+    os.chdir(project_path)
+    print(f"✅ 已切換至專案目錄: {os.getcwd()}")
+
+    # --- 步驟 2: 安裝核心依賴 ---
+    def task_install_deps():
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "psutil", "pyyaml", "uv", "nest_asyncio", "httpx"], check=True)
+    run_task_with_spinner(task_install_deps, "正在安裝 Colab 核心依賴...")
+
+    # --- 步驟 3: 在背景啟動後端服務 ---
+    print("\n✅ 核心環境準備就緒。")
+    print("🚀 即將在背景啟動所有後端服務 (包括 Web 監控儀表板)...")
+
+    # 使用 Popen 在背景啟動 launch.py，並將其輸出導向到一個日誌檔案
+    log_file = open("launch_logs.txt", "w")
+    subprocess.Popen([sys.executable, "launch.py"], stdout=log_file, stderr=subprocess.STDOUT)
+
+    print("⏳ 等待 Web 儀表板服務上線 (約需 15 秒)...")
+    time.sleep(15)
+
+    # --- 步驟 4: 顯示最終連結 ---
+    proxy_url = "http://localhost:8000"
+    print("\n" + "="*80)
+    print("🎉 啟動程序已觸發！ 🎉".center(80))
+    print("\n")
+    print(f"👉 請點擊以下連結，在新分頁中打開「即時監控儀表板」:")
+    print(f"   {proxy_url}")
+    print("\n")
+    print("您可以在儀表板中觀察詳細的服務啟動進度。")
+    print(f"所有詳細的背景日誌都記錄在專案資料夾的 `launch_logs.txt` 檔案中。")
+    print("請注意：關閉此 Colab 執行環境將會終止所有後端服務。")
+    print("="*80)
+
 if __name__ == "__main__":
-    # 延遲導入，確保在 Colab 環境中可用
-    from core_utils.colab_display_manager import ColabDisplayManager
-    from core_utils.colab_log_manager import ColabLogManager
-
-    # 1. 初始化共享狀態物件
-    shared_stats = {}
-    log_manager = ColabLogManager()
-
-    # 2. 初始化並啟動顯示管理器
-    display_manager = ColabDisplayManager(shared_stats, log_manager)
-    display_manager.start()
-
-    # 3. 在主執行緒中執行核心任務
-    main_task(shared_stats, log_manager)
-
-    # 4. 停止顯示管理器並顯示最終畫面
-    display_manager.stop()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n💥 啟動程序發生未預期的嚴重錯誤: {e}")
+        import traceback
+        traceback.print_exc()

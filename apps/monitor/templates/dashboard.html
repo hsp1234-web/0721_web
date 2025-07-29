@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳳凰之心 - 系統啟動監控</title>
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; font-size: 14px; }
+        .container { max-width: 900px; margin: auto; }
+        .panel { border: 1px solid #444; border-radius: 8px; margin-bottom: 20px; background-color: #2a2a2a; }
+        .panel-header { background-color: #333; padding: 10px 15px; border-bottom: 1px solid #444; border-top-left-radius: 7px; border-top-right-radius: 7px; font-weight: bold; }
+        .panel-body { padding: 15px; }
+        #fixed-header .panel-body { text-align: center; color: #aaa; }
+        .service-status-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; }
+        .service-status-grid span:first-child { font-weight: bold; }
+        .status-indicator { padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .status-pending { background-color: #555; color: #fff; }
+        .status-starting { background-color: #f0ad4e; color: #000; }
+        .status-running { background-color: #5cb85c; color: #fff; }
+        .status-failed { background-color: #d9534f; color: #fff; }
+        #log-container { height: 300px; overflow-y: scroll; background-color: #111; border: 1px solid #444; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', monospace; font-size: 13px; }
+        #log-container div { padding: 2px 0; }
+        #final-link-panel { display: none; text-align: center; }
+        #action-button { display: inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; font-weight: bold; border-radius: 8px; border: 2px solid #0056b3; transition: background-color 0.3s, transform 0.1s; }
+        #action-button:hover { background-color: #0056b3; }
+        #action-button:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="fixed-header" class="panel"><div class="panel-body"><h1>🚀 鳳凰之心 - 系統啟動監控面板 🚀</h1><p>此面板為唯讀，將在連接到後端後開始監控</p></div></div>
+        <div id="status-panel" class="panel"><div class="panel-header">🌐 後端服務狀態</div><div class="panel-body"><div class="service-status-grid"><span>📈 Quant App:</span><span id="quant-status" class="status-indicator status-pending">⚪ 等待中...</span><span>🎤 Transcriber App:</span><span id="transcriber-status" class="status-indicator status-pending">⚪ 等待中...</span><span><strong>整體狀態:</strong></span><span id="overall-status" class="status-indicator status-pending">⚪ 系統待命中...</span></div></div></div>
+        <div id="logs-panel" class="panel"><div class="panel-header">📜 即時啟動日誌</div><div class="panel-body"><div id="log-container"></div></div></div>
+        <div id="final-link-panel" class="panel"><div class="panel-header">✅ 啟動完成 - 進行操作</div><div class="panel-body"><p>所有服務已就緒！點擊下方連結以開啟互動操作介面。</p><a id="action-button" href="https://your-app.phoenix-heart.com/dashboard" target="_blank">👉 點此開啟操作儀表板 (新分頁) 👈</a><p style="margin-top: 15px; font-size: 12px; color: #aaa;">或複製網址: https://your-app.phoenix-heart.com/dashboard</p></div></div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const logContainer = document.getElementById('log-container');
+            const quantStatus = document.getElementById('quant-status');
+            const transcriberStatus = document.getElementById('transcriber-status');
+            const overallStatus = document.getElementById('overall-status');
+            const finalLinkPanel = document.getElementById('final-link-panel');
+            function addLogMessage(message) { const logEntry = document.createElement('div'); logEntry.textContent = message; logContainer.appendChild(logEntry); logContainer.scrollTop = logContainer.scrollHeight; }
+            function setStatus(element, text, className) { element.textContent = text; element.className = 'status-indicator ' + className; }
+            addLogMessage('正在連接到後端日誌串流...');
+            const eventSource = new EventSource("/api/logs");
+            eventSource.onopen = function() { addLogMessage('✅ 已成功連接到日誌串流。等待日誌...'); };
+            eventSource.onmessage = function (event) {
+                const message = event.data;
+                addLogMessage(message);
+                if (message.includes("正在啟動 App: quant")) { setStatus(quantStatus, '🟡 啟動中...', 'status-starting'); }
+                else if (message.includes("Quant App is now RUNNING")) { setStatus(quantStatus, '🟢 運行中', 'status-running'); }
+                else if (message.includes("Quant App FAILED")) { setStatus(quantStatus, '🔴 失敗', 'status-failed'); }
+                if (message.includes("正在啟動 App: transcriber")) { setStatus(transcriberStatus, '🟡 啟動中...', 'status-starting'); }
+                else if (message.includes("Transcriber App is now RUNNING")) { setStatus(transcriberStatus, '🟢 運行中', 'status-running'); }
+                else if (message.includes("Transcriber App FAILED")) { setStatus(transcriberStatus, '🔴 失敗', 'status-failed'); }
+                const isQuantRunning = quantStatus.classList.contains('status-running');
+                const isTranscriberRunning = transcriberStatus.classList.contains('status-running');
+                const isAnyFailed = quantStatus.classList.contains('status-failed') || transcriberStatus.classList.contains('status-failed');
+                if (isAnyFailed) { setStatus(overallStatus, '🔴 系統啟動失敗', 'status-failed'); }
+                else if (isQuantRunning && isTranscriberRunning) { setStatus(overallStatus, '🟢 所有服務運行中', 'status-running'); }
+                else { setStatus(overallStatus, '🟡 系統啟動中...', 'status-starting'); }
+                if (message.includes("[SUCCESS] 所有服務已成功啟動")) { finalLinkPanel.style.display = 'block'; addLogMessage('✅ 所有服務已成功啟動。監控結束。'); }
+            };
+            eventSource.onerror = function (err) { addLogMessage('❌ 與日誌串流的連接發生錯誤。'); console.error("EventSource failed:", err); eventSource.close(); };
+        });
+    </script>
+</body>
+</html>

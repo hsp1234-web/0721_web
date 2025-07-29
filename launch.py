@@ -67,7 +67,6 @@ def run_command(command, cwd, venv_path=None):
     """執行一個子進程命令，並即時串流其輸出"""
     executable = command.split()[0]
     if venv_path:
-        # 在 Windows 和 Linux/macOS 上尋找虛擬環境中的可執行檔
         bin_dir = "Scripts" if sys.platform == "win32" else "bin"
         executable_path = venv_path / bin_dir / executable
         if executable_path.exists():
@@ -89,13 +88,14 @@ def run_command(command, cwd, venv_path=None):
         if output == '' and process.poll() is not None:
             break
         if output:
-            print(f"   {output.strip()}")
+            clean_line = output.strip()
+            add_log(f"[CMD_LOG] {clean_line}")
+            print(f"   {clean_line}")
 
     return_code = process.wait()
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, command)
 
-# 導入新模組
 from core_utils.safe_installer import install_packages
 
 def ensure_uv_installed():
@@ -143,22 +143,17 @@ async def prepare_app(app_path: Path):
         return
 
     try:
-        # 步驟 1: 建立虛擬環境
         print_info(f"[{app_name}] 建立或驗證虛擬環境...")
         run_command(f"uv venv", cwd=app_path)
         print_success(f"[{app_name}] 虛擬環境準備就緒。")
 
-        # 步驟 2: 使用 safe_installer 安全安裝依賴
         print_info(f"[{app_name}] 啟動智慧型安全安裝程序...")
-
-        # 我們需要捕獲 safe_installer 的日誌輸出
         safe_installer_cmd = [
             sys.executable, "-m", "core_utils.safe_installer",
             app_name, str(requirements_path), str(python_executable)
         ]
         result = subprocess.run(safe_installer_cmd, capture_output=True, text=True, encoding='utf-8')
 
-        # 將日誌逐行加入佇列
         for line in result.stdout.strip().split('\n'):
             if line:
                 add_log(f"[{app_name.upper()}_LOG] {line}")
@@ -196,7 +191,6 @@ async def launch_app(app_path: Path, port: int):
         env=env
     )
 
-    # 建立一個協程來非同步讀取日誌
     async def log_reader():
         while True:
             line = await asyncio.to_thread(process.stdout.readline)
@@ -206,19 +200,15 @@ async def launch_app(app_path: Path, port: int):
             if clean_line:
                 add_log(f"[{app_name.upper()}_LOG] {clean_line}")
 
-        # 檢查最終返回碼
         process.wait()
         if process.returncode != 0:
             add_log(f"[{app_name.upper()}_ERROR] App 意外終止，返回碼: {process.returncode}")
 
     asyncio.create_task(log_reader())
 
-    # 給 App 一點時間來啟動
     await asyncio.sleep(2)
 
-    # 假設如果 App 在 2 秒後沒有崩潰，就是成功啟動了
     if process.poll() is None:
-        # 使用與設計圖一致的日誌格式
         add_log(f"[INFO] {app_name.capitalize()} App is now RUNNING.")
         print_success(f"App '{app_name}' 已在背景啟動，監聽埠: {port}, PID: {process.pid}")
     else:
@@ -227,8 +217,6 @@ async def launch_app(app_path: Path, port: int):
 
     return process
 
-# --- 逆向代理 ---
-# 讀取代理設定
 with open(PROXY_CONFIG_FILE) as f:
     proxy_config = json.load(f)
 
@@ -238,13 +226,10 @@ client = httpx.AsyncClient()
 @proxy_app.api_route("/{path:path}")
 async def reverse_proxy(request: Request):
     path = f"/{request.path_params['path']}"
-
-    # 根據路徑前綴找到目標服務
     target_url = None
     for prefix, route_info in proxy_config["routes"].items():
         if path.startswith(prefix):
             target_host = route_info["target"]
-            # 移除前綴，得到子路徑
             sub_path = path[len(prefix):]
             target_url = f"{target_host}{sub_path}"
             break
@@ -252,10 +237,8 @@ async def reverse_proxy(request: Request):
     if not target_url:
         return Response(content="無法路由的請求。", status_code=404)
 
-    # 建立一個新的請求，轉發到目標服務
     url = httpx.URL(url=target_url, query=request.url.query.encode("utf-8"))
     headers = dict(request.headers)
-    # httpx 會自動處理 host，所以從 header 中移除
     headers.pop("host", None)
 
     rp_req = client.build_request(
@@ -273,9 +256,9 @@ async def reverse_proxy(request: Request):
             headers=dict(rp_resp.headers)
         )
     except httpx.ConnectError as e:
-        error_message = f"無法連接到後端服務: {target_url}。請確認該服務是否已成功啟動。"
+        error_message = f"無法連接到後端服務: {target_url}。"
         print(f"{colors.FAIL}{error_message}{colors.ENDC}")
-        return Response(content=error_message, status_code=503) # 503 Service Unavailable
+        return Response(content=error_message, status_code=503)
 
 async def main():
     """主協調函式"""
@@ -285,7 +268,6 @@ async def main():
     ensure_uv_installed()
     ensure_core_deps()
 
-    # 將 monitor app 與其他 app 分開處理，確保它最後啟動
     other_apps = [d for d in APPS_DIR.iterdir() if d.is_dir() and d.name != 'monitor']
     monitor_app_path = APPS_DIR / 'monitor'
 
@@ -293,13 +275,11 @@ async def main():
     if monitor_app_path.exists():
         apps_to_launch.append(monitor_app_path)
 
-    # 準備所有 App 的環境
     for app_path in apps_to_launch:
         await prepare_app(app_path)
 
     print_success("所有 App 環境均已準備就緒！")
 
-    # 啟動所有 App
     processes = []
     current_port = BASE_PORT
     for app_path in apps_to_launch:
@@ -307,7 +287,6 @@ async def main():
         processes.append(process)
         current_port += 1
 
-    # 啟動逆向代理
     listen_port = proxy_config["listen_port"]
     print_header(f"所有 App 已在背景啟動，正在啟動主逆向代理...")
     print_success(f"系統已就緒！統一訪問入口: http://localhost:{listen_port}")
@@ -316,7 +295,6 @@ async def main():
     print_info(f"  - 轉寫服務請訪問: http://localhost:{listen_port}/transcriber/...")
     print_warning("按 Ctrl+C 終止所有服務。")
 
-    # 發送一個特殊的成功標記到日誌
     add_log("[SUCCESS] 所有服務已成功啟動。")
 
     try:
@@ -331,7 +309,6 @@ async def main():
         print_info("正在終止所有背景 App 行程...")
         for p in processes:
             p.terminate()
-        # 等待所有行程終止
         for p in processes:
             p.wait()
         print_success("所有服務已成功關閉。再會！")
