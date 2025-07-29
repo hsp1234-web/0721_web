@@ -200,6 +200,75 @@ def test_app(app_path: Path, test_mode: str) -> bool:
     print_success(f"App '{app_name}' 所有測試皆已通過！")
     return True
 
+def test_database_driven_flow():
+    """測試資料庫驅動的核心流程"""
+    print_header("步驟 4: 測試資料庫驅動流程")
+
+    db_file = PROJECT_ROOT / "test_state.db"
+    if db_file.exists():
+        db_file.unlink()
+
+    # 1. 設置環境變數
+    test_env = os.environ.copy()
+    test_env["FAST_TEST_MODE"] = "true"
+    test_env["DB_FILE"] = str(db_file)
+
+    # 2. 執行 launch.py (後端主力部隊)
+    print_info("執行 launch.py (後端主力部隊)...")
+    result = run_command([sys.executable, "launch.py"], env=test_env)
+
+    if result != 0:
+        print_fail("launch.py 執行失敗。")
+        return False
+
+    # 3. 驗證資料庫是否生成且內容正確
+    if not db_file.exists():
+        print_fail(f"資料庫檔案未找到: {db_file}")
+        return False
+
+    import sqlite3
+    import json
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+
+    # 驗證狀態表
+    cursor.execute("SELECT current_stage, apps_status, action_url FROM status_table WHERE id = 1")
+    status_row = cursor.fetchone()
+    if not status_row:
+        print_fail("在 status_table 中找不到紀錄。")
+        return False
+
+    stage, apps_status_json, action_url = status_row
+    apps_status = json.loads(apps_status_json)
+
+    if stage != "completed":
+        print_fail(f"最終階段應為 'completed'，但卻是 '{stage}'。")
+        return False
+    if not all(s == "running" for s in apps_status.values()):
+        print_fail(f"並非所有 App 狀態皆為 'running': {apps_status}")
+        return False
+    if action_url != "http://localhost:8000/dashboard":
+        print_fail(f"action_url 不正確: {action_url}")
+        return False
+    print_success("狀態表驗證成功。")
+
+    # 驗證日誌表
+    cursor.execute("SELECT level, message FROM log_table WHERE message LIKE '%所有服務已成功啟動%'")
+    log_row = cursor.fetchone()
+    if not log_row:
+        print_fail("在日誌表中找不到成功啟動的訊息。")
+        return False
+    print_success("日誌表驗證成功。")
+
+    conn.close()
+
+    # 4. 清理
+    db_file.unlink()
+
+    print_success("資料庫驅動流程測試通過！")
+    return True
+
+
 def main():
     """主函數"""
     test_mode = os.environ.get("TEST_MODE", "mock")
@@ -214,27 +283,25 @@ def main():
 
     print_header(f"步驟 3: 開始對 {len(apps)} 個 App 進行平行化測試")
 
-    # 準備傳遞給 test_app 的參數
-    # starmap 需要一個參數元組的列表
     tasks = [(app_path, test_mode) for app_path in apps]
-
-    # 使用 multiprocessing.Pool 來平行執行測試
-    # 使用 cpu_count() 來決定進程數，但不超過 App 的數量
     num_processes = min(cpu_count(), len(apps))
     print_info(f"將使用 {num_processes} 個平行進程。")
 
     with Pool(processes=num_processes) as pool:
-        # starmap 會將元組解包作為參數傳遞給 test_app
         results = pool.starmap(test_app, tasks)
 
-    failures = sum(1 for res in results if not res)
+    app_failures = sum(1 for res in results if not res)
+
+    # 執行資料庫流程測試
+    db_flow_test_success = test_database_driven_flow()
 
     print_header("所有測試已完成")
-    if failures == 0:
+    if app_failures == 0 and db_flow_test_success:
         print_success("🎉 恭喜！所有 App 的測試都已成功通過！")
         sys.exit(0)
     else:
-        print_fail(f"總共有 {failures} 個 App 的測試未通過。請檢查上面的日誌。")
+        total_failures = app_failures + (0 if db_flow_test_success else 1)
+        print_fail(f"總共有 {total_failures} 個測試流程未通過。請檢查上面的日誌。")
         sys.exit(1)
 
 if __name__ == "__main__":

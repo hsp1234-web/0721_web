@@ -95,6 +95,16 @@
 
 為了徹底解決以上所有問題，我們設計並驗證了一套全自動化的解決方案，其工作流程如下：
 
+#### 儀表板強制渲染
+
+為了解決在 GoTTY 環境下 TUI 儀表板無法顯示的問題，我們採取了以下強制渲染策略：
+
+1.  **強制 TUI 模式**：我們移除了 `launch.py` 中對 `TERM` 環境變數的判斷，確保 `main_tui()` 函式在任何情況下都會被呼叫。
+2.  **強制 `rich` 渲染**：在建立 `rich.Console` 物件時，我們傳入了 `force_terminal=True` 參數。這會強制 `rich` 產生 ANSI escape codes，即使它偵測到目前並非在一個標準的 TTY 環境中。
+3.  **移除 Alternate Screen Buffer**：在 `rich.Live` 物件中，我們移除了 `screen=True` 參數。這可以避免 `rich` 使用 alternate screen buffer，確保 TUI 能夠在任何終端環境中被正確捕捉。
+
+透過以上設定，我們確保了 `launch.py` 在 GoTTY 環境中，也能夠穩定地渲染出 TUI 儀表板。
+
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
