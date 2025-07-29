@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>鳳凰之心 - 即時儀表板</title>
+    <style>
+        body { background-color: #1a1a1a; font-family: 'Fira Code', 'Noto Sans TC', monospace; color: #e0e0e0; padding: 1em; }
+        .dashboard-container { display: flex; gap: 1em; }
+        .panel { border: 1px solid #555; margin-bottom: 1em; background-color: #2b2b2b; border-radius: 8px; overflow: hidden; }
+        .panel-title { font-weight: bold; padding: 0.8em; border-bottom: 1px solid #555; background-color: #333; }
+        .panel-content { padding: 1em; }
+        .left-column { flex: 1; }
+        .right-column { flex: 2; }
+        .log-entry { margin-bottom: 0.5em; font-size: 0.9em; white-space: pre-wrap; word-break: break-all; }
+        .log-level-WARNING { color: #fbbc04; }
+        .log-level-ERROR, .log-level-CRITICAL { color: #ea4335; }
+        .footer { text-align: center; padding-top: 1em; border-top: 1px solid #555; margin-top: 1em; font-size: 0.9em; }
+        a { color: #34a853; font-weight: bold; text-decoration: none; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 0.5em 0.2em; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .status-running { background-color: #34a853; }
+        .status-pending, .status-starting { background-color: #fbbc04; }
+        .status-failed { background-color: #ea4335; }
+        .status-unknown { background-color: #9e9e9e; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="left-column">
+            <div class="panel">
+                <div class="panel-title">微服務狀態</div>
+                <div class="panel-content" id="apps-status-content"><table></table></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">系統資源</div>
+                <div class="panel-content">
+                    <table>
+                        <tr><td>CPU</td><td id="cpu-usage">--</td></tr>
+                        <tr><td>RAM</td><td id="ram-usage">--</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="right-column">
+            <div class="panel">
+                <div class="panel-title">即時日誌</div>
+                <div class="panel-content" id="logs-content" style="max-height: 300px; overflow-y: auto;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="footer" id="footer-content">正在初始化...</div>
+
+    <script>
+        const API_BASE_URL = '{{ API_URL }}'; // 這個模板變數將由 Python 替換
+
+        function getStatusDot(status) {
+            const statusClass = `status-${status || 'unknown'}`;
+            return `<span class="status-dot ${statusClass}"></span>`;
+        }
+
+        function updateDashboard() {
+            // 更新狀態
+            fetch(`${API_BASE_URL}/api/status`)
+                .then(response => response.json())
+                .then(data => {
+                    // 更新系統資源
+                    document.getElementById('cpu-usage').innerText = `${data.cpu_usage ? data.cpu_usage.toFixed(1) : '0.0'}%`;
+                    document.getElementById('ram-usage').innerText = `${data.ram_usage ? data.ram_usage.toFixed(1) : '0.0'}%`;
+
+                    // 更新微服務狀態
+                    const appsStatus = JSON.parse(data.apps_status || '{}');
+                    const appsTable = document.querySelector('#apps-status-content table');
+                    appsTable.innerHTML = Object.keys(appsStatus).map(app => `
+                        <tr>
+                            <td>${getStatusDot(appsStatus[app])} ${app.charAt(0).toUpperCase() + app.slice(1)}</td>
+                            <td>${appsStatus[app]}</td>
+                        </tr>
+                    `).join('');
+
+                    // 更新頁腳
+                    const footer = document.getElementById('footer-content');
+                    if (data.action_url) {
+                        footer.innerHTML = `✅ 啟動完成！操作儀表板連結: <a href="${data.action_url}" target="_blank">${data.action_url}</a>`;
+                    } else if (data.current_stage === 'failed' || data.current_stage === 'critical_failure') {
+                        footer.innerHTML = `<span class="log-level-ERROR">❌ 啟動失敗。請檢查日誌。</span>`;
+                    } else {
+                        footer.innerHTML = `⏳ 當前階段: ${data.current_stage ? data.current_stage.toUpperCase() : 'UNKNOWN'}`;
+                    }
+                })
+                .catch(error => console.error('Error fetching status:', error));
+
+            // 更新日誌
+            fetch(`${API_BASE_URL}/api/logs`)
+                .then(response => response.json())
+                .then(data => {
+                    const logsContent = document.getElementById('logs-content');
+                    logsContent.innerHTML = data.map(log => {
+                        const ts = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '--------';
+                        const levelClass = `log-level-${log.level || ''}`;
+                        return `<div class="log-entry"><span class="${levelClass}">[${ts}] [${log.level || '?'}] ${log.message}</span></div>`;
+                    }).join('');
+                })
+                .catch(error => console.error('Error fetching logs:', error));
+        }
+
+        // 立即執行一次，然後每 2 秒更新一次
+        updateDashboard();
+        setInterval(updateDashboard, 2000);
+    </script>
+</body>
+</html>

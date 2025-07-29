@@ -35,8 +35,8 @@ def setup_database():
             message TEXT
         )
         """)
-        # 初始化狀態表
-        cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage) VALUES (1, 'pending')")
+        # 初始化狀態表，並為資源使用率設定預設值
+        cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage, cpu_usage, ram_usage) VALUES (1, 'pending', 0.0, 0.0)")
         conn.commit()
 
 def add_log(level, message):
@@ -136,24 +136,26 @@ async def main_logic():
 
             if hasattr(google.colab, 'kernel') and google.colab.kernel:
                 add_log("INFO", "Colab 環境檢測成功，開始嘗試獲取代理 URL...")
-                for i in range(10): # 嘗試 10 次
+                for i in range(10):  # 最多嘗試 10 次
                     try:
                         url = eval_js(f"google.colab.kernel.proxyPort(8005)")
-                        if url:
+                        if url and url.startswith('https://'):
                             final_url = url
-                            add_log("INFO", f"成功獲取代理 URL: {final_url}")
-                            break # 成功後跳出迴圈
+                            add_log("INFO", f"成功獲取代理 URL (第 {i+1}/10 次嘗試): {final_url}")
+                            break  # 成功後跳出迴圈
+                        else:
+                            add_log("WARNING", f"第 {i+1}/10 次獲取嘗試返回無效的 URL: '{url}'")
                     except Exception as e:
-                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 失敗: {e}")
+                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 時發生異常: {e}")
 
-                    if final_url == "http://localhost:8005/":
-                         add_log("INFO", f"等待 5 秒後重試...")
-                         await asyncio.sleep(5)
+                    if i < 9: # 如果不是最後一次嘗試，則等待
+                        add_log("INFO", "等待 5 秒後重試...")
+                        await asyncio.sleep(5)
 
                 if final_url == "http://localhost:8005/":
-                    add_log("ERROR", "10 次嘗試後仍無法獲取 Colab 代理 URL，將使用本地 URL。")
+                    add_log("ERROR", "10 次嘗試後仍無法獲取 Colab 代理 URL，將使用預設本地 URL。")
             else:
-                 add_log("WARNING", "非 Colab kernel 環境。")
+                add_log("WARNING", "非 Colab kernel 環境，將使用預設本地 URL。")
 
         except (ImportError, AttributeError):
             add_log("WARNING", f"無法導入 google.colab 模組，將使用本地 URL。")
@@ -178,21 +180,35 @@ async def monitor_resources():
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
-    try:
-        # 同時執行主邏輯和資源監控
-        main_task = asyncio.create_task(main_logic())
-        monitor_task = asyncio.create_task(monitor_resources())
+    add_log("INFO", "Launch.py main process started.")
+    update_status(stage="initializing")
 
+    monitor_task = asyncio.create_task(monitor_resources())
+    main_task = asyncio.create_task(main_logic())
+
+    try:
+        # 等待主邏輯和監控任務完成
+        # 在正常操作中，monitor_task 是無限循環的，
+        # 所以這裡會一直等到 main_task 結束
         await main_task
 
-        # 僅在非測試環境下進入長時間休眠
+        # 在非測試模式下，讓監控任務繼續在前台運行
         if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
-            add_log("INFO", "服務啟動完成，後端進入持續待命狀態...")
-            await monitor_task # 讓監控任務持續執行
+            add_log("INFO", "主邏輯執行完畢，資源監控將持續在背景運行。")
+            await monitor_task
+        else:
+            # 在測試模式下，給監控任務一點時間執行幾次，然後取消
+            await asyncio.sleep(3)
+            monitor_task.cancel()
 
     except Exception as e:
         add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
         update_status(stage="critical_failure")
+    finally:
+        # 確保所有任務在結束時都被妥善處理
+        if not monitor_task.done():
+            monitor_task.cancel()
+        add_log("INFO", "Launch.py main process finished.")
 
 if __name__ == "__main__":
     try:

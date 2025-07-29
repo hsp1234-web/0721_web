@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab HTML 動態儀表板 v14.0                                ║
+# ║   🚀 鳳凰之心 - JS 驅動儀表板 v15.0                                ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   採用動態生成 HTML+CSS 的方式，提供像素級精準的儀表板。           ║
-# ║   後端作為守護進程持續運行，前端顯示迴圈永不中斷。                 ║
+# ║   新架構：後端提供 API，前端 JS 自主渲染，徹底解決閃爍問題。       ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心 HTML 啟動器 v14.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 JS 啟動器 v15.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -18,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "4.3.7" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "v4.3.9" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -44,164 +43,93 @@ import shutil
 import subprocess
 from pathlib import Path
 import time
-import sqlite3
-import json
-from IPython.display import display, HTML, clear_output
-
-def render_dashboard_html(status_row, log_rows):
-    """根據資料庫狀態生成儀表板的 HTML"""
-    stage, apps_status_json, action_url, cpu, ram = status_row
-    apps_status = json.loads(apps_status_json) if apps_status_json else {}
-
-    # CSS 樣式
-    css = """
-    <style>
-        .dashboard-container { background-color: transparent; font-family: 'Fira Code', 'Noto Sans TC', monospace; color: #FFFFFF; padding: 1em; }
-        .panel { border: 1px solid #FFFFFF; margin-bottom: 1em; }
-        .panel-title { font-weight: bold; padding: 0.5em; border-bottom: 1px solid #FFFFFF; }
-        .panel-content { padding: 0.5em; }
-        .flex-container { display: flex; gap: 1em; }
-        .left-column { flex: 1; }
-        .right-column { flex: 2; }
-        .log-entry { margin-bottom: 0.5em; }
-        .log-level-WARNING { color: #fbbc04; }
-        .log-level-ERROR, .log-level-CRITICAL { color: #ea4335; }
-        .footer { text-align: center; padding-top: 1em; border-top: 1px solid #FFFFFF; }
-        a { color: #34a853; font-weight: bold; }
-        table { width: 100%; }
-    </style>
-    """
-
-    # --- HTML 生成邏輯 ---
-    def get_app_status_rows():
-        rows = ""
-        status_map = {
-            "running": "<span>🟢</span> Running",
-            "pending": "<span>🟡</span> Pending",
-            "starting": "<span>🟡</span> Starting",
-            "failed": "<span>🔴</span> Failed"
-        }
-        for app, status in apps_status.items():
-            display_status = status_map.get(status, f"<span>❓</span> {status}")
-            rows += f"<tr><td>{app.capitalize()}</td><td>{display_status}</td></tr>"
-        return rows
-
-    def get_log_entries():
-        entries = ""
-        for ts, level, msg in reversed(log_rows):
-            ts_str = str(ts).split(" ")[1][:8] if ts else "--------"
-            level_class = f"log-level-{level}" if level in ["WARNING", "ERROR", "CRITICAL"] else ""
-            entries += f'<div class="log-entry"><span class="{level_class}">{ts_str} [{level.ljust(8)}] {msg}</span></div>'
-        return entries
-
-    def get_footer_content():
-        if action_url:
-            return f'✅ 啟動完成！操作儀表板連結: <a href="{action_url}" target="_blank">{action_url}</a>'
-        if stage in ["failed", "critical_failure"]:
-            return '<span class="log-level-ERROR">❌ 啟動失敗。請檢查日誌。</span>'
-        return f"⏳ 當前階段: {stage.upper()}"
-
-    html = f"""
-    <div class="dashboard-container">
-        <div class="flex-container">
-            <div class="left-column">
-                <div class="panel">
-                    <div class="panel-title">微服務狀態</div>
-                    <div class="panel-content">
-                        <table>{get_app_status_rows()}</table>
-                    </div>
-                </div>
-                <div class="panel">
-                    <div class="panel-title">系統資源</div>
-                    <div class="panel-content">
-                        <table>
-                            <tr><td>CPU</td><td>{cpu or 0.0:.1f}%</td></tr>
-                            <tr><td>RAM</td><td>{ram or 0.0:.1f}%</td></tr>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <div class="right-column">
-                <div class="panel">
-                    <div class="panel-title">即時日誌</div>
-                    <div class="panel-content">{get_log_entries()}</div>
-                </div>
-            </div>
-        </div>
-        <div class="footer">{get_footer_content()}</div>
-    </div>
-    """
-    return css + html
-
-base_path = Path("/content")
+from IPython.display import display, HTML
+from google.colab import output
 
 def main():
-    # --- 全域路徑與變數 ---
+    base_path = Path("/content")
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
+    api_port = 8080 # 為 API 伺服器選擇一個埠號
 
-    # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心 HTML 啟動器 v15.3")
+    # --- 步驟 1: 準備專案 (與之前版本類似) ---
+    print("🚀 鳳凰之心 JS 驅動啟動器 v15.0")
     print("="*80)
-    # ... (其餘準備邏輯保持不變)
+    # ... (此處省略了與之前版本相同的 Git clone/pull 邏輯)
+    # 為了簡潔，我們假設程式碼已經存在於 project_path
+    if not project_path.exists():
+        print(f"正在從 {REPOSITORY_URL} 克隆專案...")
+        subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], check=True)
+    os.chdir(project_path)
+    print(f"工作目錄已切換至: {os.getcwd()}")
 
-    # --- 步驟 2: 安裝核心依賴 ---
-    # ... (安裝邏輯保持不變)
 
-    # --- 步驟 3: 在背景啟動後端主力部隊 ---
-    # --- 步驟 3: 在背景啟動後端主力部隊 ---
-    print("\n3. 觸發背景服務啟動程序...")
+    # --- 步驟 2: 在背景啟動後端雙雄 ---
+    print("\n2. 正在啟動後端服務...")
+
+    # 設定環境變數
     env = os.environ.copy()
     env["DB_FILE"] = str(db_file)
+    env["API_PORT"] = str(api_port)
     if FAST_TEST_MODE:
         env["FAST_TEST_MODE"] = "true"
 
-    log_file = project_path / "logs" / "launch.log"
-    log_file.parent.mkdir(exist_ok=True)
-    with open(log_file, "w") as f:
-        launch_process = subprocess.Popen([sys.executable, "launch.py"], env=env, stdout=f, stderr=subprocess.STDOUT)
+    # 啟動主力部隊 (launch.py)
+    launch_log = project_path / "logs" / "launch.log"
+    launch_log.parent.mkdir(exist_ok=True)
+    with open(launch_log, "w") as f_launch:
+        launch_process = subprocess.Popen([sys.executable, "launch.py"], env=env, stdout=f_launch, stderr=subprocess.STDOUT)
     print(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
 
-    # --- 步驟 4: 啟動前端智慧型渲染器 ---
-    last_displayed_data = None
+    # 啟動通訊官 (api_server.py)
+    api_log = project_path / "logs" / "api_server.log"
+    with open(api_log, "w") as f_api:
+        api_process = subprocess.Popen([sys.executable, "api_server.py"], env=env, stdout=f_api, stderr=subprocess.STDOUT)
+    print(f"✅ 後端通訊官 (api_server.py) 已在背景啟動 (PID: {api_process.pid})。")
+
+    # --- 步驟 3: 獲取 Colab 代理 URL 並渲染靜態舞台 ---
+    print("\n3. 正在準備前端儀表板...")
+
+    # 獲取 Colab 為 API 伺服器分配的 URL
+    api_url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
+    print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
+
+    # 讀取 HTML 模板
+    dashboard_template_path = project_path / "run" / "dashboard.html"
+    with open(dashboard_template_path, 'r', encoding='utf-8') as f:
+        html_template = f.read()
+
+    # 注入 API URL
+    html_content = html_template.replace('{{ API_URL }}', api_url)
+
+    # 顯示最終的靜態 HTML
+    display(HTML(html_content))
+    print("\n✅ 儀表板已載入。所有後續更新將由前端自主完成。")
+    print("您可以查看 `logs/` 目錄下的 launch.log 和 api_server.log 以獲取詳細日誌。")
+
+    # --- 步驟 4: 等待手動中斷 ---
     try:
+        print("\n後端服務正在運行中。您可以隨時在此儲存格按下「停止」按鈕來終止所有進程。")
         while True:
-            try:
-                conn = sqlite3.connect(db_file)
-                cursor = conn.cursor()
-                cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
-                status_row = cursor.fetchone()
-                cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
-                log_rows = cursor.fetchall()
-                conn.close()
-
-                current_data = (status_row, log_rows)
-
-                # 只有在資料變化時才重繪畫面
-                if current_data != last_displayed_data:
-                    clear_output(wait=True)
-                    display(HTML(render_dashboard_html(status_row, log_rows)))
-                    last_displayed_data = current_data
-
-            except sqlite3.OperationalError as e:
-                if "no such table" not in str(e):
-                    # 忽略 "no such table" 錯誤，因為後端可能尚未建立好資料庫
-                    pass
-
-            time.sleep(0.5) # 以較高頻率輪詢資料變化
-
+            time.sleep(60)
     except KeyboardInterrupt:
         print("\n\n🛑 偵測到手動中斷！")
     finally:
         print("正在終止後端服務...")
+        api_process.terminate()
         launch_process.terminate()
         try:
-            launch_process.wait(timeout=5)
-            print("✅ 後端服務已成功終止。")
+            api_process.wait(timeout=5)
+            print("✅ API 伺服器已成功終止。")
         except subprocess.TimeoutExpired:
-            print("⚠️ 後端服務未能及時回應終止信號，將強制終結。")
+            api_process.kill()
+            print("⚠️ API 伺服器被強制終結。")
+        try:
+            launch_process.wait(timeout=5)
+            print("✅ 主力部隊已成功終止。")
+        except subprocess.TimeoutExpired:
             launch_process.kill()
-            print("✅ 後端服務已被強制終結。")
+            print("⚠️ 主力部隊被強制終結。")
 
 if __name__ == "__main__":
     main()
