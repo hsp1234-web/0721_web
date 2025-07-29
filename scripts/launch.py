@@ -78,6 +78,10 @@ def run_command(command, cwd=None, env=None):
         print(f"❌ 執行命令時發生意外錯誤: {e}")
         return 1
 
+class AppPreparationError(Exception):
+    """在應用程式準備期間發生錯誤時引發的自訂異常"""
+    pass
+
 def prepare_app_environment(app_path: Path, uv_executable: str):
     """為單一應用程式準備獨立的虛擬環境和依賴"""
     app_name = app_path.name
@@ -89,7 +93,8 @@ def prepare_app_environment(app_path: Path, uv_executable: str):
     # 1. 建立虛擬環境
     if not venv_path.exists():
         print(f"為 {app_name} 建立新的虛擬環境於: {venv_path}")
-        run_command([uv_executable, "venv", str(venv_path), "--seed"])
+        if run_command([uv_executable, "venv", str(venv_path), "--seed"]) != 0:
+            raise AppPreparationError(f"為 {app_name} 建立虛擬環境失敗。")
     else:
         print(f"{app_name} 的虛擬環境已存在。")
 
@@ -99,29 +104,54 @@ def prepare_app_environment(app_path: Path, uv_executable: str):
 
     if base_reqs_file.exists():
         print(f"為 {app_name} 安裝基礎依賴...")
-        run_command([
+        if run_command([
             uv_executable, "pip", "install",
             "--python", str(python_executable),
             "-r", str(base_reqs_file)
-        ])
+        ]) != 0:
+            raise AppPreparationError(f"為 {app_name} 安裝基礎依賴失敗。")
 
     if app_reqs_file.exists():
         print(f"為 {app_name} 安裝特定依賴...")
-        run_command([
+        if run_command([
             uv_executable, "pip", "install",
             "--python", str(python_executable),
             "-r", str(app_reqs_file)
-        ])
-    else:
+        ]) != 0:
+            raise AppPreparationError(f"為 {app_name} 安裝特定依賴失敗。")
+    elif app_name != "bad_service":
         print(f"⚠️ 警告: 在 {REQUIREMENTS_DIR} 中找不到 {app_name}.txt，跳過特定依賴安裝。")
 
     print(f"✅ {app_name} 環境準備完成!")
     return str(python_executable)
 
+def check_service_health(app_name, port, timeout=30):
+    """檢查服務是否在指定時間內啟動並回應健康檢查"""
+    start_time = time.time()
+    url = f"http://localhost:{port}/"  # 假設健康檢查端點在根目錄
+    if app_name == "transcriber":
+        url += "health"  # transcriber 的健康檢查路徑不同
+
+    print(f"🩺 對 {app_name} 進行健康檢查於 {url} (超時: {timeout}s)...")
+    while time.time() - start_time < timeout:
+        try:
+            response = httpx.get(url, timeout=2)
+            if response.status_code == 200:
+                print(f"✅ {app_name} 服務健康檢查通過！")
+                return True
+        except httpx.RequestError:
+            # 服務可能尚未完全啟動，這是正常的
+            pass
+        time.sleep(1)
+
+    print(f"❌ 錯誤: {app_name} 服務在 {timeout} 秒內未啟動或健康檢查失敗。")
+    return False
+
 def start_services(apps_to_run):
-    """在背景啟動所有 FastAPI 服務"""
+    """在背景啟動所有 FastAPI 服務，並進行健康檢查"""
     print_header("啟動所有微服務")
     processes = []
+    healthy_services = []
 
     for app_name, config in apps_to_run.items():
         port = config["port"]
@@ -134,12 +164,25 @@ def start_services(apps_to_run):
         process = subprocess.Popen(
             [python_executable, "-m", f"src.{app_name}.main"],
             cwd=PROJECT_ROOT,
-            env=env
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
         processes.append(process)
-        print(f"✅ {app_name} 服務已啟動，PID: {process.pid}")
+        print(f"⏳ {app_name} 服務已啟動 (PID: {process.pid})，等待健康檢查...")
 
-    return processes
+        if check_service_health(app_name, port):
+            healthy_services.append(process)
+        else:
+            print(f"🛑 正在終止無回應的服務 {app_name} (PID: {process.pid})")
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print(f"⚠️ {app_name} 未能終止，強制結束。")
+                process.kill()
+
+    return healthy_services
 
 def start_dashboard():
     """使用 gotty 啟動儀表板"""
@@ -199,17 +242,20 @@ def main():
     uv_executable = find_uv_executable()
 
     apps_to_run = {}
-    ports = {"quant": 8001, "transcriber": 8002}
+    ports = {"quant": 8001, "transcriber": 8002, "bad_service": 8003}
 
     for app_path in SRC_DIR.iterdir():
         if app_path.is_dir() and (app_path / "main.py").exists():
             app_name = app_path.name
-            python_executable = prepare_app_environment(app_path, uv_executable)
-            apps_to_run[app_name] = {
-                "python": python_executable,
-                "path": app_path,
-                "port": ports.get(app_name, 8000)
-            }
+            try:
+                python_executable = prepare_app_environment(app_path, uv_executable)
+                apps_to_run[app_name] = {
+                    "python": python_executable,
+                    "path": app_path,
+                    "port": ports.get(app_name, 8000)
+                }
+            except AppPreparationError as e:
+                print(f"❌ 為 {app_name} 準備環境時發生錯誤: {e}")
 
     if args.dashboard:
         dashboard_process = start_dashboard()

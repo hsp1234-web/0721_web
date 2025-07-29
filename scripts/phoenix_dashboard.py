@@ -73,86 +73,97 @@ PROGRESS_RE = re.compile(
     r"(?P<speed>[\d\.\w /s]+)"     # 速度
 )
 
-async def run_command_async(command: str, cwd: Path, app: App):
-    """異步執行一個子進程命令，並將其輸出串流到 App 的日誌中"""
+async def run_command_async(command: str, cwd: Path, app: App, timeout: int = 300):
+    """
+    異步執行一個子進程命令，並將其輸出串流到 App 的日誌中，支持超時。
+    """
     is_install_command = "pip install" in command
-    task_name = f"安裝依賴於 {app.name}" if is_install_command else f"執行 {command.split()[0]}"
+    task_name = f"為 {app.name} 安裝依賴" if is_install_command else f"執行 {command.split()[0]}"
 
     if app.dashboard and is_install_command:
         app.dashboard.update_current_task(task_name=task_name, progress_line="")
 
-    # ... (subprocess 建立過程保持不變)
+    # 根據平台選擇不同的 subprocess 啟動方式
     if sys.platform != "win32":
         args = shlex.split(command)
-        process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd)
+        process = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd
+        )
     else:
-        process = await asyncio.create_subprocess_shell(command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd)
+        process = await asyncio.create_subprocess_shell(
+            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=cwd
+        )
 
-    while True:
-        line = await process.stdout.readline()
-        if not line:
-            break
-        decoded_line = line.decode('utf-8', errors='replace').strip()
-        if not decoded_line:
-            continue
+    try:
+        # 使用 wait_for 來實現超時
+        async def stream_output():
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                decoded_line = line.decode('utf-8', errors='replace').strip()
+                if not decoded_line:
+                    continue
 
-        match = PROGRESS_RE.match(decoded_line)
-        if match and app.dashboard and is_install_command:
-            # 這是進度條，更新當前任務區塊
-            app.dashboard.update_current_task(progress_line=decoded_line)
-        else:
-            # 這是普通日誌
-            app.add_log(decoded_line)
+                match = PROGRESS_RE.match(decoded_line)
+                if match and app.dashboard and is_install_command:
+                    app.dashboard.update_current_task(progress_line=decoded_line)
+                else:
+                    app.add_log(decoded_line)
+            return await process.wait()
 
-    if app.dashboard and is_install_command:
-        app.dashboard.update_current_task(task_name="[空閒]", progress_line="")
+        return_code = await asyncio.wait_for(stream_output(), timeout=timeout)
+        return return_code
 
-    return await process.wait()
+    except asyncio.TimeoutError:
+        app.add_log(f"❌ 錯誤: 命令 '{command}' 執行超時 ({timeout}秒)。正在終止...")
+        process.terminate()
+        await asyncio.sleep(1) # 給予終止的時間
+        if process.returncode is None:
+            app.add_log("⚠️ 警告: 終止失敗，強制結束。")
+            process.kill()
+        await process.wait()
+        raise  # 重新引發 TimeoutError 以便上層捕獲
+    finally:
+        if app.dashboard and is_install_command:
+            app.dashboard.update_current_task(task_name="[空閒]", progress_line="")
 
-async def prepare_app_environment(app: App, install_large_deps=False):
-    """為單個 App 準備環境和依賴"""
+async def prepare_app_environment(app: App, install_large_deps=False, timeout_per_command: int = 600):
+    """為單個 App 準備環境和依賴，每個安裝步驟都有超時限制"""
     app.set_status(AppStatus.INSTALLING)
 
     try:
         # 1. 建立虛擬環境
         venv_cmd = f"uv venv {shlex.quote(str(app.venv_path))} --seed"
-        return_code = await run_command_async(venv_cmd, cwd=PROJECT_ROOT, app=app)
-        if return_code != 0:
-            raise RuntimeError(f"建立虛擬環境失敗，返回碼: {return_code}")
+        await run_command_async(venv_cmd, cwd=PROJECT_ROOT, app=app, timeout=60) # venv 建立應較快
 
         python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
-
         if not python_executable.exists():
-            raise FileNotFoundError(f"在 '{app.venv_path}' 中找不到 Python 解譯器: '{python_executable}'")
+            raise FileNotFoundError(f"在 '{app.venv_path}' 中找不到 Python 解譯器")
 
-        # 2. 安裝通用測試依賴
-        common_deps = "pytest pytest-mock ruff httpx"
-        pip_cmd = f'uv pip install --python "{python_executable}" {common_deps}'
-        return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-        if return_code != 0:
-            raise RuntimeError(f"安裝通用依賴失敗，返回碼: {return_code}")
+        # 2. 安裝通用依賴
+        common_deps_file = PROJECT_ROOT / "requirements" / "base.txt"
+        if common_deps_file.exists():
+            pip_cmd = f'uv pip install --python "{python_executable}" -r "{common_deps_file}"'
+            await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app, timeout=timeout_per_command)
 
         # 3. 安裝 App 核心依賴
-        reqs_file = app.path / "requirements.txt"
+        reqs_file = PROJECT_ROOT / "requirements" / f"{app.name}.txt"
         if reqs_file.exists():
             pip_cmd = f'uv pip install --python "{python_executable}" -r "{reqs_file}"'
-            return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-            if return_code != 0:
-                raise RuntimeError(f"安裝核心依賴失敗，返回碼: {return_code}")
+            await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app, timeout=timeout_per_command)
 
-        # 4. (可選) 安裝大型依賴
-        if install_large_deps:
-            large_reqs_file = app.path / "requirements.large.txt"
-            if large_reqs_file.exists():
-                app.add_log("偵測到大型依賴，開始安裝...")
-                pip_cmd = f'uv pip install --python "{python_executable}" -r "{large_reqs_file}"'
-                return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-                if return_code != 0:
-                    raise RuntimeError(f"安裝大型依賴失敗，返回碼: {return_code}")
+        # 4. (可選) 安裝大型依賴 (如果適用)
+        # 在這個專案中，大型依賴已合併到 app 特定依賴中，此步驟備用
+        # if install_large_deps: ...
 
         app.set_status(AppStatus.INSTALL_DONE)
         return True
 
+    except asyncio.TimeoutError:
+        app.set_status(AppStatus.FAILED)
+        app.add_log(f"💥 環境準備超時。")
+        return False
     except Exception as e:
         app.set_status(AppStatus.FAILED)
         app.add_log(f"💥 環境準備過程中發生嚴重錯誤: {e}")
@@ -399,10 +410,11 @@ class ANSIDashboard:
             self._write(f"{ANSI.move_cursor(22, 1)}{ANSI.SHOW_CURSOR}")
 
 
-async def run_tests_for_app(app: App):
-    """在 App 的虛擬環境中執行 pytest"""
+async def run_tests_for_app(app: App, timeout: int = 300):
+    """在 App 的虛擬環境中執行 pytest，並設定超時。"""
     app.set_status(AppStatus.TESTING)
 
+    # 測試目錄現在位於 `src/app_name/tests`
     tests_dir = app.path / "tests"
     if not tests_dir.exists() or not any(tests_dir.glob("test_*.py")):
         app.add_log("找不到測試檔案，跳過測試。")
@@ -410,19 +422,32 @@ async def run_tests_for_app(app: App):
         return True
 
     python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    if not python_executable.exists():
+        app.add_log("找不到 Python 解譯器，無法執行測試。")
+        app.set_status(AppStatus.TEST_FAILED)
+        return False
 
     # 設定環境變數，讓測試可以找到專案根目錄
-    os.environ['PYTHONPATH'] = str(PROJECT_ROOT)
+    test_env = os.environ.copy()
+    test_env['PYTHONPATH'] = str(PROJECT_ROOT)
 
     test_cmd = f'uv run --python "{python_executable}" pytest "{tests_dir}"'
 
-    return_code = await run_command_async(test_cmd, cwd=PROJECT_ROOT, app=app)
+    try:
+        # 注意：run_command_async 內部已經處理了 TimeoutError 的日誌記錄和進程終止
+        # 我們只需要在這裡捕獲它來更新 App 的狀態
+        return_code = await run_command_async(test_cmd, cwd=PROJECT_ROOT, app=app, timeout=timeout)
 
-    if return_code == 0:
-        app.set_status(AppStatus.TEST_PASSED)
-        return True
-    else:
+        if return_code == 0:
+            app.set_status(AppStatus.TEST_PASSED)
+            return True
+        else:
+            app.set_status(AppStatus.TEST_FAILED)
+            app.add_log(f"測試執行失敗，返回碼: {return_code}")
+            return False
+    except asyncio.TimeoutError:
         app.set_status(AppStatus.TEST_FAILED)
+        app.add_log(f"測試執行超時 ({timeout}秒)。")
         return False
 
 async def _main_logic_with_dashboard(dashboard: ANSIDashboard = None):

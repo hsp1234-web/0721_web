@@ -56,33 +56,20 @@ async def get_transcription_status(task_id: str):
 
     return JSONResponse(content=status_info)
 
-@app.get("/", summary="服務健康檢查")
+@app.get("/", summary="服務資訊")
 def read_root():
     """
-    根路由，用於簡單的服務健康檢查。
+    根路由，提供服務的基本資訊。
     """
-    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
-
-@app.get("/", summary="服務健康檢查")
-def read_root():
-    """
-    根路由，用於簡單的服務健康檢查。
-    """
-    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
-
-@app.get("/", summary="服務健康檢查")
-def read_root():
-    """
-    根路由，用於簡單的服務健康檢查。
-    """
-    return {"status": "ok", "service": "鳳凰之心 - 語音轉寫服務"}
+    return {"service": "鳳凰之心 - 語音轉寫服務", "version": "1.0.0"}
 
 @app.get("/health", summary="服務健康檢查")
 def health_check():
     """
     一個簡單的健康檢查端點，用於確認服務是否正在運行。
+    返回 200 OK 狀態碼表示服務正常。
     """
-    return {"status": "ok", "message": "語音轉寫服務運行中"}
+    return {"status": "ok"}
 
 def start():
     """
