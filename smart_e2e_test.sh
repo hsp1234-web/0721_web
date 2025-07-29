@@ -67,14 +67,22 @@ TEST_MODE=${TEST_MODE:-mock}
 
 print_header "鳳凰之心智能測試開始 (模式: $TEST_MODE)"
 
-# 步驟 1: 檢查 uv
-print_header "步驟 1: 檢查核心工具 uv"
+# 步驟 1: 檢查核心工具 (uv, psutil, pyyaml)
+print_header "步驟 1: 檢查核心工具"
+# 檢查 uv
 if ! command -v uv &> /dev/null; then
     print_warn "uv 未找到，正在安裝..."
     python3 -m pip install -q uv
     export PATH="$HOME/.local/bin:$PATH"
 fi
 print_success "uv 已就緒。"
+# 檢查核心 Python 依賴
+python3 -c "import psutil, yaml" &> /dev/null || {
+    print_warn "缺少核心依賴 (psutil, PyYAML)，正在安裝..."
+    python3 -m pip install -q psutil pyyaml
+}
+print_success "核心 Python 依賴已滿足。"
+
 
 # 步驟 2: 發現 App
 print_header "步驟 2: 發現 `apps` 目錄下的所有微服務"
@@ -91,10 +99,10 @@ for app_path in "${APPS[@]}"; do
     VENV_DIR="$app_path/.venv_test"
     REQS_FILE="$app_path/requirements.txt"
     REQS_LARGE_FILE="$app_path/requirements.large.txt"
-    TESTS_DIR="$app_path/tests"
+    TESTS_DIR="tests/$app_name"
 
     if [ ! -d "$TESTS_DIR" ] || [ -z "$(find "$TESTS_DIR" -name 'test_*.py')" ]; then
-        print_warn "App '$app_name' 沒有測試檔案，跳過。"
+        print_warn "在 'tests/$app_name' 中找不到 '$app_name' 的測試檔案，跳過。"
         continue
     fi
 
@@ -104,18 +112,18 @@ for app_path in "${APPS[@]}"; do
     uv venv "$VENV_DIR" -p python3 --seed > /dev/null
     PYTHON_EXEC="$VENV_DIR/bin/python"
 
-    print_info "[$app_name] 2. 安裝通用測試依賴..."
+    print_info "[$app_name] 2. 安裝通用測試依賴 (pytest, etc.)..."
+    # 通用依賴比較小，可以直接安裝
     uv pip install -q -p "$PYTHON_EXEC" pytest pytest-mock ruff httpx
 
-    print_info "[$app_name] 3. 安裝 App 核心依賴..."
-    [ -f "$REQS_FILE" ] && uv pip install -q -p "$PYTHON_EXEC" -r "$REQS_FILE"
+    print_info "[$app_name] 3. 啟動智慧型安全安裝程序..."
+    python3 -m core_utils.safe_installer "$app_name" "$REQS_FILE" "$PYTHON_EXEC"
 
     # 根據測試模式決定是否安裝大型依賴
     if [ "$TEST_MODE" == "real" ]; then
         if [ -f "$REQS_LARGE_FILE" ]; then
-            print_warn "[$app_name] 偵測到真實模式，準備安裝大型依賴..."
-            check_and_manage_resources # 僅在安裝大型依賴前檢查
-            uv pip install -q -p "$PYTHON_EXEC" -r "$REQS_LARGE_FILE"
+            print_warn "[$app_name] 偵測到真實模式，準備安全安裝大型依賴..."
+            python3 -m core_utils.safe_installer "${app_name}_large" "$REQS_LARGE_FILE" "$PYTHON_EXEC"
             print_success "[$app_name] 大型依賴安裝完成。"
         fi
         export APP_MOCK_MODE="false"

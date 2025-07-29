@@ -24,10 +24,12 @@ dist/
 # Test artifacts
 .test_venv/
 .e2e_venv/
+.venv_test/
 test_final_archive/
 
 # Logs
-*.log
+# 忽略 logs 目錄下的所有 .log 檔案
+logs/*.log
 
 # IDE / Editor specific
 .vscode/

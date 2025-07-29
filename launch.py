@@ -84,6 +84,9 @@ def run_command(command, cwd, venv_path=None):
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, command)
 
+# 導入新模組
+from core_utils.safe_installer import install_packages
+
 def ensure_uv_installed():
     """確保 uv 已經安裝"""
     print_header("檢查核心工具 uv")
@@ -99,6 +102,22 @@ def ensure_uv_installed():
             print(f"{colors.FAIL}uv 安裝失敗: {e}{colors.ENDC}")
             sys.exit(1)
 
+def ensure_core_deps():
+    """確保核心依賴 (psutil, pyyaml) 已安裝"""
+    print_header("檢查核心依賴 (psutil, PyYAML)")
+    try:
+        import psutil
+        import yaml
+        print_success("核心依賴已滿足。")
+    except ImportError:
+        print_warning("缺少核心依賴，正在嘗試安裝...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "psutil", "pyyaml"])
+            print_success("核心依賴安裝成功！")
+        except subprocess.CalledProcessError as e:
+            print(f"{colors.FAIL}核心依賴安裝失敗: {e}{colors.ENDC}")
+            sys.exit(1)
+
 async def prepare_app(app_path: Path):
     """為單個 App 準備環境和依賴"""
     app_name = app_path.name
@@ -106,6 +125,7 @@ async def prepare_app(app_path: Path):
 
     venv_path = app_path / ".venv"
     requirements_path = app_path / "requirements.txt"
+    python_executable = venv_path / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
     if not requirements_path.exists():
         print_warning(f"在 {app_name} 中找不到 requirements.txt，跳過依賴安裝。")
@@ -117,12 +137,12 @@ async def prepare_app(app_path: Path):
         run_command(f"uv venv", cwd=app_path)
         print_success(f"[{app_name}] 虛擬環境準備就緒。")
 
-        # 步驟 2: 同步依賴
-        print_info(f"[{app_name}] 使用 uv 光速同步依賴...")
-        run_command(f"uv pip sync {requirements_path.name}", cwd=app_path, venv_path=venv_path)
-        print_success(f"[{app_name}] 所有依賴已同步。")
+        # 步驟 2: 使用 safe_installer 安全安裝依賴
+        print_info(f"[{app_name}] 啟動智慧型安全安裝程序...")
+        install_packages(app_name, str(requirements_path), str(python_executable))
+        print_success(f"[{app_name}] 所有依賴已成功安裝。")
 
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, SystemExit) as e:
         print(f"{colors.FAIL}[{app_name}] 環境準備失敗: {e}{colors.ENDC}")
         raise
 
@@ -201,6 +221,7 @@ async def main():
     """主協調函式"""
     print_header("鳳凰之心專案啟動程序開始")
     ensure_uv_installed()
+    ensure_core_deps()
 
     apps_to_launch = [d for d in APPS_DIR.iterdir() if d.is_dir()]
 

@@ -109,46 +109,92 @@ async def run_command_async(command: str, cwd: Path, app: App):
 
     return await process.wait()
 
-async def prepare_app_environment(app: App, install_large_deps=False):
-    """為單個 App 準備環境和依賴"""
-    app.set_status(AppStatus.INSTALLING)
+async def watch_log_file(log_file: Path, app: App):
+    """在背景監控指定的日誌檔案，並將新內容添加到 App 的日誌中"""
+    app.add_log(f"日誌監控已啟動: {log_file}")
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            f.seek(0, 2) # 移動到檔案末尾
+            while not app.install_finished.is_set():
+                line = f.readline()
+                if not line:
+                    await asyncio.sleep(0.1)
+                    continue
+                app.add_log(line.strip())
+    except FileNotFoundError:
+        app.add_log(f"警告：日誌檔案 {log_file} 未找到。")
+    except Exception as e:
+        app.add_log(f"日誌監控錯誤: {e}")
 
+
+async def run_safe_installer(app: App, reqs_file: Path, python_executable: str):
+    """在一個單獨的執行緒中運行同步的 safe_installer"""
+    from core_utils.safe_installer import install_packages
+    loop = asyncio.get_event_loop()
+    # safe_installer 會處理自己的日誌，這裡我們只需要知道它何時完成
+    await loop.run_in_executor(
+        None, # 使用預設的 ThreadPoolExecutor
+        install_packages,
+        app.name,
+        str(reqs_file),
+        python_executable
+    )
+
+async def prepare_app_environment(app: App, install_large_deps=False):
+    """為單個 App 準備環境和依賴 (使用 safe_installer)"""
+    from core_utils.safe_installer import setup_logger
+    app.set_status(AppStatus.INSTALLING)
+    app.install_finished = asyncio.Event()
+
+    log_watcher_task = None
     try:
         # 1. 建立虛擬環境
         venv_cmd = f"uv venv {shlex.quote(str(app.venv_path))} --seed"
         return_code = await run_command_async(venv_cmd, cwd=PROJECT_ROOT, app=app)
-        if return_code != 0:
-            raise RuntimeError(f"建立虛擬環境失敗，返回碼: {return_code}")
+        if return_code != 0: raise RuntimeError("建立虛擬環境失敗")
 
         python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+        if not python_executable.exists(): raise FileNotFoundError(f"找不到 Python 解譯器: {python_executable}")
 
-        if not python_executable.exists():
-            raise FileNotFoundError(f"在 '{app.venv_path}' 中找不到 Python 解譯器: '{python_executable}'")
-
-        # 2. 安裝通用測試依賴
+        # 2. 安裝通用測試依賴 (這些通常很小，直接安裝)
         common_deps = "pytest pytest-mock ruff httpx"
         pip_cmd = f'uv pip install --python "{python_executable}" {common_deps}'
-        return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-        if return_code != 0:
-            raise RuntimeError(f"安裝通用依賴失敗，返回碼: {return_code}")
+        await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
+
+        # 找出最新的日誌檔案以進行監控
+        log_dir = Path("logs")
+        list_of_logs = list(log_dir.glob(f"install_{app.name}_*.log"))
+        # 這裡我們假設在執行此函式前，safe_installer 尚未建立日誌
+        # 我們將在啟動安裝執行緒後，再開始尋找日誌
 
         # 3. 安裝 App 核心依賴
         reqs_file = app.path / "requirements.txt"
         if reqs_file.exists():
-            pip_cmd = f'uv pip install --python "{python_executable}" -r "{reqs_file}"'
-            return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-            if return_code != 0:
-                raise RuntimeError(f"安裝核心依賴失敗，返回碼: {return_code}")
+            app.add_log(f"啟動核心依賴的安全安裝程序...")
+            # 我們需要找到 safe_installer 將要建立的日誌檔
+            # 為了簡化，我們讓 safe_installer 返回日誌檔路徑
+            logger = setup_logger(app.name)
+            log_file_path = logger.handlers[0].baseFilename
+
+            log_watcher_task = asyncio.create_task(watch_log_file(Path(log_file_path), app))
+
+            await run_safe_installer(app, reqs_file, str(python_executable))
 
         # 4. (可選) 安裝大型依賴
         if install_large_deps:
             large_reqs_file = app.path / "requirements.large.txt"
             if large_reqs_file.exists():
-                app.add_log("偵測到大型依賴，開始安裝...")
-                pip_cmd = f'uv pip install --python "{python_executable}" -r "{large_reqs_file}"'
-                return_code = await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
-                if return_code != 0:
-                    raise RuntimeError(f"安裝大型依賴失敗，返回碼: {return_code}")
+                app.add_log("啟動大型依賴的安全安裝程序...")
+                # 為大型依賴建立一個新的 logger 和日誌檔案
+                large_logger = setup_logger(f"{app.name}_large")
+                large_log_file_path = large_logger.handlers[0].baseFilename
+
+                if log_watcher_task and not log_watcher_task.done():
+                    log_watcher_task.cancel() # 停止上一個監控
+
+                log_watcher_task = asyncio.create_task(watch_log_file(Path(large_log_file_path), app))
+
+                await run_safe_installer(app, large_reqs_file, str(python_executable))
 
         app.set_status(AppStatus.INSTALL_DONE)
         return True
@@ -157,6 +203,10 @@ async def prepare_app_environment(app: App, install_large_deps=False):
         app.set_status(AppStatus.FAILED)
         app.add_log(f"💥 環境準備過程中發生嚴重錯誤: {e}")
         return False
+    finally:
+        app.install_finished.set()
+        if log_watcher_task and not log_watcher_task.done():
+            log_watcher_task.cancel()
 
 
 def discover_apps() -> list[App]:
@@ -401,7 +451,8 @@ async def run_tests_for_app(app: App):
     """在 App 的虛擬環境中執行 pytest"""
     app.set_status(AppStatus.TESTING)
 
-    tests_dir = app.path / "tests"
+    # 修正測試目錄的路徑
+    tests_dir = PROJECT_ROOT / "tests" / app.name
     if not tests_dir.exists() or not any(tests_dir.glob("test_*.py")):
         app.add_log("找不到測試檔案，跳過測試。")
         app.set_status(AppStatus.TEST_PASSED) # 沒有測試也算通過
@@ -444,14 +495,26 @@ async def main_logic(dashboard: ANSIDashboard = None):
         if success:
             await run_tests_for_app(app)
 
-def main():
-    """主函數"""
-    ensure_psutil_installed()
+def ensure_core_deps():
+    """確保核心依賴 (uv, psutil, pyyaml) 已安裝"""
+    print("正在檢查核心依賴...")
     try:
         subprocess.check_output(["uv", "--version"], stderr=subprocess.STDOUT)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("錯誤: `uv` 未安裝。")
-        sys.exit(1)
+        import psutil
+        import yaml
+        print("✅ 核心依賴已滿足。")
+    except (ImportError, FileNotFoundError, subprocess.CalledProcessError):
+        print("⚠️ 缺少核心依賴，正在嘗試安裝...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "uv", "psutil", "pyyaml"])
+            print("✅ 核心依賴安裝成功！")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ 核心依賴安裝失敗: {e}")
+            sys.exit(1)
+
+def main():
+    """主函數"""
+    ensure_core_deps()
 
     if '--no-tui' in sys.argv:
         asyncio.run(main_logic())

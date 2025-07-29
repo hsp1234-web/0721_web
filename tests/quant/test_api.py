@@ -8,10 +8,12 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 # --- 設置導入路徑 ---
-app_dir = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(app_dir))
+# 我們需要將專案的根目錄 (包含 apps/ 和 tests/ 的目錄) 加入 sys.path
+# 這樣 Python 才能找到 `quant` 模組
+project_root = Path.cwd()
+sys.path.insert(0, str(project_root))
 
-from quant.main import app  # noqa: E402
+from apps.quant.main import app
 
 # 使用 FastAPI 的測試客戶端
 client = TestClient(app)

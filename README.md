@@ -107,31 +107,50 @@ python phoenix_starter.py
 ```
 /PHOENIX_HEART_PROJECT/
 │
-├── 🚀 launch.py                 # 唯一的「總開關」，一鍵啟動所有服務。
+├── 🚀 launch.py                   # 唯一的「總開關」，一鍵啟動所有服務。
+├── 🚀 phoenix_starter.py          # 視覺化的「鳳凰之心指揮中心」啟動器。
 │
-├── 📦 apps/                      # 【所有獨立微服務的家】
+├── 📦 apps/                        # 【所有獨立微服務的家】
 │   │
-│   ├── 📈 quant/                 # 【量化金融 App】
-│   │   ├── 🛰️ main.py             # FastAPI 入口
-│   │   ├── 🧠 logic/             # 核心業務邏輯
-│   │   ├── 🕸️ api/                # API 接口層
-│   │   ├── 📜 requirements.txt     # 核心依賴
-│   │   └── 🧪 tests/             # 獨立的測試
+│   ├── 📈 quant/                   # 【量化金融 App】
+│   │   ├── 🛰️ main.py               # FastAPI 應用主入口。
+│   │   ├── 🧠 logic/               # 核心業務邏輯。
+│   │   │   ├── analysis.py         # 分析計算模組。
+│   │   │   ├── data_sourcing.py    # 數據源處理模組。
+│   │   │   ├── database.py         # 資料庫互動模組。
+│   │   │   └── factor_engineering.py # 因子工程模組。
+│   │   ├── 🕸️ api/                  # API 接口層。
+│   │   │   └── v1/                 # API 版本 v1。
+│   │   │       └── endpoints.py    # API 端點定義。
+│   │   └── 📜 requirements.txt       # Python 核心依賴。
 │   │
-│   └── 🎤 transcriber/           # 【語音轉寫 App】
-│       ├── 🛰️ main.py             # FastAPI 入口
-│       ├── 🧠 logic.py           # 核心業務邏輯
-│       ├── 📜 requirements.txt     # 核心依賴
-│       ├── 📜 requirements.large.txt # (可選) 大型依賴
-│       └── 🧪 tests/             # 獨立的測試
+│   └── 🎤 transcriber/             # 【語音轉寫 App】
+│       ├── 🛰️ main.py               # FastAPI 應用主入口。
+│       ├── 🧠 logic.py             # 核心業務邏輯。
+│       ├── 📜 requirements.txt       # Python 核心依賴。
+│       └── 📜 requirements.large.txt # (可選) 大型 AI 模型依賴。
 │
-├── ⚙️ proxy/                      # 【逆向代理配置】
-│   └── proxy_config.json       # 路由規則設定檔
+├── 🧪 tests/                       # 【品質保證中心：所有測試的家】
+│   │
+│   ├── 📈 quant/                   # 【量化金融 App 的測試】
+│   │   └── test_api.py           # API 層級的整合測試。
+│   │
+│   └── 🎤 transcriber/             # 【語音轉寫 App 的測試】
+│       └── test_api.py           # API 層級的整合測試 (包含模擬與 E2E)。
 │
-├── 📜 smart_e2e_test.sh         # 智能測試指揮官腳本
+├── ⚙️ proxy/                        # 【逆向代理配置】
+│   └── proxy_config.json         # 路由規則設定檔，定義如何轉發請求。
 │
-├── 📚 docs/                       # 【專案文件】
-│   └── ARCHITECTURE.md         # 最終的架構設計總藍圖
+├── 📜 smart_e2e_test.sh           # 智能測試指揮官腳本。
 │
-└── 🗄️ ALL_DATE/                 # 【封存參考資料】
+├── 📚 docs/                         # 【專案文件】
+│   ├── ARCHITECTURE.md           # 最終的架構設計總藍圖。
+│   ├── Colab_Guide.md            # 在 Google Colab 上運行的指南。
+│   ├── MISSION_DEBRIEFING.md     # 專案的任務報告與總結。
+│   └── TEST.md                   # 關於測試策略的詳細說明。
+│
+├── 🗄️ ALL_DATE/                   # 【封存參考資料】
+│   └── ...                       # (包含多個舊專案與參考資料，此處省略)
+│
+└── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
