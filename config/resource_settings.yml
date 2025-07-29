@@ -32,3 +32,10 @@ resource_monitoring:
   # "disk": 當記憶體不足時，系統可能會考慮使用此策略，將模型的部分或全部
   #         緩存到磁碟上。 (此功能為未來擴展預留)
   model_storage_strategy: "memory"
+
+  # --- 前端儀表板設定 (Dashboard Settings) ---
+
+  # 儀表板刷新頻率 (秒, float)
+  # 控制前端儀表板的更新頻率。較低的值會提供更即時的反應，但可能增加
+  # CPU 負擔。建議值在 0.2 到 1.0 之間。
+  monitor_refresh_seconds: 0.2

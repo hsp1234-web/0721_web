@@ -129,19 +129,34 @@ async def main_logic():
     await asyncio.gather(*tasks, return_exceptions=True)
 
     if all(status == "running" for status in apps_status.values()):
+        final_url = "http://localhost:8005/" # 預設值
         try:
-            # 僅在 Colab 環境中嘗試生成代理 URL
             from google.colab.output import eval_js
             import google.colab
+
             if hasattr(google.colab, 'kernel') and google.colab.kernel:
-                 final_url = eval_js(f"google.colab.kernel.proxyPort(8005)")
-                 add_log("INFO", f"Colab 環境檢測成功，生成代理 URL: {final_url}")
+                add_log("INFO", "Colab 環境檢測成功，開始嘗試獲取代理 URL...")
+                for i in range(10): # 嘗試 10 次
+                    try:
+                        url = eval_js(f"google.colab.kernel.proxyPort(8005)")
+                        if url:
+                            final_url = url
+                            add_log("INFO", f"成功獲取代理 URL: {final_url}")
+                            break # 成功後跳出迴圈
+                    except Exception as e:
+                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 失敗: {e}")
+
+                    if final_url == "http://localhost:8005/":
+                         add_log("INFO", f"等待 5 秒後重試...")
+                         await asyncio.sleep(5)
+
+                if final_url == "http://localhost:8005/":
+                    add_log("ERROR", "10 次嘗試後仍無法獲取 Colab 代理 URL，將使用本地 URL。")
             else:
-                 raise ImportError("Not in a Colab kernel environment")
+                 add_log("WARNING", "非 Colab kernel 環境。")
+
         except (ImportError, AttributeError):
-            # 在非 Colab 環境或無法獲取 kernel 的情況下，退回到 localhost
-            final_url = "http://localhost:8005/"
-            add_log("WARNING", f"無法生成 Colab 代理 URL，將使用本地 URL: {final_url}")
+            add_log("WARNING", f"無法導入 google.colab 模組，將使用本地 URL。")
 
         update_status(stage="completed", action_url=final_url)
         add_log("INFO", f"所有服務已成功啟動！操作儀表板已就緒。")
@@ -150,17 +165,30 @@ async def main_logic():
         add_log("ERROR", "部分服務啟動失敗。")
 
 # --- 主程序 ---
+import psutil
+
+async def monitor_resources():
+    """持續監控並更新系統資源"""
+    while True:
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        update_status(cpu=cpu, ram=ram)
+        await asyncio.sleep(1)
+
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
     try:
-        await main_logic()
+        # 同時執行主邏輯和資源監控
+        main_task = asyncio.create_task(main_logic())
+        monitor_task = asyncio.create_task(monitor_resources())
+
+        await main_task
 
         # 僅在非測試環境下進入長時間休眠
-        # CI_MODE or FAST_TEST_MODE in test will skip this
         if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
             add_log("INFO", "服務啟動完成，後端進入持續待命狀態...")
-            await asyncio.sleep(3600 * 24) # 休眠24小時
+            await monitor_task # 讓監控任務持續執行
 
     except Exception as e:
         add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
