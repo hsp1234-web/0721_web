@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 Colab 全自動化啟動器 v4.0                                     ║
+# ║   🚀 Colab 官方方法啟動器 v5.0 (最終版)                            ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
 # ║   設計哲學：                                                         ║
-# ║       以最快速度準備並啟動後端 Web 儀表板，然後在 Colab 端透過      ║
-# ║       JavaScript 自動偵測並嵌入儀表板畫面。任務結束後，自動生成      ║
-# ║       精美的 Markdown 報告並歸檔，最後自動終止儲存格。             ║
+# ║       採用 Colab 官方推薦的 `google.colab.output` 函式庫，以最穩定、  ║
+# ║       可靠的方式自動偵測並顯示後端儀表板。結合日誌歸檔與自動終止，   ║
+# ║       提供最完善的自動化體驗。                                       ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心全自動啟動器 v4.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心全自動啟動器 v5.0 (最終版) { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -47,7 +47,8 @@ import shutil
 import subprocess
 from pathlib import Path
 import time
-from IPython.display import display, Javascript, HTML
+import httpx
+from google.colab import output as colab_output
 
 def main():
     try:
@@ -55,7 +56,7 @@ def main():
         project_path = base_path / PROJECT_FOLDER_NAME
         log_file_path = project_path / "launch_logs.txt"
 
-        print("🚀 鳳凰之心全自動化啟動程序 v4.0")
+        print("🚀 鳳凰之心全自動化啟動程序 v5.0 (最終版)")
         print("="*80)
 
         # --- 步驟 1: 準備專案 ---
@@ -79,54 +80,40 @@ def main():
         server_process = subprocess.Popen([sys.executable, "launch.py"], stdout=log_file, stderr=subprocess.STDOUT)
         print(f"✅ 後端啟動腳本 (launch.py) 已在背景運行 (PID: {server_process.pid})。")
 
-        # --- 步驟 4: 自動偵測並顯示儀表板 ---
-        print("\n4. 自動偵測並嵌入 Web 監控儀表板...")
-        proxy_url = "http://localhost:8000"
+        # --- 步驟 4: 使用官方方法，自動偵測並顯示儀表板 ---
+        print("\n4. 自動偵測並顯示 Web 監控儀表板...")
 
-        # 使用 Javascript 來實現自動重試和嵌入 iframe
-        js_code = f"""
-            const url = '{proxy_url}';
-            const maxRetries = 20; // 最多重試 20 次 (共 20 秒)
-            let retries = 0;
-            const intervalId = setInterval(async () => {{
-                const statusDiv = document.getElementById('status');
-                try {{
-                    const response = await fetch(url, {{ mode: 'no-cors' }});
-                    // 對於 no-cors 模式，我們無法檢查 status，但只要請求不拋出錯誤就認為服務已上線
-                    clearInterval(intervalId);
-                    statusDiv.innerHTML = `<h2>✅ 儀表板已上線！正在載入...</h2>`;
+        # 使用 Python 端的 httpx 進行重試偵測
+        proxy_port = 8000
+        max_retries = 20
+        for i in range(max_retries):
+            try:
+                # 使用 httpx 探測 localhost 的服務是否已啟動
+                response = httpx.get(f"http://localhost:{proxy_port}/", timeout=1)
+                # 只要有回應（無論狀態碼），就代表服務已上線
+                print(f"✅ 儀表板服務已在第 {i+1} 秒偵測到！正在顯示...")
 
-                    const iframe = document.createElement('iframe');
-                    iframe.src = url;
-                    iframe.style.width = '100%';
-                    iframe.style.height = '600px';
-                    iframe.style.border = '1px solid #ccc';
-                    document.getElementById('dashboard').appendChild(iframe);
+                # 使用 Colab 官方函式庫來顯示儀表板
+                colab_output.serve_kernel_port_as_iframe(proxy_port, height=600)
 
-                }} catch (e) {{
-                    retries++;
-                    statusDiv.innerHTML = `<h2>⏳ 等待儀表板上線中... (嘗試第 ${{retries}} 次)</h2>`;
-                    if (retries >= maxRetries) {{
-                        clearInterval(intervalId);
-                        statusDiv.innerHTML = `<h2>❌ 儀表板啟動超時，請檢查日誌。</h2>`;
-                    }}
-                }}
-            }}, 1000);
-        """
-        display(HTML('<div id="status"></div><div id="dashboard"></div>'))
-        display(Javascript(js_code))
+                break # 成功後跳出迴圈
+            except httpx.ConnectError:
+                if i < max_retries - 1:
+                    time.sleep(1)
+                else:
+                    print("❌ 儀表板啟動超時。請檢查 `launch_logs.txt` 以了解詳細資訊。")
+                    # 即使超時，也繼續後續步驟以生成報告
 
         # --- 步驟 5: 等待後端任務完成 ---
         print("\n5. Colab 前端將在背景監測後端任務，完成後將自動生成報告並終止。")
-        server_process.wait() # 等待 launch.py 執行緒結束
-        log_file.close() # 關閉日誌檔案
+        server_process.wait()
+        log_file.close()
         print("\n✅ 後端服務已終止。")
 
         # --- 步驟 6: 生成並歸檔報告 ---
         if LOG_ARCHIVE_FOLDER_NAME:
             print(f"\n6. 正在生成並歸檔執行報告至 '{LOG_ARCHIVE_FOLDER_NAME}'...")
             from core_utils.report_generator import ReportGenerator
-            # 注意：這裡的歸檔路徑是在 Colab 的根目錄，而不是專案目錄內
             archive_path = base_path / LOG_ARCHIVE_FOLDER_NAME
             generator = ReportGenerator(log_file_path=str(log_file_path), archive_folder=str(archive_path))
             generator.save()
