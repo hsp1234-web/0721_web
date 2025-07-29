@@ -78,7 +78,69 @@
 
 ---
 
-## 三、 全鏈路自動化流程圖
+## 三、 Colab 混合動力啟動器 (`run/colab_runner.py`)
+
+`colab_runner.py` 是專為 Google Colab 環境量身打造的啟動器，旨在解決 Colab 的「服務孤島化」問題，提供「一鍵執行，自動開啟」的無縫體驗。
+
+### 困境：服務孤島化
+
+在 Colab 中啟動的後端服務（如 GoTTY 或 Web API）運行在 Google 的內部網路中，無法被使用者的瀏覽器直接存取。這導致即使服務成功啟動，使用者也無法與之互動，形成「看得到卻用不到」的困境。
+
+### 解決方案：後端驅動的混合動力架構
+
+我們採用了一種後端驅動、前後端協作的混合動力架構來解決這個問題。其核心思想是，將所有網路通訊的發起點都放在可靠的 Colab 後端，然後將最終結果「推送」到前端供使用者操作。
+
+```mermaid
+sequenceDiagram
+    participant User as 👨‍💻 使用者
+    participant Colab_Python as 🐍 Colab 後端 (colab_runner.py)
+    participant API_Service as ⚙️ API 服務 (localhost:8004)
+    participant Colab_Frontend as 📄 Colab 前端 (瀏覽器)
+
+    User->>Colab_Python: 執行儲存格
+    Colab_Python->>Colab_Python: 啟動 GoTTY 和 API 服務
+    Colab_Python->>Colab_Frontend: 1. 顯示 GoTTY iframe (透過 serve_kernel_port_as_iframe)
+    Colab_Python->>Colab_Frontend: 2. 顯示 "等待中..." 的初始訊息
+
+    loop 後端輪詢 (在 Colab 環境內部)
+        Colab_Python->>API_Service: GET /api/get-action-url
+        alt API 未就緒
+            API_Service-->>Colab_Python: 回應失敗或未完成
+            Colab_Python->>Colab_Python: 等待 5 秒後重試
+        else API 已就緒
+            API_Service-->>Colab_Python: 回應 {status: "success", url: "..."}
+            break
+        end
+    end
+
+    Colab_Python->>Colab_Python: 成功獲取到最終 URL
+    Colab_Python->>Colab_Frontend: 3. 執行 JavaScript，將 "等待中..." 替換為 "🚀 點此開啟" 按鈕
+
+    User->>Colab_Frontend: 點擊按鈕
+    Colab_Frontend->>User: 在新分頁開啟儀表板
+```
+
+#### 流程詳解：
+
+1.  **服務啟動與橋樑建立**：
+    *   `colab_runner.py` 首先在背景啟動 GoTTY（日誌服務）和 Uvicorn（API 服務）。
+    *   它使用 `google.colab.output.serve_kernel_port_as_iframe` 為 GoTTY 的 `8080` 連接埠建立一個安全的對外公開通道，並將其顯示在 Colab 的輸出儲存格中。
+
+2.  **後端輪詢與狀態監控**：
+    *   腳本的核心是一個位於 **Python 後端** 的輪詢迴圈。
+    *   這個迴圈在 Colab 內部不斷地向 `http://localhost:8004/api/get-action-url` 發送請求。因為請求源和目標都在同一個 Colab 環境內，所以網路通訊是可靠的。
+    *   同時，它會在 Colab 的輸出中列印進度，讓使用者知道系統正在努力工作。
+
+3.  **動態 JavaScript 注入**：
+    *   一旦後端輪詢成功獲取到儀表板的 URL，它會動態生成一小段 JavaScript 程式碼。
+    *   這段程式碼的唯一目的，就是將頁面上預先放置的 `<div>` 佔位符，替換成一個包含了最終 URL 的可點擊按鈕。
+    *   透過 `IPython.display.Javascript`，這段腳本被「推送」到前端並執行，完成了使用者介面的更新。
+
+這個架構不僅解決了網路隔離問題，還提供了一個可擴展的模式。未來若有更多需要與使用者互動的連結或按鈕，都可以採用同樣的「後端輪詢 -> 動態注入」模式來實現。
+
+---
+
+## 四、 全鏈路自動化流程圖
 
 這張圖描繪了從使用者啟動到測試完成的完整自動化鏈路，體現了我們設計哲學中的所有核心策略。
 
