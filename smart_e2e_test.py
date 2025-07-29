@@ -200,6 +200,85 @@ def test_app(app_path: Path, test_mode: str) -> bool:
     print_success(f"App '{app_name}' 所有測試皆已通過！")
     return True
 
+def run_command_with_output(command: list[str], cwd: Path = PROJECT_ROOT, env: dict = None) -> tuple[int, str, str]:
+    """執行一個子進程命令，並返回其結束代碼、stdout 和 stderr"""
+    print_info(f"執行命令: {' '.join(command)}")
+    process = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=env or os.environ,
+        encoding='utf-8',
+        errors='replace'
+    )
+    print("--- STDOUT ---")
+    print(process.stdout)
+    print("--- STDERR ---")
+    print(process.stderr)
+    return process.returncode, process.stdout, process.stderr
+
+
+def test_colab_runner_flow_comprehensive():
+    """更全面地測試 Colab Runner 的核心流程，模擬 GoTTY 環境"""
+    print_header("步驟 4: 全面測試 Colab Runner 核心流程")
+
+    # 1. 確保所需套件已安裝
+    print_info("確保 'rich' 和 'fastapi' 套件已安裝...")
+    if run_command([sys.executable, "-m", "pip", "install", "-q", "rich", "fastapi", "uvicorn"]) != 0:
+        print_fail("安裝測試所需套件失敗。")
+        return False
+
+    # 2. 設置環境變數，模擬 GoTTY 的非 TTY 環境
+    test_env = os.environ.copy()
+    test_env["FAST_TEST_MODE"] = "true"
+    test_env["STATE_FILE"] = str(PROJECT_ROOT / "test_phoenix_state.json")
+    test_env["TERM"] = "dumb"
+
+    # 3. 執行 launch.py 並檢查 TUI 是否被強制啟動
+    print_info("在 'dumb' 終端中執行 launch.py，驗證 TUI 是否強制啟動...")
+    code, stdout, stderr = run_command_with_output([sys.executable, "launch.py"], env=test_env)
+
+    if code != 0:
+        print_fail("launch.py 執行失敗。")
+        return False
+
+    # 日誌現在會同時輸出到 stdout 和 state file，所以我們在 stdout 檢查
+    if "強制以 TUI 模式啟動..." not in stdout:
+        print_fail("在 'dumb' 終端模式下，未偵測到 TUI 強制啟動日誌。")
+        return False
+
+    if "Live TUI 渲染核心已啟動。" not in stdout:
+        print_fail("未偵測到 Live TUI 渲染核心啟動日誌。")
+        return False
+
+    print_success("TUI 強制啟動和渲染驗證成功。")
+
+    # 4. 驗證狀態檔案是否正確生成
+    state_file = Path(test_env["STATE_FILE"])
+    if not state_file.exists():
+        print_fail(f"狀態檔案未找到: {state_file}")
+        return False
+
+    import json
+    with open(state_file, 'r') as f:
+        state = json.load(f)
+
+    if state.get("action_url") != "http://localhost:8000/dashboard":
+        print_fail(f"狀態檔案中的 action_url 不正確: {state.get('action_url')}")
+        return False
+
+    print_success("狀態檔案生成和內容驗證成功！")
+
+    # 5. 模擬 API 伺服器並驗證輪詢
+    # (這部分較複雜，暫時簡化為檢查狀態檔案)
+
+    # 6. 清理
+    state_file.unlink()
+    print_success("Colab Runner 核心流程全面測試通過！")
+    return True
+
+
 def main():
     """主函數"""
     test_mode = os.environ.get("TEST_MODE", "mock")
@@ -214,27 +293,25 @@ def main():
 
     print_header(f"步驟 3: 開始對 {len(apps)} 個 App 進行平行化測試")
 
-    # 準備傳遞給 test_app 的參數
-    # starmap 需要一個參數元組的列表
     tasks = [(app_path, test_mode) for app_path in apps]
-
-    # 使用 multiprocessing.Pool 來平行執行測試
-    # 使用 cpu_count() 來決定進程數，但不超過 App 的數量
     num_processes = min(cpu_count(), len(apps))
     print_info(f"將使用 {num_processes} 個平行進程。")
 
     with Pool(processes=num_processes) as pool:
-        # starmap 會將元組解包作為參數傳遞給 test_app
         results = pool.starmap(test_app, tasks)
 
-    failures = sum(1 for res in results if not res)
+    app_failures = sum(1 for res in results if not res)
+
+    # 執行 Colab 流程測試
+    colab_test_success = test_colab_runner_flow_comprehensive()
 
     print_header("所有測試已完成")
-    if failures == 0:
+    if app_failures == 0 and colab_test_success:
         print_success("🎉 恭喜！所有 App 的測試都已成功通過！")
         sys.exit(0)
     else:
-        print_fail(f"總共有 {failures} 個 App 的測試未通過。請檢查上面的日誌。")
+        total_failures = app_failures + (0 if colab_test_success else 1)
+        print_fail(f"總共有 {total_failures} 個測試流程未通過。請檢查上面的日誌。")
         sys.exit(1)
 
 if __name__ == "__main__":
