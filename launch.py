@@ -137,10 +137,24 @@ async def main_logic():
         add_log("ERROR", "部分服務啟動失敗。")
 
 # --- 主程序 ---
-if __name__ == "__main__":
+async def main():
+    """包含休眠邏輯的主異步函數"""
     setup_database()
     try:
-        asyncio.run(main_logic())
+        await main_logic()
+
+        # 僅在非測試環境下進入長時間休眠
+        # CI_MODE or FAST_TEST_MODE in test will skip this
+        if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
+            add_log("INFO", "服務啟動完成，後端進入持續待命狀態...")
+            await asyncio.sleep(3600 * 24) # 休眠24小時
+
     except Exception as e:
         add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
         update_status(stage="critical_failure")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        add_log("INFO", "偵測到手動中斷，程序結束。")

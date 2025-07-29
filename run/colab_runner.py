@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab 資料庫驅動儀表板 v12.0 (穩定版)                        ║
+# ║      🚀 Colab 資料庫驅動儀表板 v13.0 (Rich 版)                     ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   設計哲學：                                                         ║
-# ║       一個絕對穩定的架構，將「做事」與「顯示」徹底分離。後端專心     ║
-# ║       更新資料庫，前端專心讀取資料庫並渲染，互不干擾。               ║
+# ║   採用 rich 套件，提供美觀、流暢、不閃爍的即時儀表板。             ║
+# ║   後端作為守護進程持續運行，前端顯示迴圈永不中斷。                 ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心資料庫啟動器 v12.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 Rich 啟動器 v13.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -49,48 +48,108 @@ import sqlite3
 import json
 from IPython.display import display, HTML, Javascript, clear_output
 
+# 安裝 Rich
+try:
+    import rich
+except ImportError:
+    print("安裝 rich 套件...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rich"], check=True)
+    print("✅ rich 安裝完成。")
+
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+console = Console(width=120)
+
+def make_layout() -> Layout:
+    """建立儀表板的版面配置"""
+    layout = Layout(name="root")
+    layout.split(
+        Layout(name="header", size=3),
+        Layout(ratio=1, name="main"),
+        Layout(size=5, name="footer"),
+    )
+    layout["main"].split_row(Layout(name="side", size=40), Layout(name="body", ratio=1))
+    layout["side"].split(Layout(name="status_panel"), Layout(name="system_panel"))
+    return layout
+
+def get_app_status_table(apps_status: dict) -> Table:
+    """建立應用程式狀態表格"""
+    table = Table(title="[bold blue]微服務狀態[/]", expand=True, border_style="blue")
+    table.add_column("Icon", justify="center")
+    table.add_column("服務名稱", style="magenta")
+    table.add_column("狀態", justify="right")
+
+    status_map = {
+        "pending": "[yellow]⚪ Pending[/]",
+        "starting": "[bright_yellow]🟡 Starting[/]",
+        "running": "[green]🟢 Running[/]",
+        "failed": "[red]🔴 Failed[/]"
+    }
+    for app, status in apps_status.items():
+        icon = status.split(" ")[0]
+        status_text = status_map.get(status, "[grey]❓ Unknown[/]")
+        table.add_row(icon, app.capitalize(), status_text)
+    return table
+
+def get_log_panel(log_rows: list) -> Panel:
+    """建立日誌面板"""
+    log_text = ""
+    for ts, level, msg in reversed(log_rows):
+        ts_str = str(ts).split(" ")[1][:8] if ts else ""
+        level_color = {
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold red"
+        }.get(level, "white")
+        log_text += f"[white]{ts_str}[/] [{level_color}]{level.ljust(8)}[/] [white]{msg}[/]\n"
+    return Panel(log_text, title="[bold blue]📜 即時日誌[/]", border_style="blue")
+
+base_path = Path("/content")
+
 def main():
     # --- 全域路徑與變數 ---
-    base_path = Path("/content")
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
 
     # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心資料庫啟動器 v12.0")
-    print("="*80)
-    print("1. 準備專案目錄...")
-    if FORCE_REPO_REFRESH and project_path.exists():
-        shutil.rmtree(project_path)
-    if not project_path.exists():
-        git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", "-q", REPOSITORY_URL, str(project_path)]
-        subprocess.run(git_command, check=True, cwd=base_path)
-    os.chdir(project_path)
-    print(f"✅ 專案準備完成於: {os.getcwd()}")
+    console.rule("[bold green]🚀 鳳凰之心 Rich 啟動器 v13.0[/bold green]")
+    with console.status("[bold yellow]1. 準備專案目錄...[/]", spinner="earth"):
+        if FORCE_REPO_REFRESH and project_path.exists():
+            shutil.rmtree(project_path)
+        if not project_path.exists():
+            git_command = ["git", "clone", "--branch", TARGET_BRANCH_OR_TAG, "--depth", "1", "-q", REPOSITORY_URL, str(project_path)]
+            subprocess.run(git_command, check=True, cwd=base_path)
+        os.chdir(project_path)
+    console.log(f"✅ 專案準備完成於: {os.getcwd()}")
 
     # --- 步驟 2: 安裝核心依賴 ---
-    print("\n2. 安裝核心 Python 依賴...")
-    # 升級 pip
-    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 安裝所有 App 的依賴
-    all_reqs_path = project_path / "all_requirements.txt"
-    with open(all_reqs_path, "w") as outfile:
-        for app_dir in (project_path / "apps").iterdir():
-            if app_dir.is_dir():
-                req_file = app_dir / "requirements.txt"
-                if req_file.exists():
-                    with open(req_file) as infile:
-                        outfile.write(infile.read())
-                    outfile.write("\n")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(all_reqs_path)], check=True)
-    print("✅ 所有依賴安裝完成。")
+    with console.status("[bold yellow]2. 安裝核心 Python 依賴...[/]", spinner="dots"):
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        all_reqs_path = project_path / "all_requirements.txt"
+        with open(all_reqs_path, "w") as outfile:
+            for app_dir in (project_path / "apps").iterdir():
+                if app_dir.is_dir():
+                    req_file = app_dir / "requirements.txt"
+                    if req_file.exists():
+                        with open(req_file) as infile:
+                            outfile.write(infile.read())
+                        outfile.write("\n")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(all_reqs_path)], check=True)
+    console.log("✅ 所有依賴安裝完成。")
 
     # --- 步驟 3: 在背景啟動後端主力部隊 ---
-    print("\n3. 觸發背景服務啟動程序...")
+    console.log("3. 觸發背景服務啟動程序...")
     env = os.environ.copy()
     env["DB_FILE"] = str(db_file)
     if FAST_TEST_MODE:
         env["FAST_TEST_MODE"] = "true"
-        print("   - 🚀 快速測試模式已啟用。")
+        console.log("   - 🚀 快速測試模式已啟用。")
 
     log_file = project_path / "logs" / "launch.log"
     log_file.parent.mkdir(exist_ok=True)
@@ -98,85 +157,79 @@ def main():
     with open(log_file, "w") as f:
         launch_process = subprocess.Popen(
             [sys.executable, "launch.py"],
-            env=env,
-            stdout=f,
-            stderr=subprocess.STDOUT
+            env=env, stdout=f, stderr=subprocess.STDOUT
         )
-    print(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
-    print(f"   - 日誌將寫入: {log_file}")
+    console.log(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
+    console.log(f"   - 日誌將寫入: {log_file}")
 
     # --- 步驟 4: 啟動前端戰情顯示器 ---
-    print("\n4. 正在啟動前端戰情顯示器...")
-    time.sleep(2) # 等待資料庫初始化
+    console.log("\n4. 正在啟動前端戰情顯示器...")
+    time.sleep(2)
 
-    try:
-        while True:
-            clear_output(wait=True)
-            conn = sqlite3.connect(db_file)
-            cursor = conn.cursor()
+    layout = make_layout()
 
-            # 讀取狀態
-            cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
-            status_row = cursor.fetchone()
+    with Live(layout, screen=True, redirect_stderr=False, vertical_overflow="visible") as live:
+        try:
+            while True:
+                try:
+                    conn = sqlite3.connect(db_file)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
+                    status_row = cursor.fetchone()
+                    cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
+                    log_rows = cursor.fetchall()
+                    conn.close()
 
-            # 讀取日誌
-            cursor.execute("SELECT timestamp, level, message FROM log_table ORDER BY id DESC LIMIT 10")
-            log_rows = cursor.fetchall()
+                    if not status_row:
+                        time.sleep(1)
+                        continue
+                except sqlite3.OperationalError as e:
+                    if "no such table" in str(e):
+                        time.sleep(1)
+                        continue
+                    raise
 
-            conn.close()
+                stage, apps_status_json, action_url, cpu, ram = status_row
+                apps_status = json.loads(apps_status_json) if apps_status_json else {}
 
-            if not status_row:
-                print("⏳ 等待資料庫狀態初始化...")
+                # 更新 Header
+                header_text = Text("🚀 鳳凰之心 - 作戰指揮中心 🚀", justify="center", style="bold white on blue")
+                layout["header"].update(Panel(header_text, border_style="blue"))
+
+                # 更新 App 狀態
+                layout["status_panel"].update(get_app_status_table(apps_status))
+
+                # 更新系統狀態
+                system_table = Table(title="[bold blue]📊 系統資源[/]", expand=True, border_style="blue")
+                system_table.add_column("項目", style="magenta")
+                system_table.add_column("數值", justify="right", style="green")
+                system_table.add_row("CPU", f"{cpu or 0.0:.1f}%")
+                system_table.add_row("RAM", f"{ram or 0.0:.1f}%")
+                layout["system_panel"].update(system_table)
+
+                # 更新日誌
+                layout["body"].update(get_log_panel(log_rows))
+
+                # 更新 Footer (連結和狀態)
+                footer_panel_style = "blue"
+                footer_text = f"當前階段: [bold yellow]{stage.upper()}[/]"
+                if action_url:
+                    footer_text += f"\n\n[bold green]✅ 啟動完成！[/] 點擊連結開啟主儀表板: [bright_cyan link={action_url}]{action_url}[/bright_cyan link]"
+                    footer_panel_style = "green"
+                elif stage in ["failed", "critical_failure"]:
+                    footer_text += "\n\n[bold red]❌ 啟動失敗。請檢查日誌以了解詳情。[/]"
+                    footer_panel_style = "red"
+                layout["footer"].update(Panel(Text(footer_text, justify="center"), border_style=footer_panel_style))
+
+                live.refresh()
                 time.sleep(1)
-                continue
 
-            stage, apps_status_json, action_url, cpu, ram = status_row
-            apps_status = json.loads(apps_status_json) if apps_status_json else {}
-
-            # --- 繪製儀表板 ---
-            print("╔══════════════════════════════════════════════════════════════════════════════╗")
-            print("║                          🚀 鳳凰之心 - 作戰指揮中心 🚀                          ║")
-            print("╠══════════════════════════════════════════════════════════════════════════════╣")
-            print(f"║ 狀態: {stage.upper():<15} | CPU: {cpu or 0.0:>5.1f}% | RAM: {ram or 0.0:>5.1f}%             ║")
-            print("╠═══════════════════════════╤══════════════════════════════════════════════════╣")
-            print("║         服務狀態          │                   即時日誌 (最新 10 筆)              ║")
-            print("╟───────────────────────────┘                                                  ║")
-
-            app_lines = []
-            for app, status in apps_status.items():
-                status_map = {"pending": "⚪", "starting": "🟡", "running": "🟢", "failed": "🔴"}
-                icon = status_map.get(status, "❓")
-                app_lines.append(f"║ {icon} {app.capitalize():<25} ║")
-
-            for i in range(10):
-                app_line = app_lines[i] if i < len(app_lines) else "║" + " "*27 + "║"
-                log_line = log_rows[i] if i < len(log_rows) else ("", "", "")
-                ts, level, msg = log_line
-                ts_str = str(ts).split(" ")[1][:8] if ts else ""
-                log_text = f" {ts_str} [{level}] {msg}"
-                print(f"{app_line}{log_text:<57}║")
-
-            print("╚══════════════════════════════════════════════════════════════════════════════╝")
-
-            if action_url:
-                print(f"\n✅ 啟動完成！點擊以下連結開啟主操作儀表板：")
-                print(f"   👉 {action_url}")
-                break # 結束迴圈
-
-            if stage in ["failed", "critical_failure"]:
-                print("\n❌ 啟動失敗。請檢查日誌以了解詳情。")
-                break
-
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        print("\n\n🛑 偵測到手動中斷！正在終止後端服務...")
-        launch_process.terminate()
-        print("✅ 後端服務已被終止。")
-    except Exception as e:
-        print(f"\n💥 前端顯示器發生未預期的嚴重錯誤: {e}")
-        import traceback
-        traceback.print_exc()
+        except KeyboardInterrupt:
+            console.log("\n\n🛑 偵測到手動中斷！正在終止後端服務...")
+            launch_process.terminate()
+            console.log("✅ 後端服務已被終止。")
+        except Exception as e:
+            console.print_exception(show_locals=True)
 
 if __name__ == "__main__":
     main()
