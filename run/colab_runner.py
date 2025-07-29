@@ -70,7 +70,7 @@ def main():
             subprocess.run(["mv", "gotty", str(gotty_path)], check=True)
             gotty_path.chmod(gotty_path.stat().st_mode | stat.S_IEXEC)
         print("   ✅ GoTTY 已就緒。")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rich", "httpx", "fastapi", "uvicorn"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "rich", "httpx", "fastapi", "uvicorn", "uv"], check=True)
         print("✅ 核心依賴安裝完成。")
 
         # --- 步驟 3: 在背景啟動所有服務 ---
@@ -78,17 +78,13 @@ def main():
         env = os.environ.copy()
         env["STATE_FILE"] = str(state_file_path)
 
-        api_log_path = project_path / "api.log"
-        gotty_log_path = project_path / "gotty.log"
+        api_command = [sys.executable, "-m", "uvicorn", "apps.dashboard_api.main:app", "--port", "8004", "--host", "0.0.0.0"]
+        api_process = subprocess.Popen(api_command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。")
 
-        with open(api_log_path, "w") as api_log, open(gotty_log_path, "w") as gotty_log:
-            api_command = [sys.executable, "-m", "uvicorn", "apps.dashboard_api.main:app", "--port", "8004", "--host", "0.0.0.0"]
-            api_process = subprocess.Popen(api_command, env=env, stdout=api_log, stderr=subprocess.STDOUT)
-            print(f"✅ 儀表板 API 服務已在背景啟動 (PID: {api_process.pid})。日誌 -> {api_log_path}")
-
-            gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
-            gotty_process = subprocess.Popen(gotty_command, env=env, stdout=gotty_log, stderr=subprocess.STDOUT)
-            print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。日誌 -> {gotty_log_path}")
+        gotty_command = ["gotty", "--ws-origin", ".*", "-w", "--port", "8080", "python", "launch.py"]
+        gotty_process = subprocess.Popen(gotty_command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"✅ GoTTY 日誌服務已在背景啟動 (PID: {gotty_process.pid})。")
 
         # --- 步驟 4: 顯示 GoTTY 並啟動後端輪詢 ---
         print("\n4. 正在載入 GoTTY 日誌儀表板...")
@@ -103,7 +99,7 @@ def main():
         # --- 步驟 5: 後端輪詢 API 並動態生成操作按鈕 ---
         print("\n5. 啟動後端輪詢程序，等待儀表板 URL 就緒...")
         api_url = "http://localhost:8004/api/get-action-url"
-        max_retries = 20
+        max_retries = 30 # 延長重試次數以應對較慢的啟動
 
         final_url = None
         for i in range(max_retries):
@@ -125,14 +121,14 @@ def main():
         if final_url:
             js_code = f'''
                 const placeholder = document.getElementById('action-button-placeholder');
-                placeholder.innerHTML = `<a href="{final_url}" target="_blank" style="display:inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; border-radius: 8px;">🚀 點此開啟主操作儀表板 🚀</a>`;
+                placeholder.innerHTML = `<br><a href="{final_url}" target="_blank" style="display:inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; font-size: 18px; border-radius: 8px;">🚀 點此開啟主操作儀表板 🚀</a>`;
             '''
             display(Javascript(js_code))
             print("\n✅ 操作按鈕已成功顯示在上方。")
         else:
             js_code = """
                 const placeholder = document.getElementById('action-button-placeholder');
-                placeholder.innerHTML = `<p style="color: red;">❌ 獲取操作連結超時，請檢查 API 服務日誌。</p>`;
+                placeholder.innerHTML = `<br><p style="color: red;">❌ 獲取操作連結超時，請檢查 GoTTY 日誌儀表板中的錯誤訊息。</p>`;
             """
             display(Javascript(js_code))
             print("\n❌ 獲取儀表板 URL 失敗。")

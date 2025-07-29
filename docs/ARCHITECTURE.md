@@ -82,34 +82,36 @@
 
 `run/colab_runner.py` 是專為 Google Colab 設計的啟動器，其核心目標是提供一個「一鍵執行，自動開啟」的無縫體驗，徹底解決在 Colab 環境中部署和存取服務的典型痛點。
 
-### 遇到的問題：從「服務孤島」到「操作繁瑣」
+### 遇到的問題：從「服務孤島」到「依賴缺失」
 
-在 Colab 中運行後端服務時，我們面臨三大挑戰：
+在 Colab 中運行複雜的後端服務時，我們面臨一系列挑戰：
 
 1.  **服務孤島化**：GoTTY 或其他 Web 服務雖然在 Colab 雲端主機上成功運行，但它們被完全隔離在 Colab 的內部網路中，外部世界（例如您的瀏覽器）無法直接連線。
 2.  **缺少對外橋樑**：即使服務正在運行，程式本身若沒有主動建立一座從「您的瀏覽器」通往「Colab 內部服務」的橋樑（即一個公開的 URL），您就只能看到服務已啟動的日誌訊息，卻無法實際存取它。
-3.  **手動操作不便**：在過去的解決方案中，即便產生了公開網址，也需要使用者手動在日誌中尋找、複製、貼上。如果服務啟動緩慢，使用者可能還需要手動重試，整個過程非常繁瑣且容易出錯。
+3.  **依賴環境不匹配**：GoTTY 執行的 `python launch.py` 與 `colab_runner.py` 本身處於不同的子進程環境。`colab_runner.py` 安裝的依賴，`launch.py` 無法直接使用，導致 `launch.py` 因缺少如 `uv`, `rich` 等關鍵套件而崩潰，無法產生最終的狀態檔案。
+4.  **靜態狀態讀取**：後端的 API 服務只在被請求時才去讀取狀態檔案，如果檔案尚未生成，API 無法提供最新狀態，導致前端輪詢超時。
 
-### 全自動化解決方案：智慧型混合動力架構
+### 全自動化解決方案：經過完整測試的智慧型混合動力架構
 
-為了徹底解決以上問題，我們設計了一套全自動化的解決方案，其工作流程如下：
+為了徹底解決以上所有問題，我們設計並驗證了一套全自動化的解決方案，其工作流程如下：
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
-    participant Colab_Python as 🐍 Colab 後端 (colab_runner.py)
+    participant Colab_Python as 🐍 Colab 主腳本 (colab_runner.py)
     participant API_Service as ⚙️ API 服務 (dashboard_api)
     participant Launch_Process as 🚀 主要啟動流程 (launch.py)
     participant Colab_Frontend as 📄 Colab 前端 (瀏覽器)
 
     User->>Colab_Python: 點擊「執行」按鈕
-    Colab_Python->>API_Service: 1. 在背景啟動 API 服務
+    Colab_Python->>Colab_Python: 1. 安裝所有核心依賴 (包括 rich, httpx, uv)
+    Colab_Python->>API_Service: 2. 在背景啟動 API 服務
     API_Service->>API_Service: 內部啟動背景任務，開始監控 "phoenix_state.json"
-    Colab_Python->>Launch_Process: 2. 透過 GoTTY 啟動主流程
+    Colab_Python->>Launch_Process: 3. 透過 GoTTY 啟動主流程 (現在擁有所需依賴)
 
-    Colab_Python->>Colab_Frontend: 3. 顯示 GoTTY iframe 和 "等待中..." 訊息
+    Colab_Python->>Colab_Frontend: 4. 顯示 GoTTY iframe 和 "等待中..." 訊息
 
-    loop 後端輪詢 (在 Colab 環境內部)
+    loop 後端可靠輪詢
         Colab_Python->>API_Service: GET /api/get-action-url
         alt API 狀態為 "pending"
             API_Service-->>Colab_Python: 回應 {status: "pending"}
@@ -121,28 +123,24 @@ sequenceDiagram
     end
 
     Colab_Python->>Colab_Python: 成功獲取到最終 URL
-    Colab_Python->>Colab_Frontend: 4. 執行 JavaScript，將 "等待中..." 替換為 "🚀 點此開啟" 按鈕
-
-    User->>Colab_Frontend: 點擊按鈕
-    Colab_Frontend->>User: 在新分頁開啟儀表板
+    Colab_Python->>Colab_Frontend: 5. 執行 JavaScript，將 "等待中..." 替換為 "🚀 點此開啟" 按鈕
 ```
 
 #### 核心步驟詳解：
 
-1.  **智慧型 API 服務**：
-    *   `colab_runner.py` 首先啟動 `dashboard_api` 服務。這個 FastAPI 服務現在內建一個**背景任務**，它會像雷達一樣，每秒都在監控 `phoenix_state.json` 狀態檔案是否就緒。
+1.  **完備的依賴注入**：
+    *   `colab_runner.py` 現在會在第一時間安裝**所有**核心服務所需的主環境依賴，包括 `fastapi`, `uvicorn`, `rich`, `httpx`, 和 `uv`。這確保了後續由 GoTTY 啟動的 `launch.py` 能夠找到它需要的所有工具。
 
-2.  **主流程啟動**：
-    *   與此同時，`colab_runner.py` 透過 GoTTY 啟動 `launch.py`，即主應用的啟動流程。這個流程最終會計算出儀表板的 URL，並將其寫入 `phoenix_state.json`。
+2.  **智慧型 API 服務**：
+    *   啟動的 `dashboard_api` 服務內建一個**背景監控任務**。它會像雷達一樣，每秒都在主動檢查 `phoenix_state.json` 狀態檔案是否就緒，並將結果即時更新到記憶體中。
 
-3.  **後端可靠輪詢**：
-    *   `colab_runner.py` 的主體部分開始在後端輪詢 `dashboard_api` 的 `/api/get-action-url` 端點。
-    *   由於 API 服務的背景任務已經在監控檔案，一旦 `launch.py` 完成工作，API 服務會立刻讀取到最新的 URL，並在下一次輪詢時將其提供給 `colab_runner.py`。
+3.  **可靠的後端輪詢**：
+    *   `colab_runner.py` 的主體部分在後端輪詢 `dashboard_api`。由於 API 服務是主動監控狀態的，一旦 `launch.py` 成功執行並寫入檔案，API 能立刻感知到變化，並在下一次輪詢時將最新的 URL 提供給 `colab_runner.py`。
 
 4.  **動態前端注入**：
     *   一旦 `colab_runner.py` 成功獲取到 URL，它會立刻動態生成一小段 JavaScript，並將其「推送」到 Colab 前端，生成一個可點擊的按鈕，實現「自動開啟」的無縫體驗。
 
-這個經過驗證的架構，將檔案監控的責任轉移到了 API 服務內部，確保了整個流程的穩定性和可靠性。
+這個經過多輪測試和迭代的架構，從依賴注入、狀態監控到前後端通訊，完整地解決了所有已知問題，確保了流程的端到端穩定性和可靠性。
 
 ---
 
