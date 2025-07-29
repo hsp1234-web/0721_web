@@ -139,6 +139,13 @@ sequenceDiagram
     Starter->>User: 顯示成功訊息與訪問網址
 ```
 
+### Colab 整合方案
+
+在 Google Colab 環境中，我們採用了稍微不同的策略來應對其特殊的環境限制：
+- **啟動方式**: 我們使用一個特製的 Colab Notebook (`colab_starter.ipynb`) 作為使用者入口。
+- **公開網址**: Notebook 會使用 `ngrok` 來為每個啟動的 FastAPI 服務建立一個公開的、可從外部訪問的 URL，方便遠端測試與互動。
+- **資源監控**: 由於 Colab 環境的資源是動態分配的，我們的**智慧型安裝流程**在這裡變得至關重要，它能確保在安裝大型套件（如 `torch`）之前，系統有足夠的 RAM，從而避免 Colab 執行環境崩潰。
+
 ### 流程總結：
 
 1.  **啟動器 (Starter)** 負責高層協調，它首先確保 `uv`, `psutil`, `pyyaml` 等核心工具已就緒。

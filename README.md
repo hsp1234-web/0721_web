@@ -80,6 +80,17 @@ python launch.py
 
 它會執行與視覺化啟動器完全相同的安全流程，只是將所有日誌直接輸出到您的控制台。
 
+### 2.3. 在 Google Colab 中啟動 (雲端開發)
+
+我們提供了一個專為 Google Colab 設計的啟動腳本，讓您可以在免費的雲端環境中一鍵啟動整個專案。
+
+[![在 Colab 中開啟](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-username/your-repo-name/blob/main/colab_starter.ipynb)
+
+點擊上面的按鈕，即可在 Colab 中開啟專案。該 Colab Notebook 將會：
+1.  複製最新的專案程式碼。
+2.  執行與 `phoenix_starter.py` 完全相同的智慧型安裝流程。
+3.  啟動所有微服務，並透過 `ngrok` 提供公開的訪問網址。
+
 ---
 
 ## 三、 檔案結構總覽 (v9.2 - 完整版)
