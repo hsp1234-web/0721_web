@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import os
 import time
+import shutil
 import threading
 from rich.console import Console
 from rich.layout import Layout
@@ -80,61 +81,61 @@ def get_final_link_panel():
     return Panel("等待所有服務就緒...", title="⏳ 操作入口", border_style="yellow")
 
 # --- 核心啟動邏輯 ---
-def run_backend_tasks():
+# --- 核心啟動邏輯 ---
+async def launch_app(app_name, port):
+    """僅負責啟動單個應用。"""
     APPS_DIR = Path("apps")
+    app_path = APPS_DIR / app_name
+    try:
+        set_app_status(app_name, "starting")
+        env = os.environ.copy()
+        env["PORT"] = str(port)
+        # 使用當前環境的 Python 直譯器
+        # 在除錯時，可以將 stderr=subprocess.STDOUT，以捕獲啟動錯誤
+        subprocess.Popen([sys.executable, "main.py"], cwd=app_path, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-    async def prepare_and_launch(app_name, port):
-        try:
-            app_path = APPS_DIR / app_name
-            # 準備
-            set_app_status(app_name, "preparing")
-            venv_python = app_path / ".venv/bin/python"
-            if not venv_python.exists():
-                subprocess.run(f"uv venv --quiet -p {sys.executable}", cwd=app_path, shell=True, check=True)
-                subprocess.run(f"{venv_python} -m pip install -q -r requirements.txt", cwd=app_path, shell=True, check=True)
+        # 等待服務啟動
+        await asyncio.sleep(5)
+        set_app_status(app_name, "running")
 
-            # 啟動
-            set_app_status(app_name, "starting")
-            env = os.environ.copy()
-            env["PORT"] = str(port)
-            subprocess.Popen([str(venv_python), "main.py"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        set_app_status(app_name, "failed")
+        add_log(f"啟動 {app_name} 失敗: {e}")
+        raise
 
-            # 健康檢查
-            await asyncio.sleep(5)
-            async with httpx.AsyncClient() as client:
-                await client.get(f"http://localhost:{port}/", timeout=5)
+async def main_logic():
+    """核心的循序啟動邏輯，被 TUI 和純腳本模式共享。"""
+    add_log("啟動程序開始 (循序模式)...")
+    app_configs = [
+        {"name": "quant", "port": 8001},
+        {"name": "transcriber", "port": 8002},
+        {"name": "main_dashboard", "port": 8005}
+    ]
 
-            set_app_status(app_name, "running")
-        except Exception as e:
-            set_app_status(app_name, "failed")
-            add_log(f"啟動 {app_name} 失敗: {e}")
+    # 平行啟動所有 App
+    tasks = [launch_app(config['name'], config['port']) for config in app_configs]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def main_async():
-        add_log("啟動程序開始...")
-        tasks = [
-            prepare_and_launch("quant", 8001),
-            prepare_and_launch("transcriber", 8002),
-            prepare_and_launch("main_dashboard", 8005)
-        ]
-        await asyncio.gather(*tasks)
+    for result, config in zip(results, app_configs):
+        if isinstance(result, Exception):
+            # launch_app 內部已經記錄了日誌
+            pass
 
-        # 檢查是否全部成功
-        if all(d["status"] == "running" for d in _state["apps"].values()):
-            _state["action_url"] = "http://localhost:8000/dashboard" # 這是代理的地址
-            add_log("所有服務已成功啟動！操作儀表板已就緒。")
-        else:
-            add_log("部分服務啟動失敗。")
-        update_state_file()
+    # 檢查是否全部成功
+    if all(d["status"] == "running" for d in _state["apps"].values()):
+        _state["action_url"] = "http://localhost:8000/dashboard"
+        add_log("所有服務已成功啟動！操作儀表板已就緒。")
+    else:
+        add_log("部分服務啟動失敗。")
+    update_state_file()
 
-    asyncio.run(main_async())
-
-# --- 主程序 ---
-if __name__ == "__main__":
-    # 啟動背景任務
-    backend_thread = threading.Thread(target=run_backend_tasks, daemon=True)
+def main_tui():
+    """TUI 模式：為人類使用者提供豐富的視覺化介面。"""
+    # 在背景執行緒中運行核心異步邏輯
+    backend_thread = threading.Thread(target=lambda: asyncio.run(main_logic()), daemon=True)
     backend_thread.start()
 
-    # 啟動 TUI 渲染
+    # 主執行緒負責 TUI 渲染
     with Live(layout, screen=True, redirect_stderr=False) as live:
         try:
             while backend_thread.is_alive():
@@ -144,10 +145,22 @@ if __name__ == "__main__":
                 layout["footer"].update(get_logs_panel())
                 time.sleep(0.5)
         except KeyboardInterrupt:
-            pass
+            add_log("使用者手動中斷。")
         finally:
-            # 最終渲染
+            backend_thread.join(timeout=5)
             layout["header"].update(Panel("✅ 啟動程序已結束", style="bold green"))
             layout["status"].update(get_status_table())
             layout["final_link"].update(get_final_link_panel())
             layout["footer"].update(get_logs_panel())
+
+# --- 主程序 ---
+if __name__ == "__main__":
+    # 檢查是否在非互動式環境中
+    if os.environ.get("TERM") == "dumb" or not sys.stdout.isatty():
+        # 在純腳本模式下，直接、同步地執行核心邏輯
+        print("--- 正在以純腳本模式啟動 ---")
+        asyncio.run(main_logic())
+        print("--- 純腳本模式啟動完成 ---")
+    else:
+        # 在互動式模式下，啟動 TUI
+        main_tui()

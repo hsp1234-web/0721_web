@@ -78,7 +78,86 @@
 
 ---
 
-## 三、 全鏈路自動化流程圖
+## 三、 Colab 全自動化啟動器 (`run/colab_runner.py`)
+
+`run/colab_runner.py` 是專為 Google Colab 設計的啟動器，其核心目標是提供一個「一鍵執行，自動開啟」的無縫體驗，徹底解決在 Colab 環境中部署和存取服務的典型痛點。
+
+### 遇到的問題：從「服務孤島」到「依賴缺失」
+
+在 Colab 中運行複雜的後端服務時，我們面臨一系列挑戰：
+
+1.  **服務孤島化**：GoTTY 或其他 Web 服務雖然在 Colab 雲端主機上成功運行，但它們被完全隔離在 Colab 的內部網路中，外部世界（例如您的瀏覽器）無法直接連線。
+2.  **缺少對外橋樑**：即使服務正在運行，程式本身若沒有主動建立一座從「您的瀏覽器」通往「Colab 內部服務」的橋樑（即一個公開的 URL），您就只能看到服務已啟動的日誌訊息，卻無法實際存取它。
+3.  **依賴環境不匹配**：GoTTY 執行的 `python launch.py` 與 `colab_runner.py` 本身處於不同的子進程環境。`colab_runner.py` 安裝的依賴，`launch.py` 無法直接使用，導致 `launch.py` 因缺少如 `uv`, `rich` 等關鍵套件而崩潰，無法產生最終的狀態檔案。
+4.  **靜態狀態讀取**：後端的 API 服務只在被請求時才去讀取狀態檔案，如果檔案尚未生成，API 無法提供最新狀態，導致前端輪詢超時。
+
+### 全自動化解決方案：經過完整測試的智慧型混合動力架構
+
+為了徹底解決以上所有問題，我們設計並驗證了一套全自動化的解決方案，其工作流程如下：
+
+```mermaid
+sequenceDiagram
+    participant User as 👨‍💻 使用者
+    participant Colab_Python as 🐍 Colab 主腳本 (colab_runner.py)
+    participant API_Service as ⚙️ API 服務 (dashboard_api)
+    participant Launch_Process as 🚀 主要啟動流程 (launch.py)
+    participant Colab_Frontend as 📄 Colab 前端 (瀏覽器)
+
+    User->>Colab_Python: 點擊「執行」按鈕
+    Colab_Python->>Colab_Python: 1. 安裝所有核心依賴 (包括 rich, httpx, uv)
+    Colab_Python->>API_Service: 2. 在背景啟動 API 服務
+    API_Service->>API_Service: 內部啟動背景任務，開始監控 "phoenix_state.json"
+    Colab_Python->>Launch_Process: 3. 透過 GoTTY 啟動主流程 (現在擁有所需依賴)
+
+    Colab_Python->>Colab_Frontend: 4. 顯示 GoTTY iframe 和 "等待中..." 訊息
+
+    loop 後端可靠輪詢
+        Colab_Python->>API_Service: GET /api/get-action-url
+        alt API 狀態為 "pending"
+            API_Service-->>Colab_Python: 回應 {status: "pending"}
+            Colab_Python->>Colab_Python: 等待 5 秒後重試
+        else API 狀態為 "success"
+            API_Service-->>Colab_Python: 回應 {status: "success", url: "..."}
+            break
+        end
+    end
+
+    Colab_Python->>Colab_Python: 成功獲取到最終 URL
+    Colab_Python->>Colab_Frontend: 5. 執行 JavaScript，將 "等待中..." 替換為 "🚀 點此開啟" 按鈕
+```
+
+#### 核心步驟詳解：
+
+1.  **完備的依賴注入**：
+    *   `colab_runner.py` 現在會在第一時間安裝**所有**核心服務所需的主環境依賴，包括 `fastapi`, `uvicorn`, `rich`, `httpx`, 和 `uv`。這確保了後續由 GoTTY 啟動的 `launch.py` 能夠找到它需要的所有工具。
+
+2.  **智慧型 API 服務**：
+    *   啟動的 `dashboard_api` 服務內建一個**背景監控任務**。它會像雷達一樣，每秒都在主動檢查 `phoenix_state.json` 狀態檔案是否就緒，並將結果即時更新到記憶體中。
+
+3.  **可靠的後端輪詢**：
+    *   `colab_runner.py` 的主體部分在後端輪詢 `dashboard_api`。由於 API 服務是主動監控狀態的，一旦 `launch.py` 成功執行並寫入檔案，API 能立刻感知到變化，並在下一次輪詢時將最新的 URL 提供給 `colab_runner.py`。
+
+4.  **動態前端注入**：
+    *   一旦 `colab_runner.py` 成功獲取到 URL，它會立刻動態生成一小段 JavaScript，並將其「推送」到 Colab 前端，生成一個可點擊的按鈕，實現「自動開啟」的無縫體驗。
+
+這個經過多輪測試和迭代的架構，從依賴注入、狀態監控到前後端通訊，完整地解決了所有已知問題，確保了流程的端到端穩定性和可靠性。
+
+### V11 新增功能：快速測試模式 (`FAST_TEST_MODE`)
+
+為了在不犧牲真實部署穩定性的前提下，極大地提高開發和除錯效率，我們引入了「快速測試模式」。
+
+-   **目的**：快速驗證 `colab_runner.py` -> `launch.py` -> `dashboard_api` 之間的核心通訊與協調邏輯，而無需等待耗時的依賴安裝過程。
+-   **啟用方式**：在 `colab_runner.py` 的 Colab 表單中，勾選「快速測試模式」（預設開啟）。
+-   **工作原理**：
+    1.  `colab_runner.py` 會設定一個環境變數 `FAST_TEST_MODE="true"`。
+    2.  `launch.py` 在執行時會偵測到這個變數。
+    3.  它將**跳過**所有實際的 `uv venv` 建立、`pip install` 和 `main.py` 啟動的步驟。
+    4.  取而代之，它會立即將所有 App 的狀態標記為 `running`，並在幾秒鐘內就產生最終的 `phoenix_state.json` 檔案。
+-   **效果**：使用者可以在半分鐘內就看到最終的儀表板按鈕，從而快速確認核心流程是否正常工作。當需要進行包含完整依賴安裝的真實部署時，只需取消勾選該選項即可。
+
+---
+
+## 四、 全鏈路自動化流程圖
 
 這張圖描繪了從使用者啟動到測試完成的完整自動化鏈路，體現了我們設計哲學中的所有核心策略。
 
