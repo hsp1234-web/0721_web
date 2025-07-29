@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳳凰之心 - 主操作儀表板</title>
+    <style>
+        body { background-color: #f0f2f5; color: #333; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        h1 { text-align: center; color: #1d3557; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        .panel { border: 1px solid #ddd; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .panel-header { background-color: #457b9d; color: white; padding: 15px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-size: 18px; font-weight: bold; }
+        .panel-body { padding: 20px; }
+        button { background-color: #1d3557; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+        button:hover { background-color: #a8dadc; color: #1d3557; }
+        textarea, input[type="file"], input[type="text"] { width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px; }
+        .result-box { margin-top: 15px; padding: 15px; background-color: #eaf2f8; border: 1px solid #a8dadc; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; }
+        #log-panel { display: none; margin-top: 20px; }
+        #log-toggle { margin-bottom: 20px; background-color: #6c757d; }
+        #log-toggle:hover { background-color: #5a6268; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 鳳凰之心 - 主操作儀表板 🚀</h1>
+
+        <button id="log-toggle">顯示/隱藏啟動日誌</button>
+        <div id="log-panel" class="panel">
+            <div class="panel-header">📜 啟動日誌</div>
+            <div class="panel-body">
+                <div id="log-content" class="result-box">正在載入日誌...</div>
+            </div>
+        </div>
+
+        <div class="grid-container">
+            <div id="quant-panel" class="panel">
+                <div class="panel-header">📈 量化分析 App</div>
+                <div class="panel-body">
+                    <p>觸發後端的量化分析任務。</p>
+                    <button id="run-quant">執行分析</button>
+                    <div id="quant-result" class="result-box" style="display:none;"></div>
+                </div>
+            </div>
+
+            <div id="transcriber-panel" class="panel">
+                <div class="panel-header">🎤 語音轉寫 App</div>
+                <div class="panel-body">
+                    <form id="upload-form">
+                        <p>選擇一個音訊檔案進行轉寫：</p>
+                        <input type="file" name="file" id="audio-file" accept="audio/*" required>
+                        <button type="submit">上傳並轉寫</button>
+                    </form>
+                    <div id="transcriber-result" class="result-box" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- 日誌處理 ---
+            const logToggle = document.getElementById('log-toggle');
+            const logPanel = document.getElementById('log-panel');
+            const logContent = document.getElementById('log-content');
+
+            logToggle.addEventListener('click', () => {
+                logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
+            });
+
+            fetch('/api/get-full-log')
+                .then(response => {
+                    if (!response.ok) { throw new Error('無法獲取日誌'); }
+                    return response.text();
+                })
+                .then(text => {
+                    logContent.textContent = text;
+                })
+                .catch(error => {
+                    logContent.textContent = '載入日誌失敗: ' + error;
+                });
+
+            // --- Quant App 互動 ---
+            const runQuantBtn = document.getElementById('run-quant');
+            const quantResult = document.getElementById('quant-result');
+            runQuantBtn.addEventListener('click', () => {
+                quantResult.style.display = 'block';
+                quantResult.textContent = '正在執行分析...';
+                fetch('/quant/analyze', { method: 'POST' }) // 假設是 POST 請求
+                    .then(response => response.json())
+                    .then(data => {
+                        quantResult.textContent = JSON.stringify(data, null, 2);
+                    })
+                    .catch(error => {
+                        quantResult.textContent = '分析失敗: ' + error;
+                    });
+            });
+
+            // --- Transcriber App 互動 ---
+            const uploadForm = document.getElementById('upload-form');
+            const transcriberResult = document.getElementById('transcriber-result');
+            uploadForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                transcriberResult.style.display = 'block';
+                transcriberResult.textContent = '正在上傳並轉寫檔案...';
+                const formData = new FormData(uploadForm);
+                fetch('/transcriber/transcribe', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    transcriberResult.textContent = '轉寫結果: ' + data.text;
+                })
+                .catch(error => {
+                    transcriberResult.textContent = '轉寫失敗: ' + error;
+                });
+            });
+        });
+    </script>
+</body>
+</html>
