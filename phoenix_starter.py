@@ -425,7 +425,7 @@ class ANSIDashboard:
         self._write(f"{ANSI.move_cursor(16, 3)}{ANSI.CLEAR_LINE}[{self.current_task_name}]")
         self._write(f"{ANSI.move_cursor(17, 3)}{ANSI.CLEAR_LINE}{self.current_task_progress_line}")
 
-    def run(self, main_logic_coro):
+    async def run(self, main_logic_coro, non_interactive=False):
         """啟動儀表板的主循環"""
         self._write(ANSI.HIDE_CURSOR)
         self.draw_static_layout()
@@ -435,18 +435,22 @@ class ANSIDashboard:
         status_thread.daemon = True
         status_thread.start()
 
-        loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(main_logic_coro)
+            await main_logic_coro
             self._write(f"{ANSI.move_cursor(21, 3)}{ANSI.GREEN}✅ 所有任務已完成。{ANSI.RESET}")
         except Exception as e:
             self._write(f"{ANSI.move_cursor(21, 3)}{ANSI.RED}❌ 發生錯誤: {e}{ANSI.RESET}")
         finally:
             stop_event.set()
             status_thread.join(timeout=1.5)
-            # 將游標移動到最後，顯示提示訊息並等待使用者輸入
-            self._write(f"{ANSI.move_cursor(22, 1)}{ANSI.SHOW_CURSOR}")
-            input(f"{ANSI.YELLOW}請按 Enter 鍵退出...{ANSI.RESET}")
+            self._write(ANSI.SHOW_CURSOR) # 無論如何都顯示游標
+            if not non_interactive:
+                self._write(f"{ANSI.move_cursor(22, 1)}")
+                # 在非互動模式下，我們不能使用 input()
+                # 但我們仍然可以等待一個 future 或 event
+                # 為了簡單起見，我們直接退出
+            else:
+                self._write(f"{ANSI.move_cursor(22, 1)}\n") # 換行以結束
 
 
 async def run_tests_for_app(app: App):
@@ -518,19 +522,28 @@ def main():
     """主函數"""
     ensure_core_deps()
 
+    non_interactive = '--non-interactive' in sys.argv
     if '--no-tui' in sys.argv:
         asyncio.run(main_logic())
     else:
         apps = discover_apps()
         dashboard = ANSIDashboard(apps)
 
-        # main_logic 本身就是一個協程函數，直接調用它來獲取協程對象
-        main_coro = main_logic(dashboard)
+        async def run_dashboard():
+            main_coro = main_logic(dashboard)
+            await dashboard.run(main_coro, non_interactive=non_interactive)
 
         try:
-            dashboard.run(main_coro)
+            asyncio.run(run_dashboard())
         except KeyboardInterrupt:
             print(f"\n{ANSI.SHOW_CURSOR}使用者中斷。{ANSI.RESET}")
+        except Exception as e:
+            # 確保在任何錯誤情況下都能顯示游標
+            print(ANSI.SHOW_CURSOR)
+            print(f"發生未預期錯誤: {e}")
+            import traceback
+            traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()

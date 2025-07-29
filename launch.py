@@ -217,13 +217,19 @@ async def reverse_proxy(request: Request):
         print(f"{colors.FAIL}{error_message}{colors.ENDC}")
         return Response(content=error_message, status_code=503) # 503 Service Unavailable
 
-async def main():
+async def main(args):
     """主協調函式"""
     print_header("鳳凰之心專案啟動程序開始")
     ensure_uv_installed()
     ensure_core_deps()
 
-    apps_to_launch = [d for d in APPS_DIR.iterdir() if d.is_dir()]
+    if args.apps:
+        app_names = [name.strip() for name in args.apps.split(',')]
+        apps_to_launch = [APPS_DIR / name for name in app_names if (APPS_DIR / name).is_dir()]
+        print_info(f"根據命令列參數，將啟動以下 App: {[app.name for app in apps_to_launch]}")
+    else:
+        apps_to_launch = [d for d in APPS_DIR.iterdir() if d.is_dir()]
+        print_info("將啟動所有發現的 App。")
 
     # 準備所有 App 的環境
     for app_path in apps_to_launch:
@@ -237,36 +243,63 @@ async def main():
     for app_path in apps_to_launch:
         process = await launch_app(app_path, current_port)
         processes.append(process)
+        # 更新代理設定以反映動態分配的埠
+        app_name = app_path.name
+        for prefix, route_info in proxy_config["routes"].items():
+            if app_name in route_info["target"]:
+                proxy_config["routes"][prefix]["target"] = f"http://localhost:{current_port}"
         current_port += 1
 
-    # 啟動逆向代理
-    listen_port = proxy_config["listen_port"]
-    print_header(f"所有 App 已在背景啟動，正在啟動主逆向代理...")
-    print_success(f"系統已就緒！統一訪問入口: http://localhost:{listen_port}")
-    print_info(f"  - 量化服務請訪問: http://localhost:{listen_port}/quant/...")
-    print_info(f"  - 轉寫服務請訪問: http://localhost:{listen_port}/transcriber/...")
-    print_warning("按 Ctrl+C 終止所有服務。")
+    if not args.no_proxy:
+        # 啟動逆向代理
+        listen_port = proxy_config["listen_port"]
+        print_header(f"所有 App 已在背景啟動，正在啟動主逆向代理...")
+        print_success(f"系統已就緒！統一訪問入口: http://localhost:{listen_port}")
+        for prefix, route_info in proxy_config["routes"].items():
+            if any(app.name in route_info["target"] for app in apps_to_launch):
+                 print_info(f"  - {prefix} 將被路由到 {route_info['target']}")
+        print_warning("按 Ctrl+C 終止所有服務。")
+
+        server_task = asyncio.create_task(run_proxy(listen_port))
+    else:
+        print_header("所有 App 已在背景啟動。")
+        print_warning("已使用 --no-proxy 選項，逆向代理未啟動。")
+        print_info("您可以透過各自的埠號直接訪問服務。")
+        server_task = None
 
     try:
-        config = uvicorn.Config(proxy_app, host="0.0.0.0", port=listen_port, log_level="warning")
-        server = uvicorn.Server(config)
-        await server.serve()
-
+        # 等待直到被中斷
+        while True:
+            await asyncio.sleep(3600)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n" + colors.WARNING + "收到關閉信號..." + colors.ENDC)
 
     finally:
+        if server_task:
+            server_task.cancel()
         print_info("正在終止所有背景 App 行程...")
         for p in processes:
             p.terminate()
         # 等待所有行程終止
-        for p in processes:
-            p.wait()
+        await asyncio.gather(*[asyncio.create_task(p.wait()) for p in processes], return_exceptions=True)
         print_success("所有服務已成功關閉。再會！")
 
+async def run_proxy(port: int):
+    """運行 Uvicorn 代理伺服器"""
+    config = uvicorn.Config(proxy_app, host="0.0.0.0", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    await server.serve()
+
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="鳳凰之心專案總開關。")
+    parser.add_argument("--no-proxy", action="store_true", help="僅啟動後端 App，不啟動逆向代理。")
+    parser.add_argument("--apps", type=str, help="指定要啟動的 App，以逗號分隔 (例如 'quant,transcriber')。")
+    parser.add_argument("--large", action="store_true", help="為 transcriber App 安裝大型依賴。")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(main())
+        asyncio.run(main(args))
     except Exception as e:
         print(f"{colors.FAIL}\n啟動過程中發生未預期的嚴重錯誤: {e}{colors.ENDC}")
         sys.exit(1)
