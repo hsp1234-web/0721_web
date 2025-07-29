@@ -17,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "v4.3.9" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "4.3.9" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -90,8 +90,26 @@ def main():
     # --- 步驟 3: 獲取 Colab 代理 URL 並渲染靜態舞台 ---
     print("\n3. 正在準備前端儀表板...")
 
-    # 獲取 Colab 為 API 伺服器分配的 URL
-    api_url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
+    # 獲取 Colab 為 API 伺服器分配的 URL，並加入重試機制
+    api_url = None
+    for i in range(5): # 最多嘗試 5 次
+        try:
+            url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
+            if url and url.startswith("https"):
+                api_url = url
+                break
+            print(f"URL 獲取嘗試 {i+1}/5 失敗，返回值無效: {url}")
+        except Exception as e:
+            print(f"URL 獲取嘗試 {i+1}/5 失敗，發生異常: {e}")
+
+        if i < 4:
+            print("等待 2 秒後重試...")
+            time.sleep(2)
+
+    if not api_url:
+        print("❌ 經過多次嘗試後，仍無法獲取 Colab 代理 URL。儀表板可能無法正常工作。")
+        return
+
     print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
 
     # 讀取 HTML 模板 (使用相對路徑，因為我們已經 chdir)
