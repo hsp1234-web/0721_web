@@ -83,19 +83,35 @@ def get_final_link_panel():
 # --- 核心啟動邏輯 ---
 # --- 核心啟動邏輯 ---
 async def launch_app(app_name, port):
-    """僅負責啟動單個應用。"""
+    """啟動單個應用，並支援快速測試模式。"""
+    set_app_status(app_name, "starting")
+
+    # 檢查是否啟用快速測試模式
+    if os.getenv("FAST_TEST_MODE") == "true":
+        await asyncio.sleep(2) # 模擬短暫的啟動延遲
+        set_app_status(app_name, "running")
+        add_log(f"App '{app_name}' in fast test mode, skipping actual launch.")
+        return
+
+    # --- 真實啟動邏輯 ---
     APPS_DIR = Path("apps")
     app_path = APPS_DIR / app_name
     try:
-        set_app_status(app_name, "starting")
         env = os.environ.copy()
         env["PORT"] = str(port)
+
         # 使用當前環境的 Python 直譯器
         # 在除錯時，可以將 stderr=subprocess.STDOUT，以捕獲啟動錯誤
-        subprocess.Popen([sys.executable, "main.py"], cwd=app_path, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.Popen(
+            [sys.executable, "main.py"],
+            cwd=app_path,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT
+        )
 
         # 等待服務啟動
-        await asyncio.sleep(5)
+        await asyncio.sleep(10) # 增加等待時間以確保服務完全啟動
         set_app_status(app_name, "running")
 
     except Exception as e:

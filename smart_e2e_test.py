@@ -200,6 +200,49 @@ def test_app(app_path: Path, test_mode: str) -> bool:
     print_success(f"App '{app_name}' 所有測試皆已通過！")
     return True
 
+def test_colab_runner_flow():
+    """測試 Colab Runner 的核心流程（無 GoTTY 環境）"""
+    print_header("步驟 4: 測試 Colab Runner 核心流程")
+
+    # 確保 rich 已安裝，因為 launch.py 會用到
+    print_info("確保 'rich' 套件已安裝...")
+    if run_command([sys.executable, "-m", "pip", "install", "-q", "rich"]) != 0:
+        print_fail("安裝 'rich' 失敗。")
+        return False
+
+    # 設置環境變數以模擬 Colab 環境
+    test_env = os.environ.copy()
+    test_env["FAST_TEST_MODE"] = "true"
+    test_env["STATE_FILE"] = str(PROJECT_ROOT / "test_phoenix_state.json")
+
+    # 執行 launch.py
+    print_info("執行 launch.py (模擬 GoTTY 啟動)...")
+    result = run_command([sys.executable, "launch.py"], env=test_env)
+
+    if result != 0:
+        print_fail("launch.py 執行失敗。")
+        return False
+
+    # 驗證 state file 是否生成且內容正確
+    state_file = Path(test_env["STATE_FILE"])
+    if not state_file.exists():
+        print_fail(f"狀態檔案未找到: {state_file}")
+        return False
+
+    import json
+    with open(state_file, 'r') as f:
+        state = json.load(f)
+
+    if state.get("action_url") != "http://localhost:8000/dashboard":
+        print_fail(f"狀態檔案中的 action_url 不正確: {state.get('action_url')}")
+        return False
+
+    print_success("Colab Runner 核心流程測試通過！")
+    # 清理測試用的狀態檔案
+    state_file.unlink()
+    return True
+
+
 def main():
     """主函數"""
     test_mode = os.environ.get("TEST_MODE", "mock")
@@ -214,27 +257,25 @@ def main():
 
     print_header(f"步驟 3: 開始對 {len(apps)} 個 App 進行平行化測試")
 
-    # 準備傳遞給 test_app 的參數
-    # starmap 需要一個參數元組的列表
     tasks = [(app_path, test_mode) for app_path in apps]
-
-    # 使用 multiprocessing.Pool 來平行執行測試
-    # 使用 cpu_count() 來決定進程數，但不超過 App 的數量
     num_processes = min(cpu_count(), len(apps))
     print_info(f"將使用 {num_processes} 個平行進程。")
 
     with Pool(processes=num_processes) as pool:
-        # starmap 會將元組解包作為參數傳遞給 test_app
         results = pool.starmap(test_app, tasks)
 
-    failures = sum(1 for res in results if not res)
+    app_failures = sum(1 for res in results if not res)
+
+    # 執行 Colab 流程測試
+    colab_test_success = test_colab_runner_flow()
 
     print_header("所有測試已完成")
-    if failures == 0:
+    if app_failures == 0 and colab_test_success:
         print_success("🎉 恭喜！所有 App 的測試都已成功通過！")
         sys.exit(0)
     else:
-        print_fail(f"總共有 {failures} 個 App 的測試未通過。請檢查上面的日誌。")
+        total_failures = app_failures + (0 if colab_test_success else 1)
+        print_fail(f"總共有 {total_failures} 個測試流程未通過。請檢查上面的日誌。")
         sys.exit(1)
 
 if __name__ == "__main__":
