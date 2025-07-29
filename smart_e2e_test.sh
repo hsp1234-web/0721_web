@@ -49,7 +49,12 @@ trap cleanup EXIT INT TERM
 # --- 主邏輯 ---
 PROJECT_ROOT=$(pwd)
 
-print_header "步驟 1: 啟動所有微服務 (背景執行)"
+print_header "步驟 1: 準備主環境"
+print_info "正在為 launch.py 安裝必要的依賴 (httpx)..."
+uv pip install -q httpx
+print_success "主環境準備就緒。"
+
+print_header "步驟 2: 啟動所有微服務 (背景執行)"
 # 使用 nohup 確保即使終端關閉，服務也能繼續運行，並將日誌輸出到檔案
 nohup python3 launch.py > phoenix_e2e_test.log 2>&1 &
 LAUNCHER_PID=$!
