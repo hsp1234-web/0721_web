@@ -444,7 +444,9 @@ class ANSIDashboard:
         finally:
             stop_event.set()
             status_thread.join(timeout=1.5)
+            # 將游標移動到最後，顯示提示訊息並等待使用者輸入
             self._write(f"{ANSI.move_cursor(22, 1)}{ANSI.SHOW_CURSOR}")
+            input(f"{ANSI.YELLOW}請按 Enter 鍵退出...{ANSI.RESET}")
 
 
 async def run_tests_for_app(app: App):

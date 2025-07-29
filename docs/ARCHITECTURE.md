@@ -1,124 +1,134 @@
-# 鳳凰之心：最終架構總藍圖
+# 鳳凰之心 v9.1：最終架構總藍圖
 
-這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態，涵蓋了檔案結構、業務邏輯劃分、使用的核心工具，以及完整的執行流程。
+這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態 v9.1，涵蓋了檔案結構、智慧型安裝流程、以及核心工具的協同工作方式。
 
 ---
 
 ## 一、 核心理念與工具 (Core Philosophy & Tools)
 
-我們的架構基於以下三大核心理念，並由一套精簡的工具鏈來實現：
+我們的架構基於以下四大核心理念：
 
 - **微服務架構 (Microservices)**: 每個 App (`quant`, `transcriber`) 都是一個獨立、可自行運行的 FastAPI 服務。
-- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境 (`.venv`)，由唯一的總開關 `launch.py` 自動管理，彼此絕不干擾。
-- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明，保證了環境的極速建立與可重複性。
+- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境，由主啟動腳本自動管理，彼此絕不干擾。
+- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明。
+- **智慧型資源管理 (Intelligent Resource Management)**: 在安裝**每一個**套件前，系統都會即時檢查記憶體與磁碟資源，確保不會因資源耗盡而中斷，並將所有操作記錄在案。
 
 ### 核心工具鏈:
 
-- **uv**: 我們唯一的環境管理與安裝工具。負責以極致速度建立虛擬環境 (`.venv`) 和同步 Python 套件。
-- **`launch.py`**: 專案的「總開關」，負責協調所有工具，一鍵啟動整個系統。
-- **逆向代理 (Reverse Proxy)**: 內建於 `launch.py` 中，是系統的統一流量入口，負責將請求轉發給對應的 App。
-- **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
+- **`phoenix_starter.py`**: 視覺化啟動器。
+- **`launch.py`**: 主啟動腳本 (無介面)。
+- **`core_utils/safe_installer.py`**: 安全安裝模組。
+- **`core_utils/resource_monitor.py`**: 資源監控模組。
+- **`config/resource_settings.yml`**: 全域設定中心。
+- **`logs/`**: 日誌中心。
+- **uv**: 底層安裝工具。
+- **FastAPI**: Web 框架。
 
 ---
 
-## 二、 終極檔案結構與業務邏輯歸屬
+## 二、 終極檔案結構與業務邏輯歸屬 (v9.1)
 
 這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
 
 ```
 /PHOENIX_HEART_PROJECT/
 │
-├── 🚀 launch.py                   # 唯一的「總開關」，一鍵啟動所有服務。
-├── 🚀 phoenix_starter.py          # 視覺化的「鳳凰之心指揮中心」啟動器。
+├── 🚀 phoenix_starter.py          # 【推薦】視覺化啟動器，整合所有功能。
+├── 🚀 launch.py                   # 【無介面】主啟動腳本，適合伺服器環境。
+├── 📜 smart_e2e_test.sh           # 智能測試腳本，由安全安裝模組驅動。
 │
 ├── 📦 apps/                        # 【所有獨立微服務的家】
-│   │
-│   ├── 📈 quant/                   # 【量化金融 App】
-│   │   ├── 🛰️ main.py               # FastAPI 應用主入口。
-│   │   ├── 🧠 logic/               # 核心業務邏輯。
-│   │   │   ├── analysis.py         # 分析計算模組。
-│   │   │   ├── data_sourcing.py    # 數據源處理模組。
-│   │   │   ├── database.py         # 資料庫互動模組。
-│   │   │   └── factor_engineering.py # 因子工程模組。
-│   │   ├── 🕸️ api/                  # API 接口層。
-│   │   │   └── v1/                 # API 版本 v1。
-│   │   │       └── endpoints.py    # API 端點定義。
-│   │   └── 📜 requirements.txt       # Python 核心依賴。
-│   │
-│   └── 🎤 transcriber/             # 【語音轉寫 App】
-│       ├── 🛰️ main.py               # FastAPI 應用主入口。
-│       ├── 🧠 logic.py             # 核心業務邏輯。
-│       ├── 📜 requirements.txt       # Python 核心依賴。
-│       └── 📜 requirements.large.txt # (可選) 大型 AI 模型依賴。
+│   ├── 📈 quant/                   #  - 量化金融 App
+│   └── 🎤 transcriber/             #  - 語音轉寫 App
+│       └── ... (每個 App 內部包含 main.py, logic, requirements.txt 等)
 │
-├── 🧪 tests/                       # 【品質保證中心：所有測試的家】
-│   │
-│   ├── 📈 quant/                   # 【量化金融 App 的測試】
-│   │   └── test_api.py           # API 層級的整合測試。
-│   │
-│   └── 🎤 transcriber/             # 【語音轉寫 App 的測試】
-│       └── test_api.py           # API 層級的整合測試 (包含模擬與 E2E)。
+├── 🛠️ core_utils/                 # 【核心工具模組】
+│   ├── __init__.py               #  - 將此目錄標記為 Python 套件。
+│   ├── 🔬 resource_monitor.py      #  - 資源監控模組：提供檢查系統資源的函式。
+│   └── 🛡️ safe_installer.py       #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
+│
+├── ⚙️ config/                     # 【全域設定中心】
+│   └── resource_settings.yml     #  - 在此定義記憶體/磁碟閾值等監控參數。
+│
+├── 📝 logs/                        # 【日誌中心】
+│   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處 (log檔會被自動忽略)。
+│
+├── 🧪 tests/                       # 【品質保證中心】
+│   ├── 📈 quant/                   #  - 量化金融 App 的測試。
+│   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試。
 │
 ├── ⚙️ proxy/                        # 【逆向代理配置】
-│   └── proxy_config.json         # 路由規則設定檔，定義如何轉發請求。
-│
-├── 📜 smart_e2e_test.sh           # 智能測試指揮官腳本。
+│   └── proxy_config.json         #  - 路由規則設定檔。
 │
 ├── 📚 docs/                         # 【專案文件】
-│   ├── ARCHITECTURE.md           # (本文件) 最終的架構設計總藍圖。
-│   ├── Colab_Guide.md            # 在 Google Colab 上運行的指南。
-│   ├── MISSION_DEBRIEFING.md     # 專案的任務報告與總結。
-│   └── TEST.md                   # 關於測試策略的詳細說明。
-│
-├── 🗄️ ALL_DATE/                   # 【封存參考資料】
-│   └── ...                       # (包含多個舊專案與參考資料，此處省略)
+│   └── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖。
 │
 └── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
 
 ---
 
-## 三、 統一啟動與執行流程
+## 三、 智慧型啟動與安裝流程
 
-當您在任何環境執行 `python launch.py` 時，系統將嚴格遵循以下流程：
+當您執行 `python launch.py` 或 `python phoenix_starter.py` 時，系統將嚴格遵循以下更為精密的流程：
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
-    participant Launcher as 🚀 launch.py
+    participant Starter as 🚀 啟動器<br>(launch.py / phoenix_starter.py)
+    participant Config as ⚙️ config/resource_settings.yml
+    participant SafeInstaller as 🛡️ 安全安裝模組
+    participant Monitor as 🔬 資源監控模組
+    participant Logger as 📝 日誌中心
     participant UV as ✨ uv
-    participant QuantApp as 📈 Quant App
-    participant TranscriberApp as 🎤 Transcriber App
-    participant Proxy as 🌐 逆向代理
+    participant AppVenv as 📦 App .venv
 
-    User->>Launcher: 執行 `python launch.py`
-    Launcher->>Launcher: 開始遍歷 `apps` 目錄
+    User->>Starter: 執行啟動命令
+    Starter->>Starter: 檢查並安裝核心依賴 (uv, psutil, pyyaml)
 
-    Note over Launcher, UV: --- 處理 Quant App ---
-    Launcher->>UV: 進入 `apps/quant`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>QuantApp: 在背景啟動 `main.py` (監聽 8001 埠)
+    loop 為每個 App
+        Starter->>AppVenv: 建立獨立的 .venv
 
-    Note over Launcher, UV: --- 處理 Transcriber App ---
-    Launcher->>UV: 進入 `apps/transcriber`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>TranscriberApp: 在背景啟動 `main.py` (監聽 8002 埠)
+        Note over Starter, SafeInstaller: 委派安裝任務
+        Starter->>SafeInstaller: run(app_name, reqs.txt, venv_path)
 
-    Note over Launcher, Proxy: --- 啟動最終服務 ---
-    Launcher->>Proxy: 所有 App 啟動成功，現在啟動內建的逆向代理
-    Proxy->>User: 系統準備就緒！顯示公開訪問網址 (http://localhost:8000)
+        SafeInstaller->>Config: 讀取資源閾值設定
+        SafeInstaller->>Logger: 建立 install_[app_name]_[time].log
+
+        loop 讀取 requirements.txt 中的每個套件
+            SafeInstaller->>Monitor: 檢查記憶體與磁碟
+            Monitor-->>SafeInstaller: 回報資源狀況 (OK / FAILED)
+            SafeInstaller->>Logger: 將檢查結果寫入日誌
+
+            alt 資源充足 (OK)
+                SafeInstaller->>Logger: 記錄「開始安裝...」
+                SafeInstaller->>UV: install [package]
+                UV-->>SafeInstaller: 回報安裝結果
+                SafeInstaller->>Logger: 將安裝結果寫入日誌
+            else 資源不足 (FAILED)
+                SafeInstaller->>Logger: 記錄「資源不足，中止安裝！」
+                SafeInstaller-->>Starter: 拋出例外
+                Starter-->>User: 顯示錯誤並終止
+            end
+        end
+        SafeInstaller-->>Starter: 回報所有套件安裝成功
+    end
+
+    Starter->>Starter: 啟動所有 App 的 FastAPI 伺服器
+    Starter->>User: 顯示成功訊息與訪問網址
 ```
 
 ### 流程總結：
 
-1.  **啟動器 (`launch.py`)** 是唯一的指揮官。
-2.  它逐一「拜訪」每個 App 的家 (`apps/*`)。
-3.  在每個家裡，它命令 **uv** 快速建立一個獨立、標準化的工作環境 (`.venv`) 並安裝好所有工具 (`requirements.txt`)。
-4.  環境就緒後，它就讓這個 App 自己開始工作（在背景運行自己的 FastAPI 伺服器）。
-5.  當所有 App 都開始獨立工作後，啟動器最後會打開「總服務台」（逆向代理），讓外界可以開始通過統一的入口訪問所有服務。
+1.  **啟動器 (Starter)** 負責高層協調，它首先確保 `uv`, `psutil`, `pyyaml` 等核心工具已就緒。
+2.  對於每個微服務 App，啟動器不再親自執行安裝，而是將任務**委派**給**安全安裝模組 (`safe_installer.py`)**。
+3.  **安全安裝模組**接手後：
+    a.  首先從**設定中心 (`config.yml`)** 讀取最新的資源監控標準。
+    b.  然後為這次安裝任務在**日誌中心 (`logs/`)** 中建立一個專屬的日誌檔案。
+    c.  它**逐一**讀取 `requirements.txt` 中的套件，而不是一次性全部處理。
+    d.  在安裝**每一個**套件前，它都會命令**資源監控模組 (`resource_monitor.py`)** 進行一次全面的資源健康檢查。
+    e.  所有檢查和安裝步驟，無論成功或失敗，都會被詳細地記錄在日誌檔案中。
+    f.  如果任何一步資源檢查失敗，安裝模組會立即中止任務並拋出錯誤，防止系統崩潰。
+4.  只有當所有 App 的依賴都安全安裝完畢後，啟動器才會繼續執行後續的服務啟動流程。
 
-這套流程確保了無論在何種環境下，整個系統的啟動過程都是標準化、可預測、且極度高效的。
+這套流程將原本簡單的安裝過程，升級為一個具備**容錯、監控、可追溯、可配置**能力的專業級部署系統。
