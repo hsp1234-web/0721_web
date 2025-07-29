@@ -89,7 +89,7 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
         try:
             # 使用 uv 來進行快速安裝
             command = [
-                sys.executable, "-m", "uv", "pip", "install",
+                "uv", "pip", "install",
                 "--python", python_executable,
                 package
             ]
