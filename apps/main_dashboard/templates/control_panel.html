@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳳凰之心 - 主操作儀表板</title>
+    <style>
+        body { background-color: #f0f2f5; color: #333; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        h1 { text-align: center; color: #1d3557; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        .panel { border: 1px solid #ddd; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .panel-header { background-color: #457b9d; color: white; padding: 15px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-size: 18px; font-weight: bold; }
+        .panel-body { padding: 20px; }
+        button { background-color: #1d3557; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .result-box { margin-top: 15px; padding: 15px; background-color: #eaf2f8; border: 1px solid #a8dadc; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; min-height: 50px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 鳳凰之心 - 主操作儀表板 🚀</h1>
+        <div class="grid-container">
+            <div id="quant-panel" class="panel">
+                <div class="panel-header">📈 量化分析 App</div>
+                <div class="panel-body">
+                    <button id="run-quant">執行分析</button>
+                    <div id="quant-result" class="result-box"></div>
+                </div>
+            </div>
+            <div id="transcriber-panel" class="panel">
+                <div class="panel-header">🎤 語音轉寫 App</div>
+                <div class="panel-body">
+                    <form id="upload-form">
+                        <input type="file" name="file" id="audio-file" accept="audio/*" required>
+                        <button type="submit">上傳並轉寫</button>
+                    </form>
+                    <div id="transcriber-result" class="result-box"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // JS 邏輯與之前版本相同，此處為示意
+    </script>
+</body>
+</html>
