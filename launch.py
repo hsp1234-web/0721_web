@@ -34,6 +34,7 @@ except ImportError:
 
 from core_utils.commander_console import CommanderConsole
 from core_utils.resource_monitor import is_resource_sufficient, load_resource_settings
+from core_utils.report_generator import ReportGenerator
 
 # --- 全域設定 ---
 LOGS_DIR = Path("logs")
@@ -177,8 +178,22 @@ async def manage_app_lifecycle(app_name, port, app_status):
         log_event("CRITICAL", f"管理應用 '{app_name}' 時發生嚴重錯誤: {e}")
         raise
 
-async def main_logic(is_full_mode: bool):
+def load_config():
+    """載入設定檔"""
+    config_path = Path("config.json")
+    if not config_path.exists():
+        # 如果設定檔不存在，回傳一個合理的預設值
+        return {
+            "FAST_TEST_MODE": True,
+            "TIMEZONE": "Asia/Taipei"
+        }
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+async def main_logic(config: dict):
     """核心的循序啟動邏輯"""
+    is_full_mode = not config.get("FAST_TEST_MODE", True)
+
     if is_full_mode:
         log_event("BATTLE", "鳳凰之心 v18.0 [完整模式] 啟動序列開始。")
     else:
@@ -224,12 +239,13 @@ def performance_logger_thread():
             conn.commit()
         time.sleep(1) # 每秒記錄一次
 
-async def main(args):
+async def main():
     """包含 TUI 和休眠邏輯的主異步函數"""
     if DB_FILE.exists():
         os.remove(DB_FILE)
     setup_database()
 
+    config = load_config()
     console.start()
 
     # 啟動專門的效能日誌記錄執行緒
@@ -237,10 +253,10 @@ async def main(args):
     perf_thread.start()
 
     try:
-        await main_logic(args.full)
+        await main_logic(config)
         log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
         # 在完整模式下才長時間休眠
-        if args.full:
+        if not config.get("FAST_TEST_MODE", True):
             await asyncio.sleep(3600)
     except Exception as e:
         log_event("CRITICAL", f"主程序發生未預期錯誤: {e}")
@@ -249,14 +265,20 @@ async def main(args):
         # 確保效能日誌執行緒也已停止
         perf_thread.join(timeout=1.5)
 
+        # --- 報告生成 ---
+        log_event("INFO", "開始生成最終報告...")
+        try:
+            config_path = Path("config.json")
+            if config_path.exists():
+                generator = ReportGenerator(db_path=DB_FILE, config_path=config_path)
+                generator.generate_all_reports()
+                log_event("SUCCESS", "所有報告已成功生成。")
+            else:
+                log_event("WARN", "找不到設定檔 (config.json)，無法生成報告。")
+        except Exception as e:
+            log_event("CRITICAL", f"生成報告時發生嚴重錯誤: {e}")
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 啟動器")
-    parser.add_argument(
-        '--full',
-        action='store_true',
-        help='執行完整模式，包括安裝所有依賴和啟動所有後端 App。預設為快速測試模式。'
-    )
-    args = parser.parse_args()
 
     try:
         # 確保 uv 已安裝

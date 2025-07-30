@@ -1,36 +1,51 @@
 # -*- coding: utf-8 -*-
 """
-核心工具：V3 報告生成器
+核心工具：V15 報告生成器
 """
 import sqlite3
-from pathlib import Path
 import pandas as pd
+from pathlib import Path
 from datetime import datetime
+import json
+import pytz
 
 class ReportGenerator:
     """
     從 logs.sqlite 生成三份標準 Markdown 報告。
     """
-    def __init__(self, db_path: Path, report_id: str):
+    def __init__(self, db_path: Path, config_path: Path):
         self.db_path = db_path
-        self.report_id = report_id
+        self.config = self._load_config(config_path)
+        self.timezone = pytz.timezone(self.config.get("TIMEZONE", "Asia/Taipei"))
         self.df = None
         self.start_time = None
         self.end_time = None
         self.total_duration_seconds = 0
+        self.output_dir = Path("logs")
+        self.output_dir.mkdir(exist_ok=True)
+
+    def _load_config(self, config_path: Path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
 
     def _load_data(self):
         """從資料庫載入數據到 pandas DataFrame"""
         with sqlite3.connect(self.db_path) as conn:
             self.df = pd.read_sql_query("SELECT * FROM phoenix_logs", conn)
 
-        # 轉換時間戳並設定時區
-        self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
+        if self.df.empty:
+            return
+
+        self.df['timestamp'] = pd.to_datetime(self.df['timestamp']).dt.tz_localize('UTC').dt.tz_convert(self.timezone)
         self.df = self.df.set_index('timestamp')
 
         self.start_time = self.df.index.min()
         self.end_time = self.df.index.max()
-        self.total_duration_seconds = (self.end_time - self.start_time).total_seconds()
+        if pd.notna(self.start_time) and pd.notna(self.end_time):
+            self.total_duration_seconds = (self.end_time - self.start_time).total_seconds()
+        else:
+            self.total_duration_seconds = 0
+
 
     def _format_duration(self, seconds: int) -> str:
         """將秒數格式化為 'X 分 Y 秒'"""
@@ -39,144 +54,116 @@ class ReportGenerator:
         return f"{minutes} 分 {seconds} 秒"
 
     def generate_all_reports(self):
-        """生成所有報告並返回 Markdown 字串"""
-        if self.df is None:
-            self._load_data()
+        """生成所有報告並寫入檔案"""
+        self._load_data()
 
-        report1 = self._generate_summary_report()
-        report2 = self._generate_performance_report()
-        report3 = self._generate_log_report()
+        if self.df is None or self.df.empty:
+            print("⚠️ 沒有數據可供生成報告。")
+            return
 
-        return {
-            "summary_report.md": report1,
-            "performance_report.md": report2,
-            "log_report.md": report3,
+        reports = {
+            "綜合戰情簡報.md": self._generate_summary_report,
+            "效能分析報告.md": self._generate_performance_report,
+            "詳細日誌報告.md": self._generate_log_report,
         }
 
+        for filename, generator_func in reports.items():
+            content = generator_func()
+            report_path = self.output_dir / filename
+            report_path.write_text(content, encoding='utf-8')
+            print(f"✅ 已生成報告: {report_path}")
+
     def _generate_summary_report(self) -> str:
-        """生成綜合任務報告"""
+        """生成綜合戰情簡報"""
+        if self.df.empty: return "# 綜合戰情簡報\n\n無數據。"
+
         # 效能摘要
         perf_df = self.df[self.df['level'] == 'PERF'].copy()
-        avg_cpu = perf_df['cpu_usage'].mean()
-        peak_cpu = perf_df['cpu_usage'].max()
-        avg_ram = perf_df['ram_usage'].mean()
-        peak_ram = perf_df['ram_usage'].max()
+        avg_cpu = perf_df['cpu_usage'].mean() if not perf_df.empty else 0
+        peak_cpu = perf_df['cpu_usage'].max() if not perf_df.empty else 0
+        avg_ram = perf_df['ram_usage'].mean() if not perf_df.empty else 0
+        peak_ram = perf_df['ram_usage'].max() if not perf_df.empty else 0
 
         # 關鍵事件
         key_events = self.df[self.df['level'].isin(['SUCCESS', 'ERROR', 'WARN', 'BATTLE', 'CRITICAL'])].copy()
 
         # 最終狀態
-        status_color = "green" if "ERROR" not in self.df['level'].values and "CRITICAL" not in self.df['level'].values else "red"
-        status_text = "執行成功" if status_color == "green" else "執行完畢，但有錯誤發生"
+        has_errors = "ERROR" in self.df['level'].values or "CRITICAL" in self.df['level'].values
+        status_color = "red" if has_errors else "green"
+        status_text = "執行完畢，但有錯誤發生" if has_errors else "任務成功"
 
-        md = f"""
-# 鳳凰之心 - 綜合任務報告
+        md = f"""# 📑 綜合戰情簡報
 
-**報告ID:** {self.report_id}
-**執行時間:** {self.start_time.strftime('%Y-%m-%d %H:%M:%S')} - {self.end_time.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)
+**報告產生時間:** {datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S %Z')}
 **總耗時:** {self._format_duration(self.total_duration_seconds)}
 
 ---
 
-### 一、 總體結果
+### 一、總體結果
 **狀態:** <font color="{status_color}">{status_text}</font>
 
-### 二、 效能摘要 (重點)
-- **平均 CPU:** {avg_cpu:.1f}%
-- **峰值 CPU:** {peak_cpu:.1f}%
-- **平均 RAM:** {avg_ram:.1f}%
-- **峰值 RAM:** {peak_ram:.1f}%
+### 二、效能重點
+- **平均 CPU 使用率:** {avg_cpu:.1f}%
+- **峰值 CPU 使用率:** {peak_cpu:.1f}%
+- **平均記憶體使用率:** {avg_ram:.1f}%
+- **峰值記憶體使用率:** {peak_ram:.1f}%
 
-### 三、 關鍵事件摘要
-```
-{key_events[['level', 'message']].to_string(index=False, header=False)}
-```
-
-### 四、 產出檔案
-- {self.report_id}-summary.md
-- {self.report_id}-performance.md
-- {self.report_id}-logs.md
+### 三、關鍵事件摘要
 """
+        if not key_events.empty:
+            for _, row in key_events.iterrows():
+                md += f"- **[{row['level']}]** {row['message']}\n"
+        else:
+            md += "- 無關鍵事件記錄。\n"
+
         return md.strip()
 
     def _generate_performance_report(self) -> str:
         """生成詳細效能報告"""
+        if self.df.empty: return "# 效能分析報告\n\n無數據。"
+
         perf_df = self.df[self.df['level'] == 'PERF'].copy()
+        if perf_df.empty: return "# 效能分析報告\n\n無效能數據。"
 
         summary = {
             'CPU 使用率': (perf_df['cpu_usage'].mean(), perf_df['cpu_usage'].max(), perf_df['cpu_usage'].min()),
             'RAM 使用率': (perf_df['ram_usage'].mean(), perf_df['ram_usage'].max(), perf_df['ram_usage'].min())
         }
 
-        # 時間軸圖表
-        resampled = perf_df.resample('5S').mean() # 每 5 秒一個數據點
-        timeline = []
-        for ts, row in resampled.iterrows():
-            cpu_bar = '▓' * int(row['cpu_usage'] / 5)
-            ram_bar = '▓' * int(row['ram_usage'] / 5)
-            timeline.append(f"{ts.strftime('%H:%M:%S')}  [{cpu_bar.ljust(20)}] {row['cpu_usage']:.1f}%      [{ram_bar.ljust(20)}] {row['ram_usage']:.1f}%")
+        md = f"""# 📊 效能分析報告
 
-        md = f"""
-# 鳳凰之心 - 詳細效能報告
-
-**報告產生時間:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)
+**報告產生時間:** {datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S %Z')}
 **監控持續時間:** {self._format_duration(self.total_duration_seconds)}
 
 ---
 
-### 一、 總體效能摘要
+### 一、總體效能摘要
 
-| 指標         | 平均值 | 峰值  | 最低值 |
-|--------------|--------|-------|--------|
-| CPU 使用率   | {summary['CPU 使用率'][0]:.1f}% | {summary['CPU 使用率'][1]:.1f}% | {summary['CPU 使用率'][2]:.1f}% |
-| RAM 使用率   | {summary['RAM 使用率'][0]:.1f}% | {summary['RAM 使用率'][1]:.1f}% | {summary['RAM 使用率'][2]:.1f}% |
+| 指標 | 平均值 | 峰值 | 最低值 |
+|---|---|---|---|
+| CPU 使用率 | {summary['CPU 使用率'][0]:.1f}% | {summary['CPU 使用率'][1]:.1f}% | {summary['CPU 使用率'][2]:.1f}% |
+| 記憶體使用率 | {summary['RAM 使用率'][0]:.1f}% | {summary['RAM 使用率'][1]:.1f}% | {summary['RAM 使用率'][2]:.1f}% |
 
-### 二、 效能時間軸
-
-**時間      CPU 使用率 (%)                  RAM 使用率 (%)**
-```
-{chr(10).join(timeline)}
-```
+### 二、詳細數據表
+{perf_df[['cpu_usage', 'ram_usage']].to_markdown()}
 """
         return md.strip()
 
     def _generate_log_report(self) -> str:
         """生成詳細日誌報告"""
-        log_entries = []
-        for index, row in self.df.iterrows():
-            ts_str = index.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            log_entries.append(f"[{ts_str} (Asia/Taipei)] [{row['level']}] {row['message']}")
+        if self.df.empty: return "# 詳細日誌報告\n\n無數據。"
 
-        md = f"""
-# 鳳凰之心 - 詳細日誌報告
+        log_df = self.df[self.df['level'] != 'PERF']
+        if log_df.empty: return "# 詳細日誌報告\n\n無日誌數據。"
 
-**報告產生時間:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)
+        md = f"""# 📝 詳細日誌報告
+
+**報告產生時間:** {datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S %Z')}
 **任務執行區間:** {self.start_time.strftime('%Y-%m-%d %H:%M:%S')} - {self.end_time.strftime('%Y-%m-%d %H:%M:%S')}
 
 ---
 ```
-{chr(10).join(log_entries)}
+{log_df[['level', 'message']].to_string()}
 ```
 """
         return md.strip()
-
-if __name__ == '__main__':
-    # --- 獨立測試 ---
-    print("正在測試 ReportGenerator...")
-    # 假設 launch.py 已經執行過，並且 logs/logs.sqlite 已存在
-    db_file = Path("logs/logs.sqlite")
-    if not db_file.exists():
-        print("錯誤：找不到 logs/logs.sqlite。請先執行 launch.py 來生成日誌數據。")
-    else:
-        report_id = f"PHOENIX-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        generator = ReportGenerator(db_file, report_id)
-        reports = generator.generate_all_reports()
-
-        for filename, content in reports.items():
-            report_path = Path(f"logs/{report_id}-{filename}")
-            report_path.write_text(content, encoding='utf-8')
-            print(f"已生成報告: {report_path}")
-
-        print("\n--- Summary Report ---")
-        print(reports["summary_report.md"])
-        print("\nReportGenerator 測試完畢。")
