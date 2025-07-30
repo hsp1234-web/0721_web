@@ -18,18 +18,23 @@ try:
     import psutil
     from IPython.display import display, clear_output
     import nest_asyncio
+    from aiohttp import web
+    import pandas  # 確保 pandas 也被檢查
 except ImportError:
-    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio)...")
+    # 新增 pandas 到依賴列表
+    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio, aiohttp, pandas)...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio", "aiohttp", "pandas"], check=True)
         print("依賴安裝成功。")
         import pytz
         import psutil
         from IPython.display import display, clear_output
         import nest_asyncio
+        from aiohttp import web
+        import pandas
     except Exception as e:
         print(f"自動安裝依賴失敗: {e}")
-        print("請手動執行 'pip install pytz psutil ipython nest_asyncio' 後再試一次。")
+        print("請手動執行 'pip install pytz psutil ipython nest_asyncio aiohttp pandas' 後再試一次。")
         sys.exit(1)
 
 from core_utils.commander_console import CommanderConsole
@@ -39,7 +44,7 @@ from core_utils.report_generator import ReportGenerator
 # --- 全域設定 ---
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
-DB_FILE = LOGS_DIR / "logs.sqlite"
+DB_FILE = None # 將由命令列參數提供
 TAIWAN_TZ = pytz.timezone('Asia/Taipei')
 APPS_DIR = Path("apps")
 
@@ -47,20 +52,55 @@ APPS_DIR = Path("apps")
 console = CommanderConsole()
 
 def setup_database():
-    """初始化 SQLite 資料庫和日誌表"""
+    """初始化 SQLite 資料庫，建立前端所需的所有表。"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
+        # 確保從乾淨的狀態開始
+        cursor.execute("DROP TABLE IF EXISTS phoenix_logs")
+        cursor.execute("DROP TABLE IF EXISTS status_table")
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS phoenix_logs (
+        CREATE TABLE phoenix_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
             level TEXT NOT NULL,
             message TEXT NOT NULL,
             cpu_usage REAL,
             ram_usage REAL
-        )
-        """)
+        )""")
+        cursor.execute("""
+        CREATE TABLE status_table (
+            id INTEGER PRIMARY KEY,
+            current_stage TEXT,
+            apps_status TEXT,
+            action_url TEXT,
+            cpu_usage REAL,
+            ram_usage REAL
+        )""")
+        # 插入唯一的狀態行
+        cursor.execute("INSERT OR IGNORE INTO status_table (id) VALUES (1)")
         conn.commit()
+
+def update_status(stage=None, apps_status=None, url=None, cpu=None, ram=None):
+    """安全地更新 status_table 中的狀態。"""
+    if not DB_FILE: return
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            if stage is not None:
+                cursor.execute("UPDATE status_table SET current_stage = ? WHERE id = 1", (stage,))
+            if apps_status is not None:
+                cursor.execute("UPDATE status_table SET apps_status = ? WHERE id = 1", (json.dumps(apps_status),))
+            if url is not None:
+                cursor.execute("UPDATE status_table SET action_url = ? WHERE id = 1", (url,))
+            if cpu is not None:
+                cursor.execute("UPDATE status_table SET cpu_usage = ? WHERE id = 1", (cpu,))
+            if ram is not None:
+                cursor.execute("UPDATE status_table SET ram_usage = ? WHERE id = 1", (ram,))
+            conn.commit()
+    except Exception as e:
+        # 在啟動初期，TUI 可能還不存在，所以用 print
+        print(f"Error updating status db: {e}")
+
 
 def log_event(level, message, cpu=None, ram=None):
     """將事件記錄到 TUI 和 SQLite 資料庫"""
@@ -69,14 +109,18 @@ def log_event(level, message, cpu=None, ram=None):
 
     console.add_log(f"[{level}] {message}")
 
+    if not DB_FILE: return
     timestamp = datetime.now(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
-            (timestamp, level, message, cpu, ram)
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
+                (timestamp, level, message, cpu, ram)
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"Error logging to db: {e}")
 
 async def run_command_async_and_log(command: str, cwd: Path):
     """異步執行命令並將其輸出即時記錄到日誌中"""
@@ -133,17 +177,20 @@ async def safe_install_packages(app_name: str, requirements_path: Path, python_e
 async def manage_app_lifecycle(app_name, port, app_status):
     """完整的應用生命週期管理：安裝、啟動"""
     app_status[app_name] = "pending"
+    update_status(apps_status=app_status)
     venv_path = APPS_DIR / app_name / ".venv"
     python_executable = str(venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
 
     try:
         # --- 1. 環境準備 ---
         app_status[app_name] = "installing"
+        update_status(stage=f"[{app_name}] 準備環境", apps_status=app_status)
         console.update_status_tag(f"[{app_name}] 準備虛擬環境")
         if not venv_path.exists():
             await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path))}", APPS_DIR.parent)
 
         # --- 2. 安裝依賴 ---
+        update_status(stage=f"[{app_name}] 安裝依賴")
         req_file = APPS_DIR / app_name / "requirements.txt"
         await safe_install_packages(app_name, req_file, python_executable)
 
@@ -156,6 +203,7 @@ async def manage_app_lifecycle(app_name, port, app_status):
 
         # --- 3. 啟動服務 ---
         app_status[app_name] = "starting"
+        update_status(stage=f"[{app_name}] 啟動服務", apps_status=app_status)
         console.update_status_tag(f"[{app_name}] 啟動服務中...")
         env = os.environ.copy()
         env["PORT"] = str(port)
@@ -171,10 +219,12 @@ async def manage_app_lifecycle(app_name, port, app_status):
 
         await asyncio.sleep(10) # 給予服務啟動時間
         app_status[app_name] = "running"
+        update_status(apps_status=app_status)
         log_event("SUCCESS", f"[{app_name}] 服務已在背景啟動 (日誌: {log_file})")
 
     except Exception as e:
         app_status[app_name] = "failed"
+        update_status(apps_status=app_status)
         log_event("CRITICAL", f"管理應用 '{app_name}' 時發生嚴重錯誤: {e}")
         raise
 
@@ -193,54 +243,120 @@ def load_config():
 async def main_logic(config: dict):
     """核心的循序啟動邏輯"""
     is_full_mode = not config.get("FAST_TEST_MODE", True)
+    apps_status = { "quant": "pending", "transcriber": "pending" }
 
     if is_full_mode:
         log_event("BATTLE", "鳳凰之心 v18.0 [完整模式] 啟動序列開始。")
+        update_status(stage="系統啟動中 [完整模式]", apps_status=apps_status)
     else:
         log_event("BATTLE", "鳳凰之心 v18.0 [快速測試模式] 啟動序列開始。")
+        update_status(stage="系統啟動中 [快速模式]", apps_status=apps_status)
 
     log_event("INFO", "系統環境預檢完成。")
 
     if not is_full_mode:
         log_event("INFO", "[快速測試模式] 跳過所有 App 的安裝與啟動。")
+        update_status(stage="快速測試模式")
         await asyncio.sleep(5) # 模擬一些工作負載
         log_event("SUCCESS", "快速測試流程驗證成功。")
         console.update_status_tag("[快速測試通過]")
+        update_status(stage="快速測試通過")
         return
 
-    apps_status = { "quant": "pending", "transcriber": "pending" }
+    update_status(stage="服務安裝/啟動中")
     app_configs = [
         {"name": "quant", "port": 8001},
         {"name": "transcriber", "port": 8002}
     ]
 
     # 循序執行以避免資源競爭
-    for config in app_configs:
-        await manage_app_lifecycle(config['name'], config['port'], apps_status)
+    for app_config in app_configs:
+        await manage_app_lifecycle(app_config['name'], app_config['port'], apps_status)
 
     if all(status == "running" for status in apps_status.values()):
         log_event("SUCCESS", "所有核心服務已成功啟動。")
         console.update_status_tag("[服務運行中]")
+        update_status(stage="服務運行中")
     else:
         log_event("ERROR", "部分服務啟動失敗，請檢查日誌。")
         console.update_status_tag("[啟動失敗]")
+        update_status(stage="啟動失敗")
 
 # --- 主程序 ---
 def performance_logger_thread():
     """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
     while not console._stop_event.is_set():
+        # 更新 status_table
+        update_status(cpu=console.cpu_usage, ram=console.ram_usage)
+
+        # 也將其記錄到日誌表
         timestamp = datetime.now(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
-                (timestamp, "PERF", "performance_snapshot", console.cpu_usage, console.ram_usage)
-            )
-            conn.commit()
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
+                    (timestamp, "PERF", "performance_snapshot", console.cpu_usage, console.ram_usage)
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"Error in perf logger: {e}")
+
         time.sleep(1) # 每秒記錄一次
 
-async def main():
-    """包含 TUI 和休眠邏輯的主異步函數"""
+# --- API 伺服器邏輯 ---
+async def get_status_api(request):
+    """API 端點，用於獲取當前的完整狀態"""
+    try:
+        with sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # 獲取主狀態
+            cursor.execute("SELECT * FROM status_table WHERE id = 1")
+            status_data = cursor.fetchone()
+
+            # 獲取最新的 20 條日誌
+            cursor.execute("SELECT timestamp, level, message FROM phoenix_logs ORDER BY id DESC LIMIT 20")
+            logs_data = cursor.fetchall()
+
+        if not status_data:
+            return web.json_response({"error": "Status not found"}, status=404)
+
+        response_data = {
+            "status": dict(status_data),
+            "logs": [dict(log) for log in logs_data]
+        }
+        return web.json_response(response_data)
+
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+async def run_api_server():
+    """運行 aiohttp API 伺服器"""
+    app = web.Application()
+    app.router.add_get("/api/v1/status", get_status_api)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # 使用一個前端不太可能衝突的埠
+    site = web.TCPSite(runner, 'localhost', 8088)
+    try:
+        await site.start()
+        log_event("INFO", "狀態 API 伺服器已在 http://localhost:8088 啟動")
+        # 保持伺服器運行
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        log_event("INFO", "狀態 API 伺服器正在關閉...")
+    finally:
+        await runner.cleanup()
+
+
+async def main(db_path: Path):
+    """包含 TUI、API 和休眠邏輯的主異步函數"""
+    global DB_FILE
+    DB_FILE = db_path
+
     if DB_FILE.exists():
         os.remove(DB_FILE)
     setup_database()
@@ -251,6 +367,9 @@ async def main():
     # 啟動專門的效能日誌記錄執行緒
     perf_thread = threading.Thread(target=performance_logger_thread, daemon=True)
     perf_thread.start()
+
+    # 建立 API 伺服器任務
+    api_task = asyncio.create_task(run_api_server())
 
     try:
         await main_logic(config)
@@ -264,6 +383,10 @@ async def main():
         console.stop("程序結束。")
         # 確保效能日誌執行緒也已停止
         perf_thread.join(timeout=1.5)
+
+        # 停止 API 伺服器
+        api_task.cancel()
+        await asyncio.sleep(0.1) # 給予取消操作一點時間
 
         # --- 報告生成 ---
         log_event("INFO", "開始生成最終報告...")
@@ -279,6 +402,9 @@ async def main():
             log_event("CRITICAL", f"生成報告時發生嚴重錯誤: {e}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 後端啟動器")
+    parser.add_argument("--db-file", type=Path, required=True, help="SQLite 資料庫的絕對路徑")
+    args = parser.parse_args()
 
     try:
         # 確保 uv 已安裝
@@ -291,6 +417,6 @@ if __name__ == "__main__":
         nest_asyncio.apply()
 
     try:
-        asyncio.run(main(args))
+        asyncio.run(main(args.db_file))
     except KeyboardInterrupt:
         pass
