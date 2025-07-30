@@ -1,198 +1,110 @@
-# 鳳凰之心 v9.2：權威性架構藍圖
+# 鳳凰之心 v13：彈性啟動與可觀測性架構
 
-這份文件是一份權威性的技術藍圖，旨在精準反映專案 v9.2 的最終形態。它不僅描繪了檔案結構和自動化流程，更深入闡述了其背後應對現代化開發挑戰的設計哲學。
-
----
-
-## 一、 設計哲學：應對 CI/CD 的三重困境
-
-我們的架構是為了解決在現代持續整合與部署 (CI/CD) 環境中普遍存在的三大核心瓶頸而設計的：
-
-1.  **空間瓶頸 (硬碟空間耗盡)**: 在資源受限的容器化環境中，傳統「一次性安裝所有依賴」的流程極易導致硬碟空間不足而失敗。
-2.  **時間瓶頸 (CPU 資源浪費)**: 單線程的循序測試無法充分利用多核心 CPU，導致測試時間過長，嚴重拖慢開發迭代速度。
-3.  **穩定性瓶頸 (流程意外掛起)**: 單一測試案例的意外卡死（如 API 等待、死循環）會導致整個 CI/CD 流程被無限期阻塞，無法自動報告錯誤。
-
-為此，我們確立了三大核心解決策略，它們共同構建了一個快速、穩健且高效的系統：
-
--   **策略一：原子化隔離與即時清理 (解決空間瓶頸)**
-    我們將每個測試任務視為一個「原子」單元。測試前，僅為其建立一個包含最小依賴集的專用虛擬環境；測試結束後，立即徹底刪除該環境，將硬碟空間 100% 釋放。這確保了資源峰值佔用永遠在可控範圍內。
-
--   **策略二：輕量級多核心平行處理 (解決時間瓶頸)**
-    我們透過 `multiprocessing` 實現應用級平行 (同時測試多個 App)，並利用 `pytest-xdist` 在每個 App 內部實現測試級平行。這套輕量級方案能在不增加空間負擔的前提下，壓榨 CPU 性能，大幅縮短測試總耗時。
-
--   **策略三：主動式超時強制中斷 (解決穩定性瓶頸)**
-    我們為每一個測試案例都設定了一個「生命時鐘」（透過 `pytest-timeout`）。任何超時的測試都會被自動中斷並標記為失敗，確保 CI/CD 流程永遠不會被單一故障點所阻塞。
+這份文件是專案 v13 的權威性技術藍圖。它闡述了一個以**彈性 (Resilience)** 和**可觀測性 (Observability)** 為核心的現代化微服務架構。
 
 ---
 
-## 二、 v9.2 終極檔案結構與核心工具鏈
+## 一、 設計哲學：從「能用」到「健壯」
 
-這是專案的最終檔案結構，精準反映了所有關鍵組件及其職責。
+v13 架構的設計，是為了解決前代系統在「啟動體驗」和「系統容錯」上的兩大核心痛點：
+
+1.  **漫長的啟動等待 (Long Startup Times):** 傳統的循序啟動模式，要求所有服務（無論輕重）都成功啟動後，系統才算「就緒」。這導致使用者需要漫長等待，且任何一個非核心服務的失敗都會導致整個系統啟動失敗。
+2.  **脆弱的整合 (Brittle Integration):** 前後端之間、服務與服務之間透過直接呼叫或共享狀態（如資料庫）來溝通。這種緊密耦合的關係，使得任何一個組件的失敗都可能引發連鎖反應，導致整個系統崩潰。
+
+為此，我們確立了三大核心解決策略，它們共同構建了一個**快速回應、容錯性高、易於監控**的系統：
+
+-   **策略一：分階段啟動 (Staged Loading)**
+    我們將系統啟動過程拆分為兩個階段。**階段一**在幾秒內啟動最核心的 **API 閘道**，讓系統立刻「有反應」。**階段二**則在背景**平行地、非同步地**載入其他所有業務服務。這徹底改變了使用者體驗，並實現了服務間的故障隔離。
+
+-   **策略二：統一 API 閘道 (Unified API Gateway)**
+    所有外部請求（來自前端或其他客戶端）都必須透過一個**單一的、統一的 API 閘道 (`api_server`)**。這個閘道負責路由、認證和流量控制。後端的業務服務則隱藏在閘道之後，它們之間互不直接通訊，只與閘道溝通。這大大降低了系統的複雜度和耦合度。
+
+-   **策略三：日誌流即狀態 (Log Stream as State)**
+    我們摒棄了傳統的狀態資料庫。取而代之的是，系統中的**每一個事件**——從服務啟動、資源監控，到業務邏輯執行——都以標準化的 **JSON 格式**輸出到 `stdout`。這個日誌流本身就是系統**唯一且真實的狀態**。前端或任何監控系統的職責，就是消費這個日誌流，並從中呈現出它們所關心的狀態。
+
+---
+
+## 二、 v13 檔案結構與核心工具鏈
 
 ```
 /PHOENIX_HEART_PROJECT/
 │
-├── 🚀 phoenix_starter.py          # 【推薦】視覺化啟動器，整合所有功能。
-├── 🚀 launch.py                   # 【無介面】主啟動腳本，適合伺服器環境。
-├── 🧪 smart_e2e_test.py            # 【測試】新一代 Python 智能測試指揮官 (平行/穩定)。
+├── 📂 apps/
+│   ├── 🌐 api_server/             # - 【核心】統一 API 閘道
+│   ├── 📈 quant/                  # - 量化金融 App
+│   └── 🎤 transcriber/            # - 語音轉寫 App
 │
-├── 📦 apps/                        # 【所有獨立微服務的家】
-│   ├── 📈 quant/                   #  - 量化金融 App
-│   └── 🎤 transcriber/             #  - 語音轉寫 App
+├── 📂 run/
+│   ├── 🚀 backend_runner.py       # - 【核心】純後端啟動編排器
+│   └── 🏃 colab_runner.py        # - Colab 視覺化啟動器
 │
-├── 🛠️ core_utils/                 # 【核心工具模組】
-│   ├── resource_monitor.py       #  - 資源監控模組：提供檢查系統資源的函式。
-│   └── safe_installer.py         #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
+├── 📂 utils/
+│   └── 🛡️ resource_monitor.py    # - 高頻資源監控腳本
 │
-├── ⚙️ config/                     # 【全域設定中心】
-│   └── resource_settings.yml     #  - 在此定義記憶體/磁碟閾值等監控參數。
+├── 📂 config/
+│   └── ⚙️ services.json          # - 定義所有可啟動的業務服務
 │
-├── 📝 logs/                        # 【日誌中心】
-│   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處。
-│
-├── 🧪 tests/                       # 【品質保證中心】
-│   ├── 📈 quant/                   #  - 量化金融 App 的測試
-│   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試
-│
-├── 🏃 run/                         # 【執行器】
-│   └── colab_runner.py           #  - Colab 混合動力啟動器。
-│
-├── 📚 docs/                         # 【專案文件】
-│   ├── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖。
-│   ├── Colab_Guide.md            #  - Google Colab 運行指南。
-│   ├── TEST.md                   #  - 現代化測試策略藍圖 (Pythonic)。
-│   └── MISSION_DEBRIEFING.md     #  - 專案任務報告。
-│
-├── 🗄️ ALL_DATE/                   # 【舊專案封存 (僅供參考)】
-│
-└── 📄 .gitignore                  # Git 忽略檔案設定。
+└── 📂 tests/
+    └── 🧪 test_all.py              # - ✨【唯一】的整合測試腳本
 ```
 
 ### **核心工具鏈詳解:**
 
-*   **`phoenix_starter.py` / `launch.py`**: 專案的兩大入口。前者提供視覺化儀表板，後者適用於無介面的自動化環境。它們是所有智慧流程的總指揮。
-*   **`smart_e2e_test.py`**: 新一代的 Python 測試指揮官。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
-*   **`run/colab_runner.py`**: 專為 Google Colab 設計的 Rich 儀表板啟動器。它使用 `rich` 套件提供一個美觀、即時的儀表板，並透過讀寫分離的資料庫驅動架構，確保了前端顯示和後端服務的穩定運行。
-*   **`core_utils/`**: 專案的「引擎室」。`safe_installer.py` 負責執行原子化的安全安裝，而 `resource_monitor.py` 則在每一步安裝前進行資源健康檢查，是實現「空間瓶頸」解決方案的關鍵。
-*   **`docs/TEST.md`**: 與本架構文件相輔相成的測試策略藍圖，詳細說明了如何使用 `smart_e2e_test.py` 以及其背後的測試模式。
+*   **`run/backend_runner.py`**: 專案的**心臟**。它是一個啟動編排器，負責實現我們的「分階段啟動」策略。
+*   **`apps/api_server/`**: 專案的**門戶**。所有內外部通訊的唯一入口點。
+*   **`config/services.json`**: 專案的**服務註冊中心**。定義了哪些服務是可用的，以及如何啟動它們。
+*   **`utils/resource_monitor.py`**: 專案的**眼睛**。一個獨立的程序，持續不斷地將系統效能指標以 JSON 格式輸出到日誌流中。
+*   **`tests/test_all.py`**: 專案的**品質守護者**。一個全面的整合測試，用於驗證整個架構的彈性和功能。
 
 ---
 
-## 三、 Colab 啟動器最終架構：資料庫驅動方案 (v12)
+## 三、 全鏈路自動化流程圖 (v13)
 
-在經歷了數次迭代後，我們最終確定了一套以穩定性為最高原則的架構，旨在徹底解決先前 GoTTY/API 方案的複雜性與不確定性。
-
-### 核心概念：讀寫分離
-
-我們將**「做事」與「顯示」**完全分離。後端程序專心執行任務並將所有狀態與日誌寫入一個獨立的資料庫；前端的 Colab 儲存格則專心從該資料庫讀取最新狀態並負責呈現在畫面上。兩者透過資料庫溝通，互不干擾。
-
-### 架構草圖
-
-```mermaid
-graph TD
-    A["👨‍💻 您 (使用者)"] --> B{Colab 儲存格 (前端顯示器)};
-    B -- 每秒讀取狀態 --> C[(state.db)];
-    C -- 持續寫入狀態與日誌 --> D[🚀 背景程序 (後端主力部隊)];
-    B -- 清除並重繪畫面 --> B;
-    subgraph "唯一的真相來源"
-        C
-    end
-    subgraph "執行安裝、啟動等所有任務"
-        D
-    end
-```
-
-### 執行步驟
-
-1.  **建立「真相堡壘」：資料庫**
-    *   **選擇工具**：使用 **SQLite**。它是一個單一檔案的資料庫，不需額外安裝伺服器，非常適合 Colab 環境。
-    *   **設計結構**：在資料庫中建立兩張簡單的表：
-        *   `status_table`：用來存放即時狀態。例如，只有一筆紀錄，包含 `cpu_usage`, `ram_usage`, `current_stage` (目前階段) 等欄位。後端會不斷更新這一筆紀錄。
-        *   `log_table`：用來存放歷史日誌。包含 `timestamp`, `level`, `message` 等欄位。後端會不斷插入新的日誌紀錄。
-
-2.  **打造「主力部隊」：背景程序 (`launch.py`)**
-    *   **唯一職責**：依序執行所有工作，例如：安裝依賴、啟動 App、執行分析...等。
-    *   在任務的每個階段，將最新的狀態（CPU、RAM、進度）更新到資料庫的 `status_table`。
-    *   將所有產生的日誌（無論成功、失敗或除錯訊息）插入到資料庫的 `log_table`。
-    *   **重要原則**：這個腳本**不應該**使用 `print()` 來顯示儀表板畫面。它的所有輸出都只針對資料庫。
-
-3.  **設定「戰情顯示器」：前端迴圈 (`run/colab_runner.py`)**
-    *   **唯一職責**：以固定頻率（例如每秒一次）重複執行以下操作。
-        *   連接到 SQLite 資料庫。
-        *   從 `status_table` 讀取最新的即時狀態。
-        *   從 `log_table` 讀取最新的幾筆日誌（例如最新的 10 條）。
-        *   使用 `rich.Live` 和 `rich.Layout` 來建立一個美觀、即時更新的儀表板。
-        *   將讀取到的狀態和日誌，填充到 `Layout` 的各個 `Panel` 中。
-    *   **重要原則**：這個迴圈不處理任何核心業務邏輯，它只是一個單純的「畫家」。
-
-### 核心優勢
-
-*   **極致穩定**：前端顯示的崩潰，完全不影響後端核心任務的執行。真相永遠保存在資料庫中。
-*   **架構簡潔**：沒有任何額外的網路服務 (GoTTY, API, WebSocket)，只有 Python 和 SQLite，除錯和維護成本降至最低。
-*   **數據完整**：所有事件和狀態都被完整記錄，任務結束後可輕易從資料庫匯出完整的執行報告，用於分析或歸檔。
-
----
-
-## 四、 全鏈路自動化流程圖
-
-這張圖描繪了從使用者啟動到測試完成的完整自動化鏈路，體現了我們設計哲學中的所有核心策略。
+這張圖描繪了從使用者啟動到所有服務上線的完整「分階段啟動」流程。
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
-    participant Starter as 🚀 啟動器<br>(launch.py)
-    participant SafeInstaller as 🛡️ 安全安裝器
-    participant TestCommander as 🧪 測試指揮官<br>(smart_e2e_test.py)
-    participant AppPool as 🏊‍♂️ 應用測試池
+    participant Runner as 🚀 backend_runner.py
+    participant APIGW as 🌐 API 閘道
+    participant Monitor as 🛡️ 資源監控器
+    participant ServicePool as 🏊‍♂️ 業務服務池
 
-    User->>Starter: python launch.py
+    User->>Runner: python run/backend_runner.py
 
-    Starter->>SafeInstaller: 執行原子化安全安裝
+    activate Runner
+    Runner->>APIGW: 啟動核心 API 閘道
+    Runner->>Monitor: 啟動資源監控
+    note right of Runner: --- 階段一完成 (系統已可用) ---
 
-    loop 為每個 App
-        SafeInstaller->>SafeInstaller: 1. 建立隔離環境
-        SafeInstaller->>SafeInstaller: 2. 逐一安全安裝依賴
-        SafeInstaller->>SafeInstaller: 3. 測試完成後清理環境
+    Runner->>ServicePool: 讀取 config/services.json
+
+    par 平行啟動 Quant
+        ServicePool-->>Runner: 分配進程，安裝並啟動 Quant
+        Runner-->>APIGW: Quant 報告 "online"
+    and 平行啟動 Transcriber
+        ServicePool-->>Runner: 分配進程，安裝並啟動 Transcriber
+        Runner-->>APIGW: Transcriber 報告 "online"
     end
 
-    alt 所有 App 安裝成功
-        Starter->>TestCommander: 觸發平行化測試
-    else 安裝失敗
-        Starter-->>User: 報告錯誤並中止
-    end
+    deactivate Runner
+    note right of Runner: --- 階段二完成 (所有服務上線) ---
 
-    TestCommander->>AppPool: 建立多進程池 (multiprocessing)
-
-    par 為每個 App 平行執行
-        AppPool->>TestCommander: 分配一個進程
-        TestCommander->>TestCommander: 執行 pytest -n auto --timeout=300
-        Note right of TestCommander: 在進程內部，pytest-xdist<br>再次將測試案例<br>分配到所有 CPU 核心
-    end
-
-    alt 所有測試通過
-        TestCommander-->>User: 🎉 報告所有測試成功
-    else 任何測試失敗
-        TestCommander-->>User: ❌ 報告失敗詳情
-    end
 ```
 
 ### **流程詳解:**
 
-1.  **啟動與安全安裝**:
-    *   使用者執行 `launch.py` (或視覺化的 `phoenix_starter.py`)，啟動整個流程。
-    *   啟動器首先調用**安全安裝器 (`safe_installer.py`)**。
-    *   安全安裝器嚴格遵循「原子化隔離」策略，為 `apps/` 目錄下的每一個應用，獨立地建立虛擬環境、安裝依賴，並在完成後徹底清理。
+1.  **使用者啟動**: 使用者執行 `backend_runner.py`。
+2.  **階段一：核心啟動 (毫秒級)**
+    *   `backend_runner.py` **立即**啟動 `api_server` 和 `resource_monitor`。
+    *   此時，API 閘道已經可以接受請求，資源監控也開始輸出日誌。系統在外部看來已經「活了」。
+3.  **階段二：業務服務載入 (秒級/分鐘級)**
+    *   `backend_runner.py` 讀取 `config/services.json` 來獲取所有需要啟動的業務服務列表。
+    *   它使用一個**進程池 (`ProcessPoolExecutor`)**，為每一個業務服務分配一個獨立的進程。
+    *   在各自的進程中，每個服務會**獨立地**建立自己的虛擬環境、安裝依賴，然後啟動。
+    *   當一個服務成功啟動後，它會主動向 `api_server` **回報**自己的「上線」狀態。
+4.  **前端呈現**
+    *   與此同時，任何前端應用（如 `colab_runner.py`）都在持續地輪詢 `api_server` 的 `/status` 端點，或者直接讀取 `backend_runner.py` 的 stdout 日誌流。
+    *   當它發現服務狀態變更時，就會即時更新自己的 UI。
 
-2.  **觸發智能測試**:
-    *   只有當所有 App 的依賴都成功安裝後，啟動器才會繼續，調用**測試指揮官 (`smart_e2e_test.py`)**。
-    *   這確保了測試流程永遠在一個乾淨、確定的環境中開始。
-
-3.  **兩級平行化測試**:
-    *   **第一級平行 (應用級)**: 測試指揮官首先利用 `multiprocessing` 建立一個進程池，為每個 App 分配一個獨立的進程，實現了不同 App 之間的並行測試。
-    *   **第二級平行 (測試級)**: 在每個獨立的 App 測試進程中，`pytest` 被以 `-n auto` 模式調用，這會觸發 `pytest-xdist`，將該 App 內部的所有測試案例，再次分配到所有可用的 CPU 核心上。
-    *   同時，`--timeout=300` 參數為每個測試案例提供了堅實的穩定性保障。
-
-4.  **結果報告**:
-    *   測試指揮官會等待所有平行任務完成，收集結果，並向使用者報告最終的成功或失敗狀態。
-
-這個流程將我們的三大核心策略——**原子化隔離、多核心平行處理、主動式超時中斷**——無縫地整合到一個連貫、高效的自動化工作流中。
+這個架構的優雅之處在於，即使 `quant` 服務因為依賴問題需要 5 分鐘才能裝好，或者 `transcriber` 服務啟動失敗，**都不會影響到 `api_server` 的穩定運行和其他服務的載入**，從而實現了極高的系統彈性。
