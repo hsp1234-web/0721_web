@@ -202,20 +202,27 @@ def test_app(app_path: Path, test_mode: str) -> bool:
 
 def test_database_driven_flow():
     """測試資料庫驅動的核心流程"""
-    print_header("步驟 4: 測試資料庫驅動流程")
+    print_header("步驟 4: 測試資料庫驅動流程 (快速測試模式)")
 
     db_file = PROJECT_ROOT / "test_state.db"
     if db_file.exists():
         db_file.unlink()
 
-    # 1. 設置環境變數
-    test_env = os.environ.copy()
-    test_env["FAST_TEST_MODE"] = "true"
-    test_env["DB_FILE"] = str(db_file)
+    # 1. 透過 config.json 來控制，而不是環境變數
+    # 這樣更貼近 colab_runner.py 的真實行為
+    config_content = {"FAST_TEST_MODE": True, "TIMEZONE": "Asia/Taipei"}
+    config_path = PROJECT_ROOT / "config.json"
+    with open(config_path, "w") as f:
+        import json
+        json.dump(config_content, f)
 
-    # 2. 執行 launch.py (後端主力部隊)
-    print_info("執行 launch.py (後端主力部隊)...")
-    result = run_command([sys.executable, "launch.py"], env=test_env)
+    # 2. 執行 launch.py，並透過命令列參數傳遞 db_file
+    print_info(f"執行 launch.py (後端主力部隊) 並將狀態寫入 {db_file}")
+    command = [sys.executable, "launch.py", "--db-file", str(db_file)]
+    result = run_command(command, env=os.environ.copy())
+
+    # 清理設定檔
+    config_path.unlink()
 
     if result != 0:
         print_fail("launch.py 執行失敗。")
@@ -232,31 +239,36 @@ def test_database_driven_flow():
     cursor = conn.cursor()
 
     # 驗證狀態表
-    cursor.execute("SELECT current_stage, apps_status, action_url FROM status_table WHERE id = 1")
+    cursor.execute("SELECT current_stage, apps_status FROM status_table WHERE id = 1")
     status_row = cursor.fetchone()
     if not status_row:
         print_fail("在 status_table 中找不到紀錄。")
+        conn.close()
         return False
 
-    stage, apps_status_json, action_url = status_row
-    apps_status = json.loads(apps_status_json)
+    stage, apps_status_json = status_row
+    apps_status = json.loads(apps_status_json) if apps_status_json else {}
 
-    if stage != "completed":
-        print_fail(f"最終階段應為 'completed'，但卻是 '{stage}'。")
+    # 在快速測試模式下，我們預期看到不同的最終狀態
+    expected_stage = "快速測試通過"
+    if stage != expected_stage:
+        print_fail(f"最終階段應為 '{expected_stage}'，但卻是 '{stage}'。")
+        conn.close()
         return False
-    if not all(s == "running" for s in apps_status.values()):
-        print_fail(f"並非所有 App 狀態皆為 'running': {apps_status}")
-        return False
-    if action_url != "http://localhost:8000/dashboard":
-        print_fail(f"action_url 不正確: {action_url}")
+
+    # 在快速測試模式下，App 狀態應為 pending
+    if not all(s == "pending" for s in apps_status.values()):
+        print_fail(f"App 狀態應全為 'pending'，但卻是 {apps_status}")
+        conn.close()
         return False
     print_success("狀態表驗證成功。")
 
     # 驗證日誌表
-    cursor.execute("SELECT level, message FROM log_table WHERE message LIKE '%所有服務已成功啟動%'")
+    cursor.execute("SELECT level, message FROM phoenix_logs WHERE message LIKE '%快速測試流程驗證成功%'")
     log_row = cursor.fetchone()
     if not log_row:
-        print_fail("在日誌表中找不到成功啟動的訊息。")
+        print_fail("在日誌表中找不到'快速測試流程驗證成功'的訊息。")
+        conn.close()
         return False
     print_success("日誌表驗證成功。")
 

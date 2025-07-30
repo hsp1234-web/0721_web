@@ -17,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.1.3" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.1.4" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -28,9 +28,12 @@ FORCE_REPO_REFRESH = True #@param {type:"boolean"}
 #@markdown > **設定指揮中心的核心運行參數。**
 #@markdown ---
 #@markdown **儀表板更新頻率 (秒) (REFRESH_RATE_SECONDS)**
-REFRESH_RATE_SECONDS = 0.25 #@param {type:"number"}
+REFRESH_RATE_SECONDS = 0.5 #@param {type:"number"}
 #@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
 LOG_DISPLAY_LINES = 20 #@param {type:"integer"}
+#@markdown **最小重繪間隔 (秒) (MIN_REDRAW_INTERVAL_SECONDS)**
+#@markdown > **這是為了防止日誌過於頻繁刷新導致閃爍，建議值為 1.0-2.0**
+MIN_REDRAW_INTERVAL_SECONDS = 1.5 #@param {type:"number"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_FOLDER_NAME)**
 #@markdown > **留空即關閉歸檔功能。**
 LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔" #@param {type:"string"}
@@ -147,7 +150,10 @@ def background_worker():
             backend_name = "模擬後端 (mock_backend.py)"
         else:
             update_status(log="🚀 使用真實後端模式啟動...")
-            command = [sys.executable, str(project_path / "launch.py")]
+            command = [
+                sys.executable, str(project_path / "launch.py"),
+                "--db-file", str(db_file_path)
+            ]
             backend_name = "真實後端 (launch.py)"
 
         with open(log_file_path, "w") as f:
@@ -170,46 +176,60 @@ def background_worker():
             if not shared_status.get("launch_process"):
                 update_status(task="背景任務提前終止")
 
-def render_dashboard_html():
-    """根據共享狀態和資料庫狀態生成儀表板的 HTML"""
-    with status_lock:
-        current_task = shared_status['current_task']
-        logs = list(shared_status['logs'])
-        db_status = shared_status.get('db_status')
-        worker_error = shared_status.get('worker_error')
-
+def render_dashboard_html(status_data, logs_buffer):
+    """根據傳入的狀態和日誌緩衝區生成儀表板的 HTML"""
     # --- CSS ---
-    css = "<style> body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Noto Sans TC', 'Fira Code', monospace; } .container { padding: 1em; } .panel { border: 1px solid #444; margin-bottom: 1em; } .title { font-weight: bold; padding: 0.5em; border-bottom: 1px solid #444; background-color: #2a2a2a;} .content { padding: 0.5em; } .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 1em; } .log { font-size: 0.9em; } .error { color: #ff6b6b; } .footer { text-align: center; padding-top: 1em; border-top: 1px solid #444; font-size: 0.8em; color: #888;} table { width: 100%;} </style>"
+    css = "<style> body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Noto Sans TC', 'Fira Code', monospace; } .container { padding: 1em; } .panel { border: 1px solid #444; margin-bottom: 1em; } .title { font-weight: bold; padding: 0.5em; border-bottom: 1px solid #444; background-color: #2a2a2a;} .content { padding: 0.5em; } .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 1em; } .log { font-size: 0.9em; white-space: pre-wrap; word-break: break-all; } .error { color: #ff6b6b; } .footer { text-align: center; padding-top: 1em; border-top: 1px solid #444; font-size: 0.8em; color: #888;} table { width: 100%;} </style>"
 
     # --- HTML Body ---
-    stage, apps_status, action_url, cpu, ram = "未知", {}, None, 0, 0
-    if db_status:
-        stage, apps_status_json, action_url, cpu, ram = db_status
-        apps_status = json.loads(apps_status_json) if apps_status_json else {}
+    stage, apps_status, action_url, cpu, ram = "等待後端回報...", {}, None, 0.0, 0.0
+    if status_data:
+        stage = status_data.get('current_stage', stage)
+        apps_status_json = status_data.get('apps_status')
+        action_url = status_data.get('action_url')
+        cpu = status_data.get('cpu_usage', cpu)
+        ram = status_data.get('ram_usage', ram)
+        if apps_status_json:
+            try:
+                apps_status = json.loads(apps_status_json)
+            except json.JSONDecodeError:
+                apps_status = {}
 
     app_rows = ""
     status_map = {"running": "🟢 運行中", "pending": "🟡 等待中", "installing": "🛠️ 安裝中", "starting": "🚀 啟動中", "failed": "🔴 失敗"}
-    for app, status in apps_status.items():
-        app_rows += f"<tr><td>{app.capitalize()}</td><td>{status_map.get(status, f'❓ {status}')}</td></tr>"
+    if apps_status:
+        for app, status in apps_status.items():
+            app_rows += f"<tr><td>{app.capitalize()}</td><td>{status_map.get(status, f'❓ {status}')}</td></tr>"
+    else:
+        app_rows = '<tr><td>等待後端回報...</td></tr>'
 
-    log_entries = "<br>".join(logs)
+
+    log_entries = "<br>".join(logs_buffer) if logs_buffer else "等待日誌..."
+
+    # 從共享狀態獲取前端的任務狀態
+    with status_lock:
+        current_task = shared_status['current_task']
+        worker_error = shared_status.get('worker_error')
 
     footer_text = f"指揮中心前端任務: {current_task}"
     if worker_error:
         footer_text = f"<span class='error'>錯誤: {worker_error}</span>"
     elif action_url:
         footer_text = f'✅ 服務啟動完成！操作儀表板: <a href="{action_url}" target="_blank" style="color: #50fa7b;">{action_url}</a>'
+    else:
+        footer_text = f"指揮中心後端任務: {stage}"
+
 
     html = f"""
     <div class="container">
         <div class="grid">
             <div>
-                <div class="panel"><div class="title">微服務狀態</div><div class="content"><table>{app_rows or '<tr><td>等待後端啟動...</td></tr>'}</table></div></div>
+                <div class="panel"><div class="title">微服務狀態</div><div class="content"><table><tbody>{app_rows}</tbody></table></div></div>
                 <div class="panel"><div class="title">系統資源 (由後端回報)</div><div class="content"><table><tr><td>CPU</td><td>{cpu or 0.0:.1f}%</td></tr><tr><td>RAM</td><td>{ram or 0.0:.1f}%</td></tr></table></div></div>
             </div>
-            <div class="panel"><div class="title">啟動程序日誌</div><div class="content log">{log_entries or '等待日誌...'}</div></div>
+            <div class="panel"><div class="title">啟動程序日誌</div><div class="content log">{log_entries}</div></div>
         </div>
-        <div class.footer">{footer_text}</div>
+        <div class="footer">{footer_text}</div>
     </div>
     """
     return css + html
@@ -247,72 +267,127 @@ def archive_reports(project_path, archive_folder_name, timezone_str):
         update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
 
 def main():
-    update_status(log="指揮中心 V16 啟動。")
+    update_status(log=f"指揮中心 V18 (低頻刷新版) 啟動。")
+
     worker_thread = threading.Thread(target=background_worker)
     worker_thread.start()
 
-    db_file = None
-    last_displayed_html = ""
     launch_process_local = None
+    db_file = None
+
+    # 前端日誌緩衝區
+    logs_buffer = deque(maxlen=LOG_DISPLAY_LINES)
+    # 用於追蹤已顯示的日誌ID，避免重複
+    displayed_log_ids = set()
+
+    last_redraw_time = 0
+    status_data = {}
 
     try:
-        while worker_thread.is_alive() or (shared_status.get("launch_process") and shared_status.get("launch_process").poll() is None):
+        # 等待後端服務啟動
+        while not launch_process_local:
             with status_lock:
-                project_path = shared_status.get("project_path")
                 launch_process_local = shared_status.get("launch_process")
+                project_path = shared_status.get("project_path")
+                worker_error = shared_status.get("worker_error")
+            if worker_error: raise RuntimeError(f"背景工作執行緒出錯: {worker_error}")
+            if not worker_thread.is_alive() and not launch_process_local:
+                raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
+            time.sleep(0.5)
 
-            if project_path:
-                db_file = project_path / "state.db"
+        db_file = project_path / "state.db"
+
+        # 主渲染迴圈
+        while launch_process_local.poll() is None:
+            new_logs_found = False
+
+            # 從資料庫獲取狀態和日誌
+            try:
                 if db_file.exists():
-                    try:
-                        conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+                    with sqlite3.connect(f"file:{db_file}?mode=ro", uri=True) as conn:
+                        conn.row_factory = sqlite3.Row
                         cursor = conn.cursor()
-                        cursor.execute("SELECT current_stage, apps_status, action_url, cpu_usage, ram_usage FROM status_table WHERE id = 1")
-                        db_row = cursor.fetchone()
-                        conn.close()
-                        with status_lock:
-                            shared_status["db_status"] = db_row
-                    except sqlite3.OperationalError:
-                        pass
+                        # 獲取主狀態
+                        cursor.execute("SELECT * FROM status_table WHERE id = 1")
+                        row = cursor.fetchone()
+                        if row:
+                            status_data = dict(row)
 
-            current_html = render_dashboard_html()
-            if current_html != last_displayed_html:
+                        # 獲取新的日誌
+                        cursor.execute("SELECT id, timestamp, level, message FROM phoenix_logs WHERE id NOT IN ({seq}) ORDER BY id ASC".format(
+                            seq=','.join(['?']*len(displayed_log_ids)) if displayed_log_ids else "''"
+                        ), list(displayed_log_ids))
+
+                        new_logs = cursor.fetchall()
+                        if new_logs:
+                            new_logs_found = True
+                            for log_row in new_logs:
+                                log_id, ts, level, msg = log_row
+                                formatted_ts = datetime.fromisoformat(ts).strftime('%H:%M:%S')
+                                logs_buffer.append(f"[{formatted_ts}] [{level}] {msg}")
+                                displayed_log_ids.add(log_id)
+
+            except sqlite3.OperationalError:
+                # 資料庫可能正在寫入，暫時忽略
+                time.sleep(0.1)
+                continue
+
+            # 判斷是否重繪
+            time_since_last_redraw = time.time() - last_redraw_time
+            # 條件：1. 有新日誌 且 2. 距離上次重繪已超過最小間隔
+            #      或者 3. 狀態報告中的 action_url 首次出現 (表示任務完成)
+            should_redraw = (new_logs_found and time_since_last_redraw > MIN_REDRAW_INTERVAL_SECONDS) or \
+                            (status_data.get('action_url') and 'action_url_displayed' not in shared_status)
+
+            if should_redraw:
                 clear_output(wait=True)
-                display(HTML(current_html))
-                last_displayed_html = current_html
+                display(HTML(render_dashboard_html(status_data, logs_buffer)))
+                last_redraw_time = time.time()
+                if status_data.get('action_url'):
+                    shared_status['action_url_displayed'] = True
 
             time.sleep(REFRESH_RATE_SECONDS)
 
-            if shared_status["worker_error"]:
-                break
+    except (KeyboardInterrupt, RuntimeError) as e:
+        if isinstance(e, KeyboardInterrupt):
+            update_status(task="偵測到手動中斷", log="🛑 正在準備終止程序...")
+        else:
+            update_status(task="前端偵測到錯誤", log=f"❌ {e}")
 
-    except KeyboardInterrupt:
-        update_status(task="偵測到手動中斷", log="🛑 正在準備終止程序...")
     finally:
-        update_status(task="執行最終清理", log="正在終止所有背景程序...")
+        # 重新從共享狀態獲取一次 launch_process，以防主迴圈未進入
+        with status_lock:
+            launch_process_local = shared_status.get("launch_process")
 
-        if launch_process_local:
+        update_status(task="執行最終清理", log="正在準備結束程序...")
+
+        if launch_process_local and launch_process_local.poll() is None:
+            update_status(log="偵測到後端服務仍在運行，正在嘗試正常終止...")
             launch_process_local.terminate()
             try:
-                # 等待 launch.py 的 finally 區塊執行完畢 (生成報告)
-                launch_process_local.wait(timeout=10)
+                # 延長等待時間以確保報告能生成
+                launch_process_local.wait(timeout=15)
                 update_status(log="✅ 後端服務已成功終止。")
             except subprocess.TimeoutExpired:
                 update_status(log="⚠️ 後端服務未能及時回應，將強制終結。")
                 launch_process_local.kill()
+        elif launch_process_local:
+            update_status(log=f"✅ 後端服務已自行結束 (返回碼: {launch_process_local.poll()})。")
 
         # 確保背景工作執行緒也結束
         worker_thread.join(timeout=5)
 
         # 最後執行歸檔
-        project_path = shared_status.get("project_path")
+        with status_lock:
+            project_path = shared_status.get("project_path")
         if project_path:
             archive_reports(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
 
-        update_status(task="所有程序已結束。")
-        # 最後再渲染一次，顯示最終狀態
+        # 最後再渲染一次，確保顯示最終狀態
         clear_output(wait=True)
-        display(HTML(render_dashboard_html()))
+        display(HTML(render_dashboard_html(status_data, logs_buffer)))
+        update_status(task="所有程序已結束。")
+        print(f"\n[{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 指揮中心前端任務: 所有程序已結束。")
 
 
 if __name__ == "__main__":
