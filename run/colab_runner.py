@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab HTML 動態儀表板 v14.0                                ║
+# ║      🚀 Colab HTML 動態儀表板 V15                                  ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
@@ -10,7 +10,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心 HTML 啟動器 v14.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 HTML 啟動器 V15 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -18,7 +18,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "4.3.7" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.1.2" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -141,7 +141,7 @@ def main():
     db_file = project_path / "state.db"
 
     # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心 HTML 啟動器 v15.3")
+    print("🚀 鳳凰之心 HTML 啟動器 V15")
     print("="*80)
     # ... (其餘準備邏輯保持不變)
 
