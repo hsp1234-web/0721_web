@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║   🚀 鳳凰之心 - JS 驅動儀表板 v17.0.0                                ║
+# ║   🚀 鳳凰之心 - JS 驅動儀表板 v17.1.0                                ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   架構優化：啟動器注入初始數據，根治路徑問題，提升即時體驗。       ║
+# ║   架構最終版：穩定工作目錄，根治競爭條件，提升整體可靠性。         ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心 JS 啟動器 v17.0.0 { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心 JS 啟動器 v17.1.0 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤。**
@@ -54,13 +54,16 @@ def install_and_import(package):
         return __import__(package)
 
 def main():
-    # --- Part 0: 環境與路徑設定 (根治遞迴問題) ---
-    # 所有操作都基於一個不變的、絕對的基礎路徑
-    base_path = Path("/content").resolve()
-    project_path = base_path / PROJECT_FOLDER_NAME
+    # --- Part 0: 環境與路徑設定 (根治競爭條件問題) ---
+    # **關鍵修正**: 腳本一開始就切換到一個絕對且穩定的工作目錄
+    stable_base_path = Path("/content").resolve()
+    os.chdir(stable_base_path)
+    print(f"✅ 工作目錄已穩定在: {os.getcwd()}")
+
+    project_path = stable_base_path / PROJECT_FOLDER_NAME
 
     # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心 JS 驅動啟動器 v17.0.0")
+    print("\n🚀 鳳凰之心 JS 驅動啟動器 v17.1.0")
     print("="*80)
 
     if FORCE_REPO_REFRESH and project_path.exists():
@@ -69,37 +72,32 @@ def main():
 
     if not project_path.exists():
         print(f"正在從 {REPOSITORY_URL} 克隆專案至 {project_path}...")
+        # 在穩定的 /content 目錄下執行 git clone
         result = subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], capture_output=True, text=True)
         if result.returncode != 0:
             print(f"❌ Git clone 失敗：\n{result.stderr}")
             return
 
-    # 在 chdir 之前定義好所有路徑，避免混淆
     db_file = project_path / "state.db"
     api_port = 8080
 
     # --- 步驟 2: 預先獲取初始數據 & 渲染儀表板 ---
     print("\n2. 正在準備即時儀表板...")
 
-    # 安裝必要的套件
     psutil = install_and_import('psutil')
     requests = install_and_import('requests')
 
-    # 預先獲取數據
     initial_cpu = psutil.cpu_percent()
     initial_ram = psutil.virtual_memory().percent
     print(f"✅ 已獲取初始數據: CPU {initial_cpu:.1f}%, RAM {initial_ram:.1f}%")
 
-    # 讀取 HTML 模板
     dashboard_template_path = project_path / "run" / "dashboard.html"
     with open(dashboard_template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
-    # 注入初始數據 (此時還不注入 API URL)
     html_content = html_template.replace('{{ INITIAL_CPU }}', f"{initial_cpu:.1f}%")
     html_content = html_content.replace('{{ INITIAL_RAM }}', f"{initial_ram:.1f}%")
 
-    # 立即顯示有初始數據的儀表板
     from IPython.display import display, HTML
     display(HTML(html_content))
     print("✅ 儀表板已載入初始數據，後端服務即將啟動...")
@@ -151,12 +149,10 @@ def main():
         print("❌ 無法獲取 Colab 代理 URL，後續更新可能失敗。")
     else:
         print(f"✅ 後端 API 將透過此 URL 訪問: {api_url}")
-        # 使用 JS 動態更新儀表板中的 API URL，並啟動輪詢
         js_code = f"""
         <script>
             const dashboardElement = document.getElementById('dashboard-container');
             dashboardElement.dataset.apiUrl = '{api_url}';
-            // 觸發一個自訂事件，讓 dashboard.html 中的腳本知道可以開始輪詢了
             dashboardElement.dispatchEvent(new CustomEvent('startPolling'));
         </script>
         """
@@ -189,7 +185,7 @@ def main():
 
         print("\n正在移動報告資料夾...")
         source_report_dir = project_path / "報告"
-        dest_report_dir = base_path / "報告"
+        dest_report_dir = stable_base_path / "報告"
         if source_report_dir.exists():
             try:
                 if dest_report_dir.exists():
