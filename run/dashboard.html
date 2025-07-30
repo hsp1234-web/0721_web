@@ -26,7 +26,8 @@
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
+    <!-- **關鍵修正**: 加入 ID 並用於接收 API URL -->
+    <div id="dashboard-container" class="dashboard-container">
         <div class="left-column">
             <div class="panel">
                 <div class="panel-title">微服務狀態</div>
@@ -36,8 +37,9 @@
                 <div class="panel-title">系統資源</div>
                 <div class="panel-content">
                     <table>
-                        <tr><td>CPU</td><td id="cpu-usage">--</td></tr>
-                        <tr><td>RAM</td><td id="ram-usage">--</td></tr>
+                        <!-- **關鍵修正**: 直接注入初始數據 -->
+                        <tr><td>CPU</td><td id="cpu-usage">{{ INITIAL_CPU }}</td></tr>
+                        <tr><td>RAM</td><td id="ram-usage">{{ INITIAL_RAM }}</td></tr>
                     </table>
                 </div>
             </div>
@@ -49,10 +51,10 @@
             </div>
         </div>
     </div>
-    <div class="footer" id="footer-content">正在初始化...</div>
+    <div class="footer" id="footer-content">正在初始化後端服務...</div>
 
     <script>
-        const API_BASE_URL = '{{ API_URL }}'; // 這個模板變數將由 Python 替換
+        const dashboardElement = document.getElementById('dashboard-container');
 
         function getStatusDot(status) {
             const statusClass = `status-${status || 'unknown'}`;
@@ -60,8 +62,15 @@
         }
 
         function updateDashboard() {
+            // **關鍵修正**: 從元素的 dataset 中獲取 API URL
+            const apiUrl = dashboardElement.dataset.apiUrl;
+            if (!apiUrl) {
+                // 如果 API URL 還不存在，則不執行更新
+                return;
+            }
+
             // 更新狀態
-            fetch(`${API_BASE_URL}/api/status`)
+            fetch(`${apiUrl}/api/status`)
                 .then(response => response.json())
                 .then(data => {
                     // 更新系統資源
@@ -94,7 +103,7 @@
                 });
 
             // 更新日誌
-            fetch(`${API_BASE_URL}/api/logs`)
+            fetch(`${apiUrl}/api/logs`)
                 .then(response => response.json())
                 .then(data => {
                     const logsContent = document.getElementById('logs-content');
@@ -107,9 +116,16 @@
                 .catch(error => console.error('Error fetching logs:', error));
         }
 
-        // 立即執行一次，然後每 2 秒更新一次
-        updateDashboard();
-        setInterval(updateDashboard, 2000);
+        // **關鍵修正**: 監聽自訂事件來啟動輪詢
+        dashboardElement.addEventListener('startPolling', () => {
+            console.log('API URL received. Starting polling...');
+            // 立即執行一次，然後每 2 秒更新一次
+            updateDashboard();
+            setInterval(updateDashboard, 2000);
+        });
+
+        // 初始載入時，先顯示靜態注入的內容，等待 'startPolling' 事件
+        console.log('Dashboard loaded. Waiting for API URL to start polling...');
     </script>
 </body>
 </html>
