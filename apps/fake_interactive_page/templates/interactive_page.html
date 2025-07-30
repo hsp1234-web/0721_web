@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>可互動的假網頁</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; }
+        .button { background-color: #4CAF50; /* Green */ border: none; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; transition: background-color 0.3s; }
+        .button:hover { background-color: #45a049; }
+        .message { margin-top: 20px; font-size: 18px; color: #333; }
+    </style>
+</head>
+<body>
+    <h1>這是一個可互動的假網頁</h1>
+    <p>點擊下面的按鈕，看看會發生什麼事！</p>
+    <button class="button" onclick="showMessage('button1')">按鈕 1</button>
+    <button class="button" onclick="showMessage('button2')">按鈕 2</button>
+    <button class="button" onclick="showMessage('button3')">按鈕 3</button>
+    <div id="message-box" class="message"></div>
+    <script>
+        function showMessage(buttonName) {
+            const messageBox = document.getElementById('message-box');
+            messageBox.textContent = `您剛剛點擊了 ${buttonName}！這個功能還在開發中，敬請期待！`;
+        }
+    </script>
+</body>
+</html>

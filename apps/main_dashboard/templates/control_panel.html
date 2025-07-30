@@ -20,27 +20,66 @@
     <div class="container">
         <h1>🚀 鳳凰之心 - 主操作儀表板 🚀</h1>
         <div class="grid-container">
-            <div id="quant-panel" class="panel">
-                <div class="panel-header">📈 量化分析 App</div>
+            <div id="status-panel" class="panel">
+                <div class="panel-header">📊 系統狀態</div>
                 <div class="panel-body">
-                    <button id="run-quant">執行分析</button>
-                    <div id="quant-result" class="result-box"></div>
+                    <p><strong>當前階段:</strong> {{ data.current_stage }}</p>
+                    <p><strong>儀表板連結:</strong> <a href="{{ data.action_url }}" target="_blank">{{ data.action_url }}</a></p>
+                    <p><strong>CPU 使用率:</strong> {{ data.cpu_usage }}%</p>
+                    <p><strong>RAM 使用率:</strong> {{ data.ram_usage }}%</p>
+                    <p><strong>可互動網頁:</strong> <a href="http://localhost:8006" target="_blank">點此開啟</a></p>
                 </div>
             </div>
-            <div id="transcriber-panel" class="panel">
-                <div class="panel-header">🎤 語音轉寫 App</div>
+            <div id="apps-panel" class="panel">
+                <div class="panel-header">🚀 應用程式狀態</div>
                 <div class="panel-body">
-                    <form id="upload-form">
-                        <input type="file" name="file" id="audio-file" accept="audio/*" required>
-                        <button type="submit">上傳並轉寫</button>
-                    </form>
-                    <div id="transcriber-result" class="result-box"></div>
+                    <ul>
+                        {% if data.apps_status %}
+                            {% for app, status in data.apps_status.items() %}
+                                <li><strong>{{ app }}:</strong> {{ status }}</li>
+                            {% endfor %}
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+            <div id="packages-panel" class="panel" style="grid-column: span 2;">
+                <div class="panel-header">📦 已安裝套件</div>
+                <div class="panel-body" style="max-height: 300px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>套件名稱</th>
+                                <th>版本</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if data.packages %}
+                                {% for package in data.packages %}
+                                    <tr>
+                                        <td>{{ package.name }}</td>
+                                        <td>{{ package.version }}</td>
+                                    </tr>
+                                {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="logs-panel" class="panel" style="grid-column: span 2;">
+                <div class="panel-header">📝 系統日誌</div>
+                <div class="panel-body">
+                    <div class="result-box" style="max-height: 300px; overflow-y: auto;">
+                        <ul>
+                            {% if data.logs %}
+                                {% for log in data.logs %}
+                                    <li>{{ log.timestamp }} [{{ log.level }}] - {{ log.message }}</li>
+                                {% endfor %}
+                            {% endif %}
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-    <script>
-        // JS 邏輯與之前版本相同，此處為示意
-    </script>
 </body>
 </html>

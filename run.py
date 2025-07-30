@@ -23,7 +23,8 @@ def setup_database():
             apps_status TEXT,
             action_url TEXT,
             cpu_usage REAL,
-            ram_usage REAL
+            ram_usage REAL,
+            packages TEXT
         )
         """)
         # 日誌表：持續插入新紀錄
@@ -37,10 +38,29 @@ def setup_database():
         """)
         # 初始化狀態表，並為資源使用率設定預設值
         cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage, cpu_usage, ram_usage) VALUES (1, 'pending', 0.0, 0.0)")
+        # 檢查 packages 欄位是否存在，如果不存在，就新增它
+        cursor.execute("PRAGMA table_info(status_table)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if "packages" not in columns:
+            cursor.execute("ALTER TABLE status_table ADD COLUMN packages TEXT")
         conn.commit()
 
+def get_installed_packages():
+    """獲取已安裝的套件列表"""
+    try:
+        result = subprocess.run([sys.executable, '-m', 'pip', 'list', '--format=json'], capture_output=True, text=True)
+        packages = json.loads(result.stdout)
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE status_table SET packages = ? WHERE id = 1", (json.dumps(packages),))
+            conn.commit()
+    except Exception as e:
+        add_log("ERROR", f"獲取已安裝套件列表失敗: {e}")
+
 def add_log(level, message):
-    """將日誌寫入資料庫"""
+    """將日誌寫入資料庫和檔案"""
+    with open("logs/run.log", "a") as f:
+        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{level}] - {message}\n")
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT INTO log_table (level, message) VALUES (?, ?)", (level, message))
@@ -92,11 +112,14 @@ async def launch_app(app_name, port, apps_status):
     try:
         env = os.environ.copy()
         env["PORT"] = str(port)
-        subprocess.Popen(
-            [sys.executable, "main.py"],
-            cwd=app_path, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
-        )
+        if app_name == "quant":
+            env["FINMIND_API_TOKEN"] = "fake_token"
+        with open(f"logs/{app_name}.log", "wb") as log_file:
+            subprocess.Popen(
+                [sys.executable, "main.py"],
+                cwd=app_path, env=env,
+                stdout=log_file, stderr=subprocess.STDOUT
+            )
         await asyncio.sleep(10)
         apps_status[app_name] = "running"
         update_status(apps_status=apps_status)
@@ -113,16 +136,14 @@ async def main_logic():
     update_status(stage="initializing")
 
     apps_status = {
-        "quant": "pending",
-        "transcriber": "pending",
-        "main_dashboard": "pending"
+        "main_dashboard": "pending",
+        "fake_interactive_page": "pending"
     }
     update_status(apps_status=apps_status)
 
     app_configs = [
-        {"name": "quant", "port": 8001},
-        {"name": "transcriber", "port": 8002},
-        {"name": "main_dashboard", "port": 8005}
+        {"name": "main_dashboard", "port": 8005},
+        {"name": "fake_interactive_page", "port": 8006}
     ]
 
     tasks = [launch_app(config['name'], config['port'], apps_status) for config in app_configs]
@@ -203,6 +224,7 @@ async def run_self_check():
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
+    get_installed_packages()
     add_log("INFO", "Launch.py main process started.")
 
     if os.getenv("SELF_CHECK_MODE") == "true":
@@ -273,6 +295,17 @@ def run_api_server():
     port = int(os.environ.get("API_PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
+def create_report():
+    REPORTS_DIR = Path("reports")
+    if not REPORTS_DIR.exists():
+        REPORTS_DIR.mkdir()
+    with open(REPORTS_DIR / "綜合摘要.md", "w") as f:
+        f.write("綜合摘要")
+    with open(REPORTS_DIR / "詳細日誌.md", "w") as f:
+        f.write("詳細日誌")
+    with open(REPORTS_DIR / "詳細效能.md", "w") as f:
+        f.write("詳細效能")
+
 if __name__ == "__main__":
     # 在一個獨立的執行緒中，執行 Flask API server
     import threading
@@ -284,3 +317,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         add_log("INFO", "偵測到手動中斷，程序結束。")
+        create_report()
