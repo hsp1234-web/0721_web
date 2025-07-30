@@ -39,6 +39,9 @@ TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 #@markdown **快速測試模式 (FAST_TEST_MODE)**
 #@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。
 FAST_TEST_MODE = True #@param {type:"boolean"}
+#@markdown **使用模擬後端 (USE_MOCK_BACKEND)**
+#@markdown > **推薦開啟以進行前端調試。** 將使用一個模擬的後端程式，而不是真實的 `launch.py`。
+USE_MOCK_BACKEND = True #@param {type:"boolean"}
 
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
@@ -125,22 +128,36 @@ def background_worker():
 
         # --- 步驟 3: 觸發背景服務啟動程序 ---
         update_status(task="啟動後端服務")
-        log_file_path = project_path / "logs" / "launch.log"
+
+        db_file_path = project_path / "state.db"
+        log_file_path = project_path / "logs" / "backend.log"
         log_file_path.parent.mkdir(exist_ok=True)
 
+        if USE_MOCK_BACKEND:
+            update_status(log="🚀 使用模擬後端模式啟動...")
+            backend_script_path = project_path / "mock_backend.py"
+            # 將 mock_backend.py 複製到專案目錄中
+            shutil.copy("mock_backend.py", backend_script_path)
+
+            command = [
+                sys.executable, str(backend_script_path),
+                "--db-file", str(db_file_path),
+                "--duration", "45"
+            ]
+            backend_name = "模擬後端 (mock_backend.py)"
+        else:
+            update_status(log="🚀 使用真實後端模式啟動...")
+            command = [sys.executable, str(project_path / "launch.py")]
+            backend_name = "真實後端 (launch.py)"
+
         with open(log_file_path, "w") as f:
-            process = subprocess.Popen(
-                [sys.executable, str(project_path / "launch.py")],
-                cwd=project_path,
-                stdout=f,
-                stderr=subprocess.STDOUT
-            )
+            process = subprocess.Popen(command, cwd=project_path, stdout=f, stderr=subprocess.STDOUT)
 
         with status_lock:
             shared_status["launch_process"] = process
 
-        update_status(log=f"✅ 後端服務 (launch.py) 已啟動 (PID: {process.pid})。")
-        update_status(task="後端服務運行中...")
+        update_status(log=f"✅ {backend_name} 已啟動 (PID: {process.pid})。")
+        update_status(task=f"{backend_name} 運行中...")
 
     except Exception as e:
         error_message = f"❌ {e}"
