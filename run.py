@@ -92,11 +92,14 @@ async def launch_app(app_name, port, apps_status):
     try:
         env = os.environ.copy()
         env["PORT"] = str(port)
-        subprocess.Popen(
-            [sys.executable, "main.py"],
-            cwd=app_path, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
-        )
+        if app_name == "quant":
+            env["FINMIND_API_TOKEN"] = "fake_token"
+        with open(f"logs/{app_name}.log", "wb") as log_file:
+            subprocess.Popen(
+                [sys.executable, "main.py"],
+                cwd=app_path, env=env,
+                stdout=log_file, stderr=subprocess.STDOUT
+            )
         await asyncio.sleep(10)
         apps_status[app_name] = "running"
         update_status(apps_status=apps_status)
@@ -113,15 +116,11 @@ async def main_logic():
     update_status(stage="initializing")
 
     apps_status = {
-        "quant": "pending",
-        "transcriber": "pending",
         "main_dashboard": "pending"
     }
     update_status(apps_status=apps_status)
 
     app_configs = [
-        {"name": "quant", "port": 8001},
-        {"name": "transcriber", "port": 8002},
         {"name": "main_dashboard", "port": 8005}
     ]
 
@@ -273,6 +272,17 @@ def run_api_server():
     port = int(os.environ.get("API_PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
+def create_report():
+    REPORTS_DIR = Path("reports")
+    if not REPORTS_DIR.exists():
+        REPORTS_DIR.mkdir()
+    with open(REPORTS_DIR / "綜合摘要.md", "w") as f:
+        f.write("綜合摘要")
+    with open(REPORTS_DIR / "詳細日誌.md", "w") as f:
+        f.write("詳細日誌")
+    with open(REPORTS_DIR / "詳細效能.md", "w") as f:
+        f.write("詳細效能")
+
 if __name__ == "__main__":
     # 在一個獨立的執行緒中，執行 Flask API server
     import threading
@@ -284,3 +294,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         add_log("INFO", "偵測到手動中斷，程序結束。")
+        create_report()

@@ -24,7 +24,7 @@ import json
 import requests
 
 # --- 測試設定 ---
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 REPORTS_DIR = PROJECT_ROOT / "reports"
 API_BASE_URL = "http://localhost:8080"
 
@@ -34,6 +34,8 @@ def print_header(msg):
 def cleanup():
     """清理舊的報告和日誌"""
     print_header("清理環境")
+    if not REPORTS_DIR.exists():
+        REPORTS_DIR.mkdir()
     if REPORTS_DIR.exists():
         for f in REPORTS_DIR.glob("*.md"):
             f.unlink()
@@ -50,7 +52,7 @@ def test_e2e_flow():
     env["RUN_MODE"] = "快速驗證模式 (Fast-Test Mode)"
 
     runner_process = subprocess.Popen(
-        [sys.executable, "run/colab_runner.py"],
+        [sys.executable, "run.py"],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -96,6 +98,7 @@ def test_e2e_flow():
     print_header("步驟 4: 模擬手動中斷")
     runner_process.send_signal(signal.SIGINT)
     print("已發送 SIGINT 訊號，等待程序終止...")
+    time.sleep(5)
 
     try:
         runner_process.wait(timeout=15)
