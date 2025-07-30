@@ -187,6 +187,15 @@ def main():
     launch_log.parent.mkdir(exist_ok=True)
     api_log = project_path / "logs" / "api_server.log"
 
+    # 安裝 api_server.py 的相依性
+    print("\n3. 正在準備後端通訊官...")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "flask", "flask-cors"], check=True)
+        print("✅ 後端通訊官相依性 (Flask, Flask-CORS) 已確認或安裝。")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 無法安裝後端通訊官的相依性: {e}")
+        raise RuntimeError("相依性安裝失敗") from e
+
     f_launch = open(launch_log, "w")
     launch_process = subprocess.Popen([sys.executable, "launch.py"], env=env, stdout=f_launch, stderr=subprocess.STDOUT)
     print(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
