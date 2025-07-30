@@ -31,6 +31,12 @@ def get_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """提供一個簡單的健康檢查端點"""
+    # 在未來，這裡可以擴展為檢查資料庫連接等
+    return jsonify({"status": "ok"})
+
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     """提供最新的 10 條日誌"""
@@ -44,6 +50,6 @@ def get_logs():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # 從環境變數讀取埠號，預設為 5000
-    port = int(os.environ.get("API_PORT", 5000))
+    # 從環境變數讀取埠號，預設為 8080 以匹配 Colab 啟動器
+    port = int(os.environ.get("API_PORT", 8080))
     app.run(host='0.0.0.0', port=port)
