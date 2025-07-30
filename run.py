@@ -7,9 +7,11 @@ from pathlib import Path
 import os
 import time
 import json
+import reporting
+import psutil
 
 # --- 資料庫設定 ---
-DB_FILE = Path(os.getenv("DB_FILE", "/tmp/state.db"))
+DB_FILE = Path(os.getenv("DB_FILE", "state.db"))
 
 def setup_database():
     """初始化資料庫和資料表"""
@@ -59,7 +61,9 @@ def get_installed_packages():
 
 def add_log(level, message):
     """將日誌寫入資料庫和檔案"""
-    with open("logs/run.log", "a") as f:
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    with open(log_dir / "run.log", "a", encoding='utf-8') as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{level}] - {message}\n")
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -163,13 +167,13 @@ async def main_logic():
                         if url and url.startswith('https://'):
                             final_url = url
                             add_log("INFO", f"成功獲取代理 URL (第 {i+1}/10 次嘗試): {final_url}")
-                            break  # 成功後跳出迴圈
+                            break
                         else:
                             add_log("WARNING", f"第 {i+1}/10 次獲取嘗試返回無效的 URL: '{url}'")
                     except Exception as e:
                         add_log("WARNING", f"第 {i+1}/10 次獲取 URL 時發生異常: {e}")
 
-                    if i < 9: # 如果不是最後一次嘗試，則等待
+                    if i < 9:
                         add_log("INFO", "等待 5 秒後重試...")
                         await asyncio.sleep(5)
 
@@ -187,9 +191,6 @@ async def main_logic():
         update_status(stage="failed")
         add_log("ERROR", "部分服務啟動失敗。")
 
-# --- 主程序 ---
-import psutil
-
 async def monitor_resources():
     """持續監控並更新系統資源"""
     while True:
@@ -198,41 +199,11 @@ async def monitor_resources():
         update_status(cpu=cpu, ram=ram)
         await asyncio.sleep(1)
 
-async def run_self_check():
-    """執行自檢模式"""
-    add_log("INFO", "啟動自檢模式...")
-    update_status(stage="self_checking")
-
-    process = await asyncio.create_subprocess_exec(
-        sys.executable, "tests/smart_e2e_test.py",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-
-    stdout, stderr = await process.communicate()
-
-    log_output = stdout.decode() + stderr.decode()
-    add_log("INFO", f"自檢腳本輸出:\n{log_output}")
-
-    if process.returncode == 0:
-        add_log("INFO", "自檢成功完成。")
-        update_status(stage="self_check_passed")
-    else:
-        add_log("ERROR", f"自檢失敗，返回碼: {process.returncode}")
-        update_status(stage="self_check_failed")
-
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
     get_installed_packages()
-    add_log("INFO", "Launch.py main process started.")
-
-    if os.getenv("SELF_CHECK_MODE") == "true":
-        await run_self_check()
-        add_log("INFO", "Launch.py main process finished after self-check.")
-        return
-
-    update_status(stage="initializing")
+    add_log("INFO", "run.py 主程序已啟動。")
 
     monitor_task = asyncio.create_task(monitor_resources())
     main_task = asyncio.create_task(main_logic())
@@ -246,16 +217,14 @@ async def main():
             await asyncio.sleep(3)
             monitor_task.cancel()
 
-    except Exception as e:
-        add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
+    except (Exception, KeyboardInterrupt) as e:
+        add_log("CRITICAL", f"主程序發生錯誤或被中斷: {e}")
         update_status(stage="critical_failure")
     finally:
         if not monitor_task.done():
             monitor_task.cancel()
-        add_log("INFO", "Launch.py main process finished.")
+        add_log("INFO", "run.py 主程序結束。正在生成報告...")
+        reporting.create_final_reports()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        add_log("INFO", "偵測到手動中斷，程序結束。")
+    asyncio.run(main())

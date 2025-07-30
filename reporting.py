@@ -7,10 +7,9 @@ import pytz
 import json
 
 # --- 常數設定 ---
-# 從環境變數讀取資料庫檔案路徑，如果未設定，則使用 Colab 的預設內容路徑
-BASE_DIR = Path(os.getenv("PROJECT_DIR", "/content/"))
-DB_FILE = BASE_DIR / "WEB1" / "state.db"
-REPORTS_BASE_DIR = BASE_DIR / "報告"
+# 使用相對路徑，假設此腳本在專案根目錄下被 run.py 呼叫
+DB_FILE = Path("state.db")
+REPORTS_BASE_DIR = Path("報告")
 
 def get_taipei_time() -> (datetime, str):
     """獲取當前的台北時間，並回傳日期時間物件和 ISO 格式的字串"""
@@ -169,6 +168,5 @@ if __name__ == '__main__':
     # 在真實情境中，run.py 會建立它。
     if not DB_FILE.exists():
         print(f"警告: 測試用的資料庫檔案 {DB_FILE} 不存在。")
-        # 這裡可以選擇建立一個假的資料庫來進行測試
     else:
         create_final_reports()

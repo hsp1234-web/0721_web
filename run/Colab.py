@@ -17,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.0.1" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.0.2" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -61,41 +61,38 @@ except ImportError:
 
 def main():
     # --- Part 0: 環境設定 ---
-    base_path = Path(".")
+    base_path = Path(".").resolve() # 獲取當前工作目錄的絕對路徑
     project_path = base_path / PROJECT_FOLDER_NAME
-    db_file = project_path / "state.db"
-    api_port = 8080 # 為 API 伺服器選擇一個埠號
 
     # --- 步驟 1: 準備專案 ---
-    print("🚀 鳳凰之心 JS 驅動啟動器 v16.0.2")
+    print("🚀 鳳凰之心 JS 驅動啟動器 v16.0.6")
     print("="*80)
 
+    # 在切換目錄前，先處理根目錄下的操作
     if FORCE_REPO_REFRESH and project_path.exists():
         print(f"強制刷新模式：正在刪除舊的專案資料夾 '{project_path}'...")
         shutil.rmtree(project_path)
 
     if not project_path.exists():
         print(f"正在從 {REPOSITORY_URL} 克隆專案...")
-        subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], check=True)
+        result = subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"❌ Git clone 失敗：\n{result.stderr}")
+            return
 
-    # 切換到專案目錄並指定特定分支/標籤
-    os.chdir(project_path)
-    print(f"工作目錄已切換至: {project_path}")
-    print(f"正在切換到版本: {TARGET_BRANCH_OR_TAG}")
-    subprocess.run(['git', 'fetch'], check=True)
-    subprocess.run(['git', 'checkout', TARGET_BRANCH_OR_TAG], check=True)
-    subprocess.run(['git', 'pull', 'origin', TARGET_BRANCH_OR_TAG], check=True)
+    # 在 chdir 之前定義好所有路徑
+    db_file = project_path / "state.db"
+    api_port = 8080
 
-    # 將專案根目錄加入 sys.path，這樣才能正確匯入 reporting 模組
-    sys.path.append(str(project_path))
-    import reporting
-
-    # --- 步驟 2: 在背景啟動後端雙雄 ---
+    # --- 步驟 2: 啟動後端服務 ---
     print("\n2. 正在啟動後端服務...")
+
+    # **關鍵修正**: 在啟動服務前，先建立 logs 資料夾
+    (project_path / "logs").mkdir(exist_ok=True)
+    print(f"✅ 已在 {project_path} 中確保 logs 資料夾存在。")
 
     # 準備環境變數
     env = os.environ.copy()
-    env["PROJECT_DIR"] = str(base_path)
     env["DB_FILE"] = str(db_file)
     env["API_PORT"] = str(api_port)
     if "Fast-Test Mode" in RUN_MODE:
@@ -103,28 +100,24 @@ def main():
     elif "Self-Check Mode" in RUN_MODE:
         env["SELF_CHECK_MODE"] = "true"
 
-    # 建立日誌資料夾
-    (project_path / "logs").mkdir(exist_ok=True)
-
-    # 啟動主力部隊 (run.py)
+    # 啟動主力部隊 (run.py) - **關鍵修正**: 使用 project_path 作為 cwd
     run_log_path = project_path / "logs" / "run.log"
     with open(run_log_path, "w") as f_run:
         run_process = subprocess.Popen(
             [sys.executable, "run.py"],
-            env=env, stdout=f_run, stderr=subprocess.STDOUT
+            cwd=str(project_path), env=env, stdout=f_run, stderr=subprocess.STDOUT
         )
     print(f"✅ 後端主力部隊 (run.py) 已在背景啟動 (PID: {run_process.pid})。")
 
-    # 等待一下，讓 run.py 有時間建立資料庫
     print("等待 3 秒，讓主力部隊初始化資料庫...")
     time.sleep(3)
 
-    # 啟動通訊官 (api_server.py)
+    # 啟動通訊官 (api_server.py) - **關鍵修正**: 使用 project_path 作為 cwd
     api_log_path = project_path / "logs" / "api_server.log"
     with open(api_log_path, "w") as f_api:
         api_process = subprocess.Popen(
             [sys.executable, "api_server.py"],
-            env=env, stdout=f_api, stderr=subprocess.STDOUT
+            cwd=str(project_path), env=env, stdout=f_api, stderr=subprocess.STDOUT
         )
     print(f"✅ 後端通訊官 (api_server.py) 已在背景啟動 (PID: {api_process.pid})。")
 
@@ -133,7 +126,6 @@ def main():
     api_url = None
     if output:
         try:
-            # 加入重試機制來穩定獲取 URL
             for i in range(5):
                 url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
                 if url and url.startswith("https"):
@@ -146,14 +138,13 @@ def main():
 
     if not api_url:
         print("❌ 無法獲取 Colab 代理 URL。儀表板可能無法正常工作。")
-        # 即使無法獲取 URL，我們仍然繼續，以便可以查看日誌
     else:
         print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
 
     # 健康檢查
     if api_url:
         is_healthy = False
-        for i in range(10): # 最多等待 20 秒
+        for i in range(10):
             try:
                 response = requests.get(f"{api_url}/api/health", timeout=2)
                 if response.status_code == 200 and response.json().get("status") == "ok":
@@ -166,14 +157,12 @@ def main():
 
         if not is_healthy:
             print("❌ 後端服務在超時後仍未通過健康檢查。請檢查 `logs/` 目錄下的日誌。")
-            # 即使健康檢查失敗，也繼續執行以顯示儀表板，方便除錯
 
     # 讀取 HTML 模板並注入 API URL
     dashboard_template_path = project_path / "run" / "dashboard.html"
     with open(dashboard_template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
-    # 即使 api_url 為 None，也替換掉佔位符，避免前端出錯
     html_content = html_template.replace('{{ API_URL }}', api_url or '')
 
     # 顯示最終的靜態 HTML
@@ -190,7 +179,6 @@ def main():
         print("\n\n🛑 偵測到手動中斷！")
     finally:
         print("\n正在終止後端服務...")
-        # 溫和地終止
         api_process.terminate()
         run_process.terminate()
         try:
@@ -206,12 +194,21 @@ def main():
             run_process.kill()
             print("⚠️ 主力部隊被強制終結。")
 
-        print("\n正在產生最終報告...")
-        try:
-            reporting.create_final_reports()
-            print("✅ 報告已成功生成。")
-        except Exception as e:
-            print(f"❌ 產生報告時發生錯誤: {e}")
+        print("\n正在移動報告資料夾...")
+        source_report_dir = project_path / "報告"
+        dest_report_dir = base_path / "報告"
+        if source_report_dir.exists():
+            try:
+                if dest_report_dir.exists():
+                    shutil.copytree(str(source_report_dir), str(dest_report_dir), dirs_exist_ok=True)
+                    shutil.rmtree(source_report_dir)
+                else:
+                    shutil.move(str(source_report_dir), str(dest_report_dir))
+                print(f"✅ 報告資料夾已成功處理。最終位置: {dest_report_dir.resolve()}")
+            except Exception as e:
+                print(f"❌ 處理報告資料夾時發生錯誤: {e}")
+        else:
+            print("⚠️ 找不到由後端生成的報告資料夾，無需移動。")
 
 if __name__ == "__main__":
     main()
