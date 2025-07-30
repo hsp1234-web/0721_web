@@ -17,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "4.5.4" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "4.5.7" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -159,15 +159,17 @@ def generate_reports(project_path, db_file, start_time, end_time, stop_reason):
 
 
 # --- 主執行邏輯 ---
+base_path = Path("/content") if 'google.colab' in sys.modules else Path.cwd()
+
 def main():
     # ... (此處省略與之前版本相同的啟動和健康檢查程式碼)
-    base_path = Path("/content") if IS_COLAB else Path.cwd()
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
     api_port = 8080
 
     print("🚀 鳳凰之心 JS 驅動啟動器 v16.0")
     print("="*80)
+    print(f"ℹ️ 正在使用版本: {TARGET_BRANCH_OR_TAG}")
     if not project_path.exists():
         print(f"正在從 {REPOSITORY_URL} 克隆專案...")
         subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], check=True)
@@ -186,6 +188,15 @@ def main():
     launch_log = project_path / "logs" / "launch.log"
     launch_log.parent.mkdir(exist_ok=True)
     api_log = project_path / "logs" / "api_server.log"
+
+    # 安裝 api_server.py 的相依性
+    print("\n3. 正在準備後端通訊官...")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "flask", "flask-cors"], check=True)
+        print("✅ 後端通訊官相依性 (Flask, Flask-CORS) 已確認或安裝。")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 無法安裝後端通訊官的相依性: {e}")
+        raise RuntimeError("相依性安裝失敗") from e
 
     f_launch = open(launch_log, "w")
     launch_process = subprocess.Popen([sys.executable, "launch.py"], env=env, stdout=f_launch, stderr=subprocess.STDOUT)
