@@ -7,195 +7,235 @@ from pathlib import Path
 import os
 import time
 import json
+import pytz
+from datetime import datetime
+import shlex
+import threading
+import psutil
 
-# --- 資料庫設定 ---
-DB_FILE = Path(os.getenv("DB_FILE", "/tmp/state.db"))
+from core_utils.commander_console import CommanderConsole
+from core_utils.resource_monitor import is_resource_sufficient, load_resource_settings
+
+# --- 全域設定 ---
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+DB_FILE = LOGS_DIR / "logs.sqlite"
+TAIWAN_TZ = pytz.timezone('Asia/Taipei')
+APPS_DIR = Path("apps")
+
+# 全域控制台物件
+console = CommanderConsole()
 
 def setup_database():
-    """初始化資料庫和資料表"""
+    """初始化 SQLite 資料庫和日誌表"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        # 狀態表：只有一筆紀錄，不斷更新
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS status_table (
-            id INTEGER PRIMARY KEY,
-            current_stage TEXT,
-            apps_status TEXT,
-            action_url TEXT,
+        CREATE TABLE IF NOT EXISTS phoenix_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            level TEXT NOT NULL,
+            message TEXT NOT NULL,
             cpu_usage REAL,
             ram_usage REAL
         )
         """)
-        # 日誌表：持續插入新紀錄
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS log_table (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            level TEXT,
-            message TEXT
+        conn.commit()
+
+def log_event(level, message, cpu=None, ram=None):
+    """將事件記錄到 TUI 和 SQLite 資料庫"""
+    if not cpu: cpu = console.cpu_usage
+    if not ram: ram = console.ram_usage
+
+    console.add_log(f"[{level}] {message}")
+
+    timestamp = datetime.now(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, level, message, cpu, ram)
         )
-        """)
-        # 初始化狀態表
-        cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage) VALUES (1, 'pending')")
         conn.commit()
 
-def add_log(level, message):
-    """將日誌寫入資料庫"""
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO log_table (level, message) VALUES (?, ?)", (level, message))
-        conn.commit()
+async def run_command_async_and_log(command: str, cwd: Path):
+    """異步執行命令並將其輸出即時記錄到日誌中"""
+    log_event("CMD", f"Executing: {command}")
+    process = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=cwd
+    )
 
-def update_status(stage=None, apps_status=None, action_url=None, cpu=None, ram=None):
-    """更新狀態表中的紀錄"""
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        updates = []
-        params = []
-        if stage:
-            updates.append("current_stage = ?")
-            params.append(stage)
-        if apps_status:
-            updates.append("apps_status = ?")
-            params.append(json.dumps(apps_status))
-        if action_url:
-            updates.append("action_url = ?")
-            params.append(action_url)
-        if cpu is not None:
-            updates.append("cpu_usage = ?")
-            params.append(cpu)
-        if ram is not None:
-            updates.append("ram_usage = ?")
-            params.append(ram)
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+        decoded_line = line.decode('utf-8', errors='replace').strip()
+        if decoded_line:
+            log_event("SHELL", decoded_line)
 
-        if updates:
-            query = f"UPDATE status_table SET {', '.join(updates)} WHERE id = 1"
-            cursor.execute(query, params)
-            conn.commit()
+    return_code = await process.wait()
+    if return_code != 0:
+        log_event("ERROR", f"Command failed with exit code {return_code}: {command}")
+        raise RuntimeError(f"Command failed: {command}")
 
-# --- 核心啟動邏輯 ---
-async def launch_app(app_name, port, apps_status):
-    """啟動單個應用，並支援快速測試模式。"""
-    apps_status[app_name] = "starting"
-    update_status(apps_status=apps_status)
-    add_log("INFO", f"App '{app_name}' status changed to 'starting'")
-
-    if os.getenv("FAST_TEST_MODE") == "true":
-        await asyncio.sleep(2)
-        apps_status[app_name] = "running"
-        update_status(apps_status=apps_status)
-        add_log("INFO", f"App '{app_name}' in fast test mode, skipping actual launch.")
+async def safe_install_packages(app_name: str, requirements_path: Path, python_executable: str):
+    """安全地逐一安裝套件，並將日誌整合到主 TUI"""
+    if not requirements_path.exists():
+        log_event("WARN", f"找不到 {requirements_path}，跳過安裝。")
         return
 
-    APPS_DIR = Path("apps")
-    app_path = APPS_DIR / app_name
+    with open(requirements_path, "r") as f:
+        packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+    log_event("BATTLE", f"開始為 {app_name} 安裝 {len(packages)} 個依賴。")
+
+    settings = load_resource_settings()
+    for i, package in enumerate(packages):
+        console.update_status_tag(f"[{app_name}] 安裝依賴: {i+1}/{len(packages)}")
+        log_event("PROGRESS", f"正在安裝 {i+1}/{len(packages)}: {package}")
+
+        sufficient, message = is_resource_sufficient(settings)
+        if not sufficient:
+            log_event("ERROR", f"資源不足，中止安裝: {message}")
+            raise RuntimeError(f"Resource insufficient for {app_name}: {message}")
+
+        try:
+            command = f"uv pip install --python {shlex.quote(python_executable)} {package}"
+            await run_command_async_and_log(command, APPS_DIR.parent)
+        except Exception as e:
+            log_event("ERROR", f"安裝套件 '{package}' 失敗: {e}")
+            raise
+
+# --- 核心啟動邏輯 ---
+async def manage_app_lifecycle(app_name, port, app_status):
+    """完整的應用生命週期管理：安裝、啟動"""
+    app_status[app_name] = "pending"
+    venv_path = APPS_DIR / app_name / ".venv"
+    python_executable = str(venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
+
+    if os.getenv("FAST_TEST_MODE") == "true":
+        log_event("INFO", f"[{app_name}] 快速測試模式，跳過安裝與啟動。")
+        app_status[app_name] = "running"
+        return
+
     try:
+        # --- 1. 環境準備 ---
+        app_status[app_name] = "installing"
+        console.update_status_tag(f"[{app_name}] 準備虛擬環境")
+        if not venv_path.exists():
+            await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path))}", APPS_DIR.parent)
+
+        # --- 2. 安裝依賴 ---
+        req_file = APPS_DIR / app_name / "requirements.txt"
+        await safe_install_packages(app_name, req_file, python_executable)
+
+        # 安裝大型依賴 (如果存在)
+        large_req_file = APPS_DIR / app_name / "requirements.large.txt"
+        if large_req_file.exists():
+            await safe_install_packages(f"{app_name}-large", large_req_file, python_executable)
+
+        log_event("SUCCESS", f"[{app_name}] 所有依賴已成功安裝。")
+
+        # --- 3. 啟動服務 ---
+        app_status[app_name] = "starting"
+        console.update_status_tag(f"[{app_name}] 啟動服務中...")
         env = os.environ.copy()
         env["PORT"] = str(port)
-        subprocess.Popen(
-            [sys.executable, "main.py"],
-            cwd=app_path, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
-        )
-        await asyncio.sleep(10)
-        apps_status[app_name] = "running"
-        update_status(apps_status=apps_status)
-        add_log("INFO", f"App '{app_name}' status changed to 'running'")
+
+        log_file = LOGS_DIR / f"{app_name}_service.log"
+        main_script_path = APPS_DIR / app_name / "main.py"
+        with open(log_file, "w") as f:
+            subprocess.Popen(
+                [python_executable, str(main_script_path)],
+                env=env,
+                stdout=f, stderr=subprocess.STDOUT
+            )
+
+        await asyncio.sleep(10) # 給予服務啟動時間
+        app_status[app_name] = "running"
+        log_event("SUCCESS", f"[{app_name}] 服務已在背景啟動 (日誌: {log_file})")
+
     except Exception as e:
-        apps_status[app_name] = "failed"
-        update_status(apps_status=apps_status)
-        add_log("ERROR", f"啟動 {app_name} 失敗: {e}")
+        app_status[app_name] = "failed"
+        log_event("CRITICAL", f"管理應用 '{app_name}' 時發生嚴重錯誤: {e}")
         raise
 
 async def main_logic():
     """核心的循序啟動邏輯"""
-    add_log("INFO", "啟動程序開始...")
-    update_status(stage="initializing")
+    log_event("BATTLE", "鳳凰之心 v18.0 啟動序列開始。")
+    log_event("INFO", "系統環境預檢完成。")
 
-    apps_status = {
-        "quant": "pending",
-        "transcriber": "pending",
-        "main_dashboard": "pending"
-    }
-    update_status(apps_status=apps_status)
+    apps_status = { "quant": "pending", "transcriber": "pending" }
 
     app_configs = [
         {"name": "quant", "port": 8001},
-        {"name": "transcriber", "port": 8002},
-        {"name": "main_dashboard", "port": 8005}
+        {"name": "transcriber", "port": 8002}
     ]
 
-    tasks = [launch_app(config['name'], config['port'], apps_status) for config in app_configs]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # 循序執行以避免資源競爭
+    for config in app_configs:
+        await manage_app_lifecycle(config['name'], config['port'], apps_status)
 
     if all(status == "running" for status in apps_status.values()):
-        final_url = "http://localhost:8005/" # 預設值
-        try:
-            from google.colab.output import eval_js
-            import google.colab
-
-            if hasattr(google.colab, 'kernel') and google.colab.kernel:
-                add_log("INFO", "Colab 環境檢測成功，開始嘗試獲取代理 URL...")
-                for i in range(10): # 嘗試 10 次
-                    try:
-                        url = eval_js(f"google.colab.kernel.proxyPort(8005)")
-                        if url:
-                            final_url = url
-                            add_log("INFO", f"成功獲取代理 URL: {final_url}")
-                            break # 成功後跳出迴圈
-                    except Exception as e:
-                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 失敗: {e}")
-
-                    if final_url == "http://localhost:8005/":
-                         add_log("INFO", f"等待 5 秒後重試...")
-                         await asyncio.sleep(5)
-
-                if final_url == "http://localhost:8005/":
-                    add_log("ERROR", "10 次嘗試後仍無法獲取 Colab 代理 URL，將使用本地 URL。")
-            else:
-                 add_log("WARNING", "非 Colab kernel 環境。")
-
-        except (ImportError, AttributeError):
-            add_log("WARNING", f"無法導入 google.colab 模組，將使用本地 URL。")
-
-        update_status(stage="completed", action_url=final_url)
-        add_log("INFO", f"所有服務已成功啟動！操作儀表板已就緒。")
+        log_event("SUCCESS", "所有核心服務已成功啟動。")
+        console.update_status_tag("[服務運行中]")
     else:
-        update_status(stage="failed")
-        add_log("ERROR", "部分服務啟動失敗。")
+        log_event("ERROR", "部分服務啟動失敗，請檢查日誌。")
+        console.update_status_tag("[啟動失敗]")
 
 # --- 主程序 ---
-import psutil
-
-async def monitor_resources():
-    """持續監控並更新系統資源"""
-    while True:
-        cpu = psutil.cpu_percent()
-        ram = psutil.virtual_memory().percent
-        update_status(cpu=cpu, ram=ram)
-        await asyncio.sleep(1)
+def performance_logger_thread():
+    """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
+    while not console._stop_event.is_set():
+        timestamp = datetime.now(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO phoenix_logs (timestamp, level, message, cpu_usage, ram_usage) VALUES (?, ?, ?, ?, ?)",
+                (timestamp, "PERF", "performance_snapshot", console.cpu_usage, console.ram_usage)
+            )
+            conn.commit()
+        time.sleep(1) # 每秒記錄一次
 
 async def main():
-    """包含休眠邏輯的主異步函數"""
+    """包含 TUI 和休眠邏輯的主異步函數"""
+    if DB_FILE.exists():
+        os.remove(DB_FILE)
     setup_database()
+
+    console.start()
+
+    # 啟動專門的效能日誌記錄執行緒
+    perf_thread = threading.Thread(target=performance_logger_thread, daemon=True)
+    perf_thread.start()
+
     try:
-        # 同時執行主邏輯和資源監控
-        main_task = asyncio.create_task(main_logic())
-        monitor_task = asyncio.create_task(monitor_resources())
-
-        await main_task
-
-        # 僅在非測試環境下進入長時間休眠
+        await main_logic()
+        log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
         if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
-            add_log("INFO", "服務啟動完成，後端進入持續待命狀態...")
-            await monitor_task # 讓監控任務持續執行
-
+            await asyncio.sleep(3600)
     except Exception as e:
-        add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
-        update_status(stage="critical_failure")
+        log_event("CRITICAL", f"主程序發生未預期錯誤: {e}")
+    finally:
+        console.stop("程序結束。")
+        # 確保效能日誌執行緒也已停止
+        perf_thread.join(timeout=1.5)
 
 if __name__ == "__main__":
     try:
+        # 確保 uv 已安裝
+        subprocess.run(["uv", "--version"], check=True, capture_output=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("錯誤: 核心工具 'uv' 未安裝。請先執行 'pip install uv'。")
+        sys.exit(1)
+
+    try:
+        if 'IPython' in sys.modules:
+            import nest_asyncio
+            nest_asyncio.apply()
         asyncio.run(main())
     except KeyboardInterrupt:
-        add_log("INFO", "偵測到手動中斷，程序結束。")
+        pass
