@@ -43,11 +43,25 @@ import shutil
 import subprocess
 from pathlib import Path
 import time
-from IPython.display import display, HTML
-from google.colab import output
+import sys
+import subprocess
+try:
+    from IPython.display import display, HTML
+except ImportError:
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'ipython'], check=True)
+    from IPython.display import display, HTML
+try:
+    from google.colab import output
+except ImportError:
+    print("⚠️  無法匯入 google.colab 模組，將無法產生公開網址。")
+    output = None
+import requests
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+import reporting
 
 def main():
-    base_path = Path("/content")
+    base_path = Path("./")
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
     api_port = 8080 # 為 API 伺服器選擇一個埠號
@@ -119,6 +133,23 @@ def main():
     with open(dashboard_template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
+    # 健康檢查
+    is_healthy = False
+    for i in range(10): # 最多等待 20 秒
+        try:
+            response = requests.get(f"{api_url}/api/health", timeout=2)
+            if response.status_code == 200 and response.json().get("status") == "ok":
+                print("✅ 後端健康檢查通過！")
+                is_healthy = True
+                break
+        except requests.RequestException as e:
+            print(f"健康檢查嘗試 {i+1}/10 失敗: {e}")
+        time.sleep(2)
+
+    if not is_healthy:
+        print("❌ 後端服務在超時後仍未通過健康檢查。請檢查 `logs/` 目錄下的日誌。")
+        return
+
     # 注入 API URL
     html_content = html_template.replace('{{ API_URL }}', api_url)
 
@@ -150,6 +181,9 @@ def main():
         except subprocess.TimeoutExpired:
             launch_process.kill()
             print("⚠️ 主力部隊被強制終結。")
+
+        print("\n正在產生報告...")
+        reporting.create_final_reports()
 
 if __name__ == "__main__":
     main()
