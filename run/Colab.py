@@ -43,46 +43,59 @@ import shutil
 import subprocess
 from pathlib import Path
 import time
-import sys
-import subprocess
+import requests
+
+# --- 動態安裝與匯入 ---
 try:
     from IPython.display import display, HTML
 except ImportError:
+    print("正在安裝 'ipython'...")
     subprocess.run([sys.executable, '-m', 'pip', 'install', 'ipython'], check=True)
     from IPython.display import display, HTML
+
 try:
     from google.colab import output
 except ImportError:
-    print("⚠️  無法匯入 google.colab 模組，將無法產生公開網址。")
-    output = None
-import requests
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-import reporting
+    print("⚠️  非 Colab 環境，將無法產生公開網址。")
+    output = None # 提供一個假的 output 物件以免出錯
 
 def main():
-    base_path = Path("./")
+    # --- Part 0: 環境設定 ---
+    base_path = Path(".")
     project_path = base_path / PROJECT_FOLDER_NAME
     db_file = project_path / "state.db"
     api_port = 8080 # 為 API 伺服器選擇一個埠號
 
-    # --- 步驟 1: 準備專案 (與之前版本類似) ---
-    print("🚀 鳳凰之心 JS 驅動啟動器 v16.0.1")
+    # --- 步驟 1: 準備專案 ---
+    print("🚀 鳳凰之心 JS 驅動啟動器 v16.0.2")
     print("="*80)
-    # ... (此處省略了與之前版本相同的 Git clone/pull 邏輯)
-    # 為了簡潔，我們假設程式碼已經存在於 project_path
+
+    if FORCE_REPO_REFRESH and project_path.exists():
+        print(f"強制刷新模式：正在刪除舊的專案資料夾 '{project_path}'...")
+        shutil.rmtree(project_path)
+
     if not project_path.exists():
         print(f"正在從 {REPOSITORY_URL} 克隆專案...")
         subprocess.run(['git', 'clone', REPOSITORY_URL, str(project_path)], check=True)
-    os.chdir(project_path)
-    print(f"工作目錄已切換至: {os.getcwd()}")
 
+    # 切換到專案目錄並指定特定分支/標籤
+    os.chdir(project_path)
+    print(f"工作目錄已切換至: {project_path}")
+    print(f"正在切換到版本: {TARGET_BRANCH_OR_TAG}")
+    subprocess.run(['git', 'fetch'], check=True)
+    subprocess.run(['git', 'checkout', TARGET_BRANCH_OR_TAG], check=True)
+    subprocess.run(['git', 'pull', 'origin', TARGET_BRANCH_OR_TAG], check=True)
+
+    # 將專案根目錄加入 sys.path，這樣才能正確匯入 reporting 模組
+    sys.path.append(str(project_path))
+    import reporting
 
     # --- 步驟 2: 在背景啟動後端雙雄 ---
     print("\n2. 正在啟動後端服務...")
 
-    # 設定環境變數
+    # 準備環境變數
     env = os.environ.copy()
+    env["PROJECT_DIR"] = str(base_path)
     env["DB_FILE"] = str(db_file)
     env["API_PORT"] = str(api_port)
     if "Fast-Test Mode" in RUN_MODE:
@@ -90,73 +103,83 @@ def main():
     elif "Self-Check Mode" in RUN_MODE:
         env["SELF_CHECK_MODE"] = "true"
 
-    # 啟動主力部隊 (launch.py)
-    launch_log = project_path / "logs" / "launch.log"
-    launch_log.parent.mkdir(exist_ok=True)
-    with open(launch_log, "w") as f_launch:
-        launch_process = subprocess.Popen([sys.executable, "launch.py"], env=env, stdout=f_launch, stderr=subprocess.STDOUT)
-    print(f"✅ 後端主力部隊 (launch.py) 已在背景啟動 (PID: {launch_process.pid})。")
+    # 建立日誌資料夾
+    (project_path / "logs").mkdir(exist_ok=True)
+
+    # 啟動主力部隊 (run.py)
+    run_log_path = project_path / "logs" / "run.log"
+    with open(run_log_path, "w") as f_run:
+        run_process = subprocess.Popen(
+            [sys.executable, "run.py"],
+            env=env, stdout=f_run, stderr=subprocess.STDOUT
+        )
+    print(f"✅ 後端主力部隊 (run.py) 已在背景啟動 (PID: {run_process.pid})。")
+
+    # 等待一下，讓 run.py 有時間建立資料庫
+    print("等待 3 秒，讓主力部隊初始化資料庫...")
+    time.sleep(3)
 
     # 啟動通訊官 (api_server.py)
-    api_log = project_path / "logs" / "api_server.log"
-    with open(api_log, "w") as f_api:
-        api_process = subprocess.Popen([sys.executable, "api_server.py"], env=env, stdout=f_api, stderr=subprocess.STDOUT)
+    api_log_path = project_path / "logs" / "api_server.log"
+    with open(api_log_path, "w") as f_api:
+        api_process = subprocess.Popen(
+            [sys.executable, "api_server.py"],
+            env=env, stdout=f_api, stderr=subprocess.STDOUT
+        )
     print(f"✅ 後端通訊官 (api_server.py) 已在背景啟動 (PID: {api_process.pid})。")
 
     # --- 步驟 3: 獲取 Colab 代理 URL 並渲染靜態舞台 ---
     print("\n3. 正在準備前端儀表板...")
-
-    # 獲取 Colab 為 API 伺服器分配的 URL，並加入重試機制
     api_url = None
-    for i in range(5): # 最多嘗試 5 次
+    if output:
         try:
-            url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
-            if url and url.startswith("https"):
-                api_url = url
-                break
-            print(f"URL 獲取嘗試 {i+1}/5 失敗，返回值無效: {url}")
+            # 加入重試機制來穩定獲取 URL
+            for i in range(5):
+                url = output.eval_js(f'google.colab.kernel.proxyPort({api_port})')
+                if url and url.startswith("https"):
+                    api_url = url
+                    break
+                print(f"URL 獲取嘗試 {i+1}/5 失敗，等待 2 秒後重試...")
+                time.sleep(2)
         except Exception as e:
-            print(f"URL 獲取嘗試 {i+1}/5 失敗，發生異常: {e}")
-
-        if i < 4:
-            print("等待 2 秒後重試...")
-            time.sleep(2)
+            print(f"❌ 無法透過 google.colab.kernel.proxyPort 獲取 URL: {e}")
 
     if not api_url:
-        print("❌ 經過多次嘗試後，仍無法獲取 Colab 代理 URL。儀表板可能無法正常工作。")
-        return
+        print("❌ 無法獲取 Colab 代理 URL。儀表板可能無法正常工作。")
+        # 即使無法獲取 URL，我們仍然繼續，以便可以查看日誌
+    else:
+        print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
 
-    print(f"✅ 儀表板 API 將透過此 URL 訪問: {api_url}")
+    # 健康檢查
+    if api_url:
+        is_healthy = False
+        for i in range(10): # 最多等待 20 秒
+            try:
+                response = requests.get(f"{api_url}/api/health", timeout=2)
+                if response.status_code == 200 and response.json().get("status") == "ok":
+                    print(f"✅ 後端健康檢查通過！ ({i+1}/10)")
+                    is_healthy = True
+                    break
+            except requests.RequestException as e:
+                print(f"健康檢查嘗試 {i+1}/10 失敗: {e}")
+            time.sleep(2)
 
-    # 讀取 HTML 模板 (使用相對路徑，因為我們已經 chdir)
-    dashboard_template_path = Path("run") / "dashboard.html"
+        if not is_healthy:
+            print("❌ 後端服務在超時後仍未通過健康檢查。請檢查 `logs/` 目錄下的日誌。")
+            # 即使健康檢查失敗，也繼續執行以顯示儀表板，方便除錯
+
+    # 讀取 HTML 模板並注入 API URL
+    dashboard_template_path = project_path / "run" / "dashboard.html"
     with open(dashboard_template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
 
-    # 健康檢查
-    is_healthy = False
-    for i in range(10): # 最多等待 20 秒
-        try:
-            response = requests.get(f"{api_url}/api/health", timeout=2)
-            if response.status_code == 200 and response.json().get("status") == "ok":
-                print("✅ 後端健康檢查通過！")
-                is_healthy = True
-                break
-        except requests.RequestException as e:
-            print(f"健康檢查嘗試 {i+1}/10 失敗: {e}")
-        time.sleep(2)
-
-    if not is_healthy:
-        print("❌ 後端服務在超時後仍未通過健康檢查。請檢查 `logs/` 目錄下的日誌。")
-        return
-
-    # 注入 API URL
-    html_content = html_template.replace('{{ API_URL }}', api_url)
+    # 即使 api_url 為 None，也替換掉佔位符，避免前端出錯
+    html_content = html_template.replace('{{ API_URL }}', api_url or '')
 
     # 顯示最終的靜態 HTML
     display(HTML(html_content))
     print("\n✅ 儀表板已載入。所有後續更新將由前端自主完成。")
-    print("您可以查看 `logs/` 目錄下的 launch.log 和 api_server.log 以獲取詳細日誌。")
+    print(f"您可以查看 `{run_log_path}` 和 `{api_log_path}` 以獲取詳細日誌。")
 
     # --- 步驟 4: 等待手動中斷 ---
     try:
@@ -166,9 +189,10 @@ def main():
     except KeyboardInterrupt:
         print("\n\n🛑 偵測到手動中斷！")
     finally:
-        print("正在終止後端服務...")
+        print("\n正在終止後端服務...")
+        # 溫和地終止
         api_process.terminate()
-        launch_process.terminate()
+        run_process.terminate()
         try:
             api_process.wait(timeout=5)
             print("✅ API 伺服器已成功終止。")
@@ -176,14 +200,18 @@ def main():
             api_process.kill()
             print("⚠️ API 伺服器被強制終結。")
         try:
-            launch_process.wait(timeout=5)
+            run_process.wait(timeout=5)
             print("✅ 主力部隊已成功終止。")
         except subprocess.TimeoutExpired:
-            launch_process.kill()
+            run_process.kill()
             print("⚠️ 主力部隊被強制終結。")
 
-        print("\n正在產生報告...")
-        reporting.create_final_reports()
+        print("\n正在產生最終報告...")
+        try:
+            reporting.create_final_reports()
+            print("✅ 報告已成功生成。")
+        except Exception as e:
+            print(f"❌ 產生報告時發生錯誤: {e}")
 
 if __name__ == "__main__":
     main()
