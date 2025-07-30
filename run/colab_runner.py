@@ -401,6 +401,36 @@ def main():
         # 確保背景工作執行緒也結束
         worker_thread.join(timeout=5)
 
+        # --- 整合報告生成 ---
+        with status_lock:
+            project_path = shared_status.get("project_path")
+        if project_path:
+            update_status(task="生成整合報告", log="正在合併報告分卷...")
+            try:
+                logs_dir = project_path / "logs"
+                report_files = ["綜合戰情簡報.md", "效能分析報告.md", "詳細日誌報告.md"]
+                consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告生成時間:** {datetime.now(pytz.timezone(TIMEZONE)).isoformat()}\n\n---\n\n"
+
+                for report_file in report_files:
+                    report_path = logs_dir / report_file
+                    if report_path.exists():
+                        consolidated_content += f"## 原始報告: {report_file}\n\n"
+                        consolidated_content += report_path.read_text(encoding='utf-8')
+                        consolidated_content += "\n\n---\n\n"
+                    else:
+                        update_status(log=f"  - 警告: 找不到報告分卷 {report_file}")
+
+                if len(consolidated_content) > 200: # 確保有內容可寫
+                    final_report_path = project_path / "final_run_report.md" # 存在根目錄
+                    final_report_path.write_text(consolidated_content, encoding='utf-8')
+                    update_status(log=f"✅ 整合報告已生成: final_run_report.md")
+                else:
+                    update_status(log="沒有足夠的報告分卷來生成整合報告。")
+
+            except Exception as e:
+                update_status(log=f"❌ 生成整合報告時發生錯誤: {e}")
+
+
         # 最後執行歸檔
         with status_lock:
             project_path = shared_status.get("project_path")
