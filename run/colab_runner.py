@@ -26,9 +26,9 @@ FORCE_REPO_REFRESH = True #@param {type:"boolean"}
 #@markdown ### **Part 2: 模式設定**
 #@markdown > **用於快速驗證或完整部署。**
 #@markdown ---
-#@markdown **快速測試模式 (FAST_TEST_MODE)**
-#@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。
-FAST_TEST_MODE = True #@param {type:"boolean"}
+#@markdown **運行模式 (RUN_MODE)**
+#@markdown > 選擇啟動器的運行模式。
+RUN_MODE = "自動自檢模式 (Self-Check Mode)" #@param ["自動自檢模式 (Self-Check Mode)", "快速驗證模式 (Fast-Test Mode)", "完整部署模式 (Full-Deploy Mode)"]
 
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
@@ -71,8 +71,10 @@ def main():
     env = os.environ.copy()
     env["DB_FILE"] = str(db_file)
     env["API_PORT"] = str(api_port)
-    if FAST_TEST_MODE:
+    if "Fast-Test Mode" in RUN_MODE:
         env["FAST_TEST_MODE"] = "true"
+    elif "Self-Check Mode" in RUN_MODE:
+        env["SELF_CHECK_MODE"] = "true"
 
     # 啟動主力部隊 (launch.py)
     launch_log = project_path / "logs" / "launch.log"

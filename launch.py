@@ -177,27 +177,50 @@ async def monitor_resources():
         update_status(cpu=cpu, ram=ram)
         await asyncio.sleep(1)
 
+async def run_self_check():
+    """執行自檢模式"""
+    add_log("INFO", "啟動自檢模式...")
+    update_status(stage="self_checking")
+
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "smart_e2e_test.py",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await process.communicate()
+
+    log_output = stdout.decode() + stderr.decode()
+    add_log("INFO", f"自檢腳本輸出:\n{log_output}")
+
+    if process.returncode == 0:
+        add_log("INFO", "自檢成功完成。")
+        update_status(stage="self_check_passed")
+    else:
+        add_log("ERROR", f"自檢失敗，返回碼: {process.returncode}")
+        update_status(stage="self_check_failed")
+
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
     add_log("INFO", "Launch.py main process started.")
+
+    if os.getenv("SELF_CHECK_MODE") == "true":
+        await run_self_check()
+        add_log("INFO", "Launch.py main process finished after self-check.")
+        return
+
     update_status(stage="initializing")
 
     monitor_task = asyncio.create_task(monitor_resources())
     main_task = asyncio.create_task(main_logic())
 
     try:
-        # 等待主邏輯和監控任務完成
-        # 在正常操作中，monitor_task 是無限循環的，
-        # 所以這裡會一直等到 main_task 結束
         await main_task
-
-        # 在非測試模式下，讓監控任務繼續在前台運行
         if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
             add_log("INFO", "主邏輯執行完畢，資源監控將持續在背景運行。")
             await monitor_task
         else:
-            # 在測試模式下，給監控任務一點時間執行幾次，然後取消
             await asyncio.sleep(3)
             monitor_task.cancel()
 
@@ -205,7 +228,6 @@ async def main():
         add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
         update_status(stage="critical_failure")
     finally:
-        # 確保所有任務在結束時都被妥善處理
         if not monitor_task.done():
             monitor_task.cancel()
         add_log("INFO", "Launch.py main process finished.")
