@@ -232,7 +232,54 @@ async def main():
             monitor_task.cancel()
         add_log("INFO", "Launch.py main process finished.")
 
+from flask import Flask, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """提供主狀態表的數據"""
+    try:
+        conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        status = conn.execute('SELECT * FROM status_table WHERE id = 1').fetchone()
+        conn.close()
+        if status is None:
+            return jsonify({"error": "No status data found"}), 404
+        return jsonify(dict(status))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """提供一個簡單的健康檢查端點"""
+    return jsonify({"status": "ok"})
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """提供最新的 10 條日誌"""
+    try:
+        conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        logs = conn.execute('SELECT * FROM log_table ORDER BY id DESC LIMIT 10').fetchall()
+        conn.close()
+        return jsonify([dict(log) for log in logs])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def run_api_server():
+    port = int(os.environ.get("API_PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
 if __name__ == "__main__":
+    # 在一個獨立的執行緒中，執行 Flask API server
+    import threading
+    api_thread = threading.Thread(target=run_api_server)
+    api_thread.daemon = True
+    api_thread.start()
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

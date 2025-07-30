@@ -5,6 +5,8 @@
 import shutil
 from typing import Dict, Any
 
+import psutil
+
 def get_system_resources() -> Dict[str, Any]:
     """
     獲取當前系統的記憶體和磁碟使用情況。
@@ -12,7 +14,6 @@ def get_system_resources() -> Dict[str, Any]:
     Returns:
         一個包含記憶體和磁碟資訊的字典。
     """
-    import psutil
     memory = psutil.virtual_memory()
     disk_usage = shutil.disk_usage("/")
 

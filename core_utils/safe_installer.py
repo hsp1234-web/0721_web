@@ -81,7 +81,8 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
         if not sufficient:
             logger.error(f"資源不足！{message}")
             logger.error(f"因資源不足，安裝程序已在安裝 '{package}' 前中止。")
-            raise SystemExit(f"安裝失敗：App '{app_name}' 資源不足。")
+            logger.error(f"因資源不足，安裝程序已在安裝 '{package}' 前中止。")
+            return 1
 
         logger.info(f"資源充足。開始安裝 '{package}'...")
 
@@ -113,6 +114,7 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
             raise SystemExit(f"安裝失敗：App '{app_name}' 發生未知錯誤。")
 
     logger.info(f"--- App '{app_name}' 所有套件均已成功安裝 ---")
+    return 0
 
 
 if __name__ == "__main__":
