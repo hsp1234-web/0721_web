@@ -1,120 +1,228 @@
-# 鳳凰之心：最終架構總藍圖
+# 鳳凰之心 v9.2：權威性架構藍圖
 
-這份文件是我們綜合所有討論後得出的最終成果。它詳細描繪了專案的最終形態，涵蓋了檔案結構、業務邏輯劃分、使用的核心工具，以及完整的執行流程。
-
----
-
-## 一、 核心理念與工具 (Core Philosophy & Tools)
-
-我們的架構基於以下三大核心理念，並由一套精簡的工具鏈來實現：
-
-- **微服務架構 (Microservices)**: 每個 App (`quant`, `transcriber`) 都是一個獨立、可自行運行的 FastAPI 服務。
-- **完全隔離 (Total Isolation)**: 每個 App 擁有自己獨立的虛擬環境 (`.venv`)，由唯一的總開關 `launch.py` 自動管理，彼此絕不干擾。
-- **聲明式環境 (Declarative Environments)**: 每個 App 的依賴由其自己的 `requirements.txt` 精確聲明，保證了環境的極速建立與可重複性。
-
-### 核心工具鏈:
-
-- **uv**: 我們唯一的環境管理與安裝工具。負責以極致速度建立虛擬環境 (`.venv`) 和同步 Python 套件。
-- **`launch.py`**: 專案的「總開關」，負責協調所有工具，一鍵啟動整個系統。
-- **逆向代理 (Reverse Proxy)**: 內建於 `launch.py` 中，是系統的統一流量入口，負責將請求轉發給對應的 App。
-- **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
+這份文件是一份權威性的技術藍圖，旨在精準反映專案 v9.2 的最終形態。它不僅描繪了檔案結構和自動化流程，更深入闡述了其背後應對現代化開發挑戰的設計哲學。
 
 ---
 
-## 二、 終極檔案結構與業務邏輯歸屬
+## 一、 設計哲學：應對 CI/CD 的三重困境
 
-這是我們專案的最終檔案結構。它清晰地展示了每一個檔案的職責。
+我們的架構是為了解決在現代持續整合與部署 (CI/CD) 環境中普遍存在的三大核心瓶頸而設計的：
+
+1.  **空間瓶頸 (硬碟空間耗盡)**: 在資源受限的容器化環境中，傳統「一次性安裝所有依賴」的流程極易導致硬碟空間不足而失敗。
+2.  **時間瓶頸 (CPU 資源浪費)**: 單線程的循序測試無法充分利用多核心 CPU，導致測試時間過長，嚴重拖慢開發迭代速度。
+3.  **穩定性瓶頸 (流程意外掛起)**: 單一測試案例的意外卡死（如 API 等待、死循環）會導致整個 CI/CD 流程被無限期阻塞，無法自動報告錯誤。
+
+為此，我們確立了三大核心解決策略，它們共同構建了一個快速、穩健且高效的系統：
+
+-   **策略一：原子化隔離與即時清理 (解決空間瓶頸)**
+    我們將每個測試任務視為一個「原子」單元。測試前，僅為其建立一個包含最小依賴集的專用虛擬環境；測試結束後，立即徹底刪除該環境，將硬碟空間 100% 釋放。這確保了資源峰值佔用永遠在可控範圍內。
+
+-   **策略二：輕量級多核心平行處理 (解決時間瓶頸)**
+    我們透過 `multiprocessing` 實現應用級平行 (同時測試多個 App)，並利用 `pytest-xdist` 在每個 App 內部實現測試級平行。這套輕量級方案能在不增加空間負擔的前提下，壓榨 CPU 性能，大幅縮短測試總耗時。
+
+-   **策略三：主動式超時強制中斷 (解決穩定性瓶頸)**
+    我們為每一個測試案例都設定了一個「生命時鐘」（透過 `pytest-timeout`）。任何超時的測試都會被自動中斷並標記為失敗，確保 CI/CD 流程永遠不會被單一故障點所阻塞。
+
+---
+
+## 二、 v9.2 終極檔案結構與核心工具鏈
+
+這是專案的最終檔案結構，精準反映了所有關鍵組件及其職責。
 
 ```
 /PHOENIX_HEART_PROJECT/
 │
-├── 🚀 launch.py                 # 唯一的「總開關」。負責協調所有 App 的環境建立與啟動，最後啟動逆向代理。
+├── 🚀 phoenix_starter.py          # 【推薦】視覺化啟動器，整合所有功能。
+├── 🚀 launch.py                   # 【無介面】主啟動腳本，適合伺服器環境。
+├── 🧪 smart_e2e_test.py            # 【測試】新一代 Python 智能測試指揮官 (平行/穩定)。
 │
-├── 📦 apps/                      # 【所有獨立微服務的家】
-│   │
-│   ├── 📈 quant/                 # 【量化金融 App - 一個完整的獨立專案】
-│   │   │
-│   │   ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器，掛載 API 路由。
-│   │   │
-│   │   ├── 🧠 logic/             # 核心業務邏輯層
-│   │   │   ├── data_sourcing.py  # 數據源邏輯 (FinMind, FRED, yfinance)
-│   │   │   ├── factor_engineering.py # 因子工程邏輯 (MA, RSI)
-│   │   │   ├── analysis.py       # 分析與策略邏輯 (回測服務)
-│   │   │   └── database.py       # 數據庫邏輯 (SQLite Manager)
-│   │   │
-│   │   ├── 🕸️ api/                # API 接口層
-│   │   │   └── v1/
-│   │   │       └── routes.py     # 定義所有 FastAPI 路由 (/backtest)
-│   │   │
-│   │   ├── 📜 requirements.txt     # **此 App 專屬的依賴清單**
-│   │   ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│   │   └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
-│   │
-│   └── 🎤 transcriber/           # 【語音轉寫 App - 一個完整的獨立專案】
-│       │
-│       ├── 🛰️ main.py             # App 的入口：啟動 FastAPI 伺服器
-│       │
-│       ├── 🧠 logic.py           # 核心業務邏輯 (呼叫轉寫模型)
-│       │
-│       ├── 📜 requirements.txt     # 核心依賴
-│       ├── 📜 requirements.large.txt # (可選) 大型依賴，用於真實模式測試
-│       ├── 🧪 tests/             # **此 App 專屬的**單元與整合測試
-│       └── .venv/                # (由 launch.py 自動生成) 獨立的虛擬環境
+├── 📦 apps/                        # 【所有獨立微服務的家】
+│   ├── 📈 quant/                   #  - 量化金融 App
+│   └── 🎤 transcriber/             #  - 語音轉寫 App
 │
-├── ⚙️ proxy/                      # 【逆向代理配置】
-│   └── proxy_config.json       # 定義路由規則 (e.g., "/quant" -> "localhost:8001")
+├── 🛠️ core_utils/                 # 【核心工具模組】
+│   ├── resource_monitor.py       #  - 資源監控模組：提供檢查系統資源的函式。
+│   └── safe_installer.py         #  - 安全安裝模組：逐一套件、帶資源檢查地執行安裝。
 │
-├── 📜 smart_e2e_test.sh         # 智能測試指揮官腳本，支持 mock 和 real 模式
+├── ⚙️ config/                     # 【全域設定中心】
+│   └── resource_settings.yml     #  - 在此定義記憶體/磁碟閾值等監控參數。
 │
-├── 📚 docs/                       # 【專案文件】
-│   └── ARCHITECTURE.md         # (本文件) 最終的架構設計總藍圖
+├── 📝 logs/                        # 【日誌中心】
+│   └── .gitkeep                  #  - 所有安裝與啟動日誌的存放處。
 │
-└── 🗄️ ALL_DATE/                 # 【封存參考資料】存放舊專案作為開發參考
+├── 🧪 tests/                       # 【品質保證中心】
+│   ├── 📈 quant/                   #  - 量化金融 App 的測試
+│   └── 🎤 transcriber/             #  - 語音轉寫 App 的測試
+│
+├── 🏃 run/                         # 【執行器】
+│   └── colab_runner.py           #  - Colab 混合動力啟動器。
+│
+├── 📚 docs/                         # 【專案文件】
+│   ├── ARCHITECTURE.md           #  - (本文件) 深入的架構設計藍圖。
+│   ├── Colab_Guide.md            #  - Google Colab 運行指南。
+│   ├── TEST.md                   #  - 現代化測試策略藍圖 (Pythonic)。
+│   └── MISSION_DEBRIEFING.md     #  - 專案任務報告。
+│
+├── 🗄️ ALL_DATE/                   # 【舊專案封存 (僅供參考)】
+│
+└── 📄 .gitignore                  # Git 忽略檔案設定。
 ```
+
+### **核心工具鏈詳解:**
+
+*   **`phoenix_starter.py` / `launch.py`**: 專案的兩大入口。前者提供視覺化儀表板，後者適用於無介面的自動化環境。它們是所有智慧流程的總指揮。
+*   **`smart_e2e_test.py`**: 新一代的 Python 測試指揮官。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
+*   **`run/colab_runner.py`**: 專為 Google Colab 設計的 Rich 儀表板啟動器。它使用 `rich` 套件提供一個美觀、即時的儀表板，並透過讀寫分離的資料庫驅動架構，確保了前端顯示和後端服務的穩定運行。
+*   **`core_utils/`**: 專案的「引擎室」。`safe_installer.py` 負責執行原子化的安全安裝，而 `resource_monitor.py` 則在每一步安裝前進行資源健康檢查，是實現「空間瓶頸」解決方案的關鍵。
+*   **`docs/TEST.md`**: 與本架構文件相輔相成的測試策略藍圖，詳細說明了如何使用 `smart_e2e_test.py` 以及其背後的測試模式。
 
 ---
 
-## 三、 統一啟動與執行流程
+## 三、 Colab 啟動器最終架構：資料庫驅動方案 (v12)
 
-當您在任何環境執行 `python launch.py` 時，系統將嚴格遵循以下流程：
+在經歷了數次迭代後，我們最終確定了一套以穩定性為最高原則的架構，旨在徹底解決先前 GoTTY/API 方案的複雜性與不確定性。
+
+### 核心概念：讀寫分離
+
+我們將**「做事」與「顯示」**完全分離。後端程序專心執行任務並將所有狀態與日誌寫入一個獨立的資料庫；前端的 Colab 儲存格則專心從該資料庫讀取最新狀態並負責呈現在畫面上。兩者透過資料庫溝通，互不干擾。
+
+### 架構草圖
+
+```mermaid
+graph TD
+    A[👨‍💻 您 (使用者)] --> B{Colab 儲存格 (前端顯示器)};
+    B -- 每秒讀取狀態 --> C[(state.db)];
+    C -- 持續寫入狀態與日誌 --> D[🚀 背景程序 (後端主力部隊)];
+    B -- 清除並重繪畫面 --> B;
+    subgraph "唯一的真相來源"
+        C
+    end
+    subgraph "執行安裝、啟動等所有任務"
+        D
+    end
+```
+
+### 執行步驟
+
+1.  **建立「真相堡壘」：資料庫**
+    *   **選擇工具**：使用 **SQLite**。它是一個單一檔案的資料庫，不需額外安裝伺服器，非常適合 Colab 環境。
+    *   **設計結構**：在資料庫中建立兩張簡單的表：
+        *   `status_table`：用來存放即時狀態。例如，只有一筆紀錄，包含 `cpu_usage`, `ram_usage`, `current_stage` (目前階段) 等欄位。後端會不斷更新這一筆紀錄。
+        *   `log_table`：用來存放歷史日誌。包含 `timestamp`, `level`, `message` 等欄位。後端會不斷插入新的日誌紀錄。
+
+2.  **打造「主力部隊」：背景程序 (`launch.py`)**
+    *   **唯一職責**：依序執行所有工作，例如：安裝依賴、啟動 App、執行分析...等。
+    *   在任務的每個階段，將最新的狀態（CPU、RAM、進度）更新到資料庫的 `status_table`。
+    *   將所有產生的日誌（無論成功、失敗或除錯訊息）插入到資料庫的 `log_table`。
+    *   **重要原則**：這個腳本**不應該**使用 `print()` 來顯示儀表板畫面。它的所有輸出都只針對資料庫。
+
+3.  **設定「戰情顯示器」：前端迴圈 (`run/colab_runner.py`)**
+    *   **唯一職責**：以固定頻率（例如每秒一次）重複執行以下操作。
+        *   連接到 SQLite 資料庫。
+        *   從 `status_table` 讀取最新的即時狀態。
+        *   從 `log_table` 讀取最新的幾筆日誌（例如最新的 10 條）。
+        *   使用 `rich.Live` 和 `rich.Layout` 來建立一個美觀、即時更新的儀表板。
+        *   將讀取到的狀態和日誌，填充到 `Layout` 的各個 `Panel` 中。
+    *   **重要原則**：這個迴圈不處理任何核心業務邏輯，它只是一個單純的「畫家」。
+
+### 核心優勢
+
+*   **極致穩定**：前端顯示的崩潰，完全不影響後端核心任務的執行。真相永遠保存在資料庫中。
+*   **架構簡潔**：沒有任何額外的網路服務 (GoTTY, API, WebSocket)，只有 Python 和 SQLite，除錯和維護成本降至最低。
+*   **數據完整**：所有事件和狀態都被完整記錄，任務結束後可輕易從資料庫匯出完整的執行報告，用於分析或歸檔。
+
+---
+
+## 四、 全鏈路自動化流程圖
+
+這張圖描繪了從使用者啟動到測試完成的完整自動化鏈路，體現了我們設計哲學中的所有核心策略。
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 使用者
-    participant Launcher as 🚀 launch.py
-    participant UV as ✨ uv
-    participant QuantApp as 📈 Quant App
-    participant TranscriberApp as 🎤 Transcriber App
-    participant Proxy as 🌐 逆向代理
+    participant Starter as 🚀 啟動器<br>(launch.py)
+    participant SafeInstaller as 🛡️ 安全安裝器
+    participant TestCommander as 🧪 測試指揮官<br>(smart_e2e_test.py)
+    participant AppPool as 🏊‍♂️ 應用測試池
 
-    User->>Launcher: 執行 `python launch.py`
-    Launcher->>Launcher: 開始遍歷 `apps` 目錄
+    User->>Starter: python launch.py
 
-    Note over Launcher, UV: --- 處理 Quant App ---
-    Launcher->>UV: 進入 `apps/quant`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>QuantApp: 在背景啟動 `main.py` (監聽 8001 埠)
+    Starter->>SafeInstaller: 執行原子化安全安裝
 
-    Note over Launcher, UV: --- 處理 Transcriber App ---
-    Launcher->>UV: 進入 `apps/transcriber`，執行 `uv venv`
-    UV-->>Launcher: 建立或確認 `.venv` 存在
-    Launcher->>UV: 執行 `uv pip sync requirements.txt`
-    UV-->>Launcher: 光速安裝/同步依賴
-    Launcher->>TranscriberApp: 在背景啟動 `main.py` (監聽 8002 埠)
+    loop 為每個 App
+        SafeInstaller->>SafeInstaller: 1. 建立隔離環境
+        SafeInstaller->>SafeInstaller: 2. 逐一安全安裝依賴
+        SafeInstaller->>SafeInstaller: 3. 測試完成後清理環境
+    end
 
-    Note over Launcher, Proxy: --- 啟動最終服務 ---
-    Launcher->>Proxy: 所有 App 啟動成功，現在啟動內建的逆向代理
-    Proxy->>User: 系統準備就緒！顯示公開訪問網址 (http://localhost:8000)
+    alt 所有 App 安裝成功
+        Starter->>TestCommander: 觸發平行化測試
+    else 安裝失敗
+        Starter-->>User: 報告錯誤並中止
+    end
+
+    TestCommander->>AppPool: 建立多進程池 (multiprocessing)
+
+    par 為每個 App 平行執行
+        AppPool->>TestCommander: 分配一個進程
+        TestCommander->>TestCommander: 執行 pytest -n auto --timeout=300
+        Note right of TestCommander: 在進程內部，pytest-xdist<br>再次將測試案例<br>分配到所有 CPU 核心
+    end
+
+    alt 所有測試通過
+        TestCommander-->>User: 🎉 報告所有測試成功
+    else 任何測試失敗
+        TestCommander-->>User: ❌ 報告失敗詳情
+    end
 ```
 
-### 流程總結：
+### **流程詳解:**
 
-1.  **啟動器 (`launch.py`)** 是唯一的指揮官。
-2.  它逐一「拜訪」每個 App 的家 (`apps/*`)。
-3.  在每個家裡，它命令 **uv** 快速建立一個獨立、標準化的工作環境 (`.venv`) 並安裝好所有工具 (`requirements.txt`)。
-4.  環境就緒後，它就讓這個 App 自己開始工作（在背景運行自己的 FastAPI 伺服器）。
-5.  當所有 App 都開始獨立工作後，啟動器最後會打開「總服務台」（逆向代理），讓外界可以開始通過統一的入口訪問所有服務。
+1.  **啟動與安全安裝**:
+    *   使用者執行 `launch.py` (或視覺化的 `phoenix_starter.py`)，啟動整個流程。
+    *   啟動器首先調用**安全安裝器 (`safe_installer.py`)**。
+    *   安全安裝器嚴格遵循「原子化隔離」策略，為 `apps/` 目錄下的每一個應用，獨立地建立虛擬環境、安裝依賴，並在完成後徹底清理。
 
-這套流程確保了無論在何種環境下，整個系統的啟動過程都是標準化、可預測、且極度高效的。
+2.  **觸發智能測試**:
+    *   只有當所有 App 的依賴都成功安裝後，啟動器才會繼續，調用**測試指揮官 (`smart_e2e_test.py`)**。
+    *   這確保了測試流程永遠在一個乾淨、確定的環境中開始。
+
+3.  **兩級平行化測試**:
+    *   **第一級平行 (應用級)**: 測試指揮官首先利用 `multiprocessing` 建立一個進程池，為每個 App 分配一個獨立的進程，實現了不同 App 之間的並行測試。
+    *   **第二級平行 (測試級)**: 在每個獨立的 App 測試進程中，`pytest` 被以 `-n auto` 模式調用，這會觸發 `pytest-xdist`，將該 App 內部的所有測試案例，再次分配到所有可用的 CPU 核心上。
+    *   同時，`--timeout=300` 參數為每個測試案例提供了堅實的穩定性保障。
+
+4.  **結果報告**:
+    *   測試指揮官會等待所有平行任務完成，收集結果，並向使用者報告最終的成功或失敗狀態。
+
+這個流程將我們的三大核心策略——**原子化隔離、多核心平行處理、主動式超時中斷**——無縫地整合到一個連貫、高效的自動化工作流中。
+
+---
+
+## 五、V4 核心架構：預設快速驗證與參數化完整執行
+
+V4 架構在 V3 的基礎上進行了關鍵的易用性改進，將**快速驗證模式設為預設行為**，同時保留了執行完整任務的能力。這使得開發者可以近乎即時地檢查 TUI 和核心日誌功能，極大地提升了日常開發和偵錯的效率。
+
+### 核心變更：
+
+*   **預設快速模式**：直接執行 `python launch.py` 將**不再**安裝任何大型依賴或啟動後端 App。它會立即啟動 TUI，模擬一個簡短的執行流程，並在幾秒鐘內完成。這成為了驗證系統核心顯示和日誌功能的標準方法。
+*   **參數化完整模式**：過去的完整執行流程現在需要透過一個明確的命令列旗標來啟動：`python launch.py --full`。只有在指定此旗標時，系統才會執行完整的依賴安裝和後端服務啟動。
+*   **內建依賴引導**：`launch.py` 現在能夠自我檢測並自動安裝其運行所需的核心 Python 套件（如 `pytz`, `psutil`, `ipython`, `nest_asyncio`），免除了使用者的手動設定步驟。
+
+### 新的標準執行流程
+
+1.  **日常開發與驗證 (預設)**:
+    ```bash
+    python launch.py
+    ```
+    *   **目的**：快速檢查 TUI 是否正常渲染，日誌是否可以生成。
+    *   **耗時**：< 5 秒。
+
+2.  **完整部署與測試 (手動觸發)**:
+    ```bash
+    python launch.py --full
+    ```
+    *   **目的**：執行完整的端到端流程，包括安裝所有應用的依賴、啟動後端服務。
+    *   **耗時**：數分鐘（取決於網路速度和依賴大小）。
+
+這個改進使得 `launch.py` 同時滿足了**快速迭代**和**完整執行**兩種核心需求，並透過將簡單性設為預設值，提供了更流暢的開發者體驗。

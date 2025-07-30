@@ -1,5 +1,0 @@
-# Transcriber App 的特定依賴
-python-multipart
-
-# 大型轉寫依賴
-faster-whisper

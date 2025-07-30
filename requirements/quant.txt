@@ -1,7 +1,0 @@
-# Quant App 的特定依賴
-pandas
-numpy
-FinMind
-fredapi
-yfinance
-tqdm

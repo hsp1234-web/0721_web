@@ -1,7 +1,6 @@
 # Virtual Environment
 .venv/
 venv/
-.venvs/
 env/
 
 # Python cache
@@ -25,13 +24,12 @@ dist/
 # Test artifacts
 .test_venv/
 .e2e_venv/
+.venv_test/
 test_final_archive/
-.pytest_cache/
-htmlcov/
-.coverage
 
 # Logs
-*.log
+# 忽略 logs 目錄下的所有 .log 檔案
+logs/*.log
 
 # IDE / Editor specific
 .vscode/
@@ -42,6 +40,3 @@ htmlcov/
 # OS-specific
 .DS_Store
 Thumbs.db
-
-# Project-specific
-.large_packages/
