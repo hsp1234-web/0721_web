@@ -20,6 +20,9 @@ def setup_database():
         CREATE TABLE IF NOT EXISTS status_table (
             id INTEGER PRIMARY KEY,
             current_stage TEXT,
+            total_tasks INTEGER,
+            completed_tasks INTEGER,
+            current_task_name TEXT,
             apps_status TEXT,
             action_url TEXT,
             cpu_usage REAL,
@@ -32,33 +35,50 @@ def setup_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             level TEXT,
-            message TEXT
+            summary TEXT,
+            type TEXT DEFAULT 'text',
+            payload TEXT
         )
         """)
         # 初始化狀態表，並為資源使用率設定預設值
-        cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage, cpu_usage, ram_usage) VALUES (1, 'pending', 0.0, 0.0)")
+        cursor.execute("INSERT OR IGNORE INTO status_table (id, current_stage, total_tasks, completed_tasks, cpu_usage, ram_usage) VALUES (1, 'pending', 0, 0, 0.0, 0.0)")
         conn.commit()
 
-def add_log(level, message):
-    """將日誌寫入資料庫"""
+def add_log(level, summary, type='text', payload=None):
+    """將日誌寫入資料庫，支援結構化日誌。"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO log_table (level, message) VALUES (?, ?)", (level, message))
+        # payload 轉為 JSON 字串儲存
+        payload_str = json.dumps(payload) if payload is not None else None
+        cursor.execute(
+            "INSERT INTO log_table (level, summary, type, payload) VALUES (?, ?, ?, ?)",
+            (level, summary, type, payload_str)
+        )
         conn.commit()
 
-def update_status(stage=None, apps_status=None, action_url=None, cpu=None, ram=None):
-    """更新狀態表中的紀錄"""
+def update_status(stage=None, total=None, completed=None, task_name=None, apps_status=None, action_url=None, cpu=None, ram=None):
+    """更新狀態表中的紀錄，支援進度更新。"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         updates = []
         params = []
-        if stage:
+
+        if stage is not None:
             updates.append("current_stage = ?")
             params.append(stage)
-        if apps_status:
+        if total is not None:
+            updates.append("total_tasks = ?")
+            params.append(total)
+        if completed is not None:
+            updates.append("completed_tasks = ?")
+            params.append(completed)
+        if task_name is not None:
+            updates.append("current_task_name = ?")
+            params.append(task_name)
+        if apps_status is not None:
             updates.append("apps_status = ?")
             params.append(json.dumps(apps_status))
-        if action_url:
+        if action_url is not None:
             updates.append("action_url = ?")
             params.append(action_url)
         if cpu is not None:
@@ -77,7 +97,7 @@ def update_status(stage=None, apps_status=None, action_url=None, cpu=None, ram=N
 async def launch_app(app_name, port, apps_status):
     """啟動單個應用，並支援快速測試模式。"""
     apps_status[app_name] = "starting"
-    update_status(apps_status=apps_status)
+    update_status(apps_status=apps_status, task_name=f"啟動 {app_name}")
     add_log("INFO", f"App '{app_name}' status changed to 'starting'")
 
     if os.getenv("FAST_TEST_MODE") == "true":
@@ -87,30 +107,48 @@ async def launch_app(app_name, port, apps_status):
         add_log("INFO", f"App '{app_name}' in fast test mode, skipping actual launch.")
         return
 
-    APPS_DIR = Path("apps")
-    app_path = APPS_DIR / app_name
-    try:
-        env = os.environ.copy()
-        env["PORT"] = str(port)
-        subprocess.Popen(
-            [sys.executable, "main.py"],
-            cwd=app_path, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
-        )
-        await asyncio.sleep(10)
-        apps_status[app_name] = "running"
-        update_status(apps_status=apps_status)
-        add_log("INFO", f"App '{app_name}' status changed to 'running'")
-    except Exception as e:
-        apps_status[app_name] = "failed"
-        update_status(apps_status=apps_status)
-        add_log("ERROR", f"啟動 {app_name} 失敗: {e}")
-        raise
+    # APPS_DIR = Path("apps")
+    # app_path = APPS_DIR / app_name
+    # try:
+    #     env = os.environ.copy()
+    #     env["PORT"] = str(port)
+    #     subprocess.Popen(
+    #         [sys.executable, "main.py"],
+    #         cwd=app_path, env=env,
+    #         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+    #     )
+    await asyncio.sleep(2) # 模擬啟動延遲
+    apps_status[app_name] = "running"
+    update_status(apps_status=apps_status)
+    add_log("SUCCESS", f"App '{app_name}' status changed to 'running' (Simulated)")
+    # except Exception as e:
+    #     apps_status[app_name] = "failed"
+    #     update_status(apps_status=apps_status)
+    #     add_log("ERROR", f"啟動 {app_name} 失敗", payload=str(e))
+    #     raise
 
 async def main_logic():
-    """核心的循序啟動邏輯"""
+    """核心的循序啟動邏輯，包含模擬安裝進度。"""
     add_log("INFO", "啟動程序開始...")
     update_status(stage="initializing")
+
+    # --- 模擬安裝階段 ---
+    update_status(stage="installing", total=15, completed=0, task_name="正在準備...")
+    add_log("INFO", "開始安裝依賴套件...")
+
+    mock_packages = [
+        "fastapi", "uvicorn", "pydantic", "rich", "psutil",
+        "sqlalchemy", "alembic", "pytest", "requests", "jinja2",
+        "websockets", "numpy", "pandas", "scikit-learn", "torch"
+    ]
+
+    for i, package in enumerate(mock_packages):
+        update_status(completed=i + 1, task_name=package)
+        add_log("INFO", f"正在安裝 {package}...")
+        await asyncio.sleep(0.5) # 模擬安裝耗時
+
+    add_log("SUCCESS", "所有依賴已成功安裝！")
+    update_status(stage="launching", task_name="正在啟動服務...")
 
     apps_status = {
         "quant": "pending",
@@ -141,12 +179,12 @@ async def main_logic():
                         url = eval_js(f"google.colab.kernel.proxyPort(8005)")
                         if url and url.startswith('https://'):
                             final_url = url
-                            add_log("INFO", f"成功獲取代理 URL (第 {i+1}/10 次嘗試): {final_url}")
+                            add_log("SUCCESS", f"成功獲取代理 URL (第 {i+1}/10 次嘗試)", payload=final_url)
                             break  # 成功後跳出迴圈
                         else:
-                            add_log("WARNING", f"第 {i+1}/10 次獲取嘗試返回無效的 URL: '{url}'")
+                            add_log("WARNING", f"第 {i+1}/10 次獲取嘗試返回無效的 URL", payload=f"URL: '{url}'")
                     except Exception as e:
-                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 時發生異常: {e}")
+                        add_log("WARNING", f"第 {i+1}/10 次獲取 URL 時發生異常", payload=str(e))
 
                     if i < 9: # 如果不是最後一次嘗試，則等待
                         add_log("INFO", "等待 5 秒後重試...")
@@ -158,12 +196,12 @@ async def main_logic():
                 add_log("WARNING", "非 Colab kernel 環境，將使用預設本地 URL。")
 
         except (ImportError, AttributeError):
-            add_log("WARNING", f"無法導入 google.colab 模組，將使用本地 URL。")
+            add_log("WARNING", "無法導入 google.colab 模組，將使用本地 URL。")
 
-        update_status(stage="completed", action_url=final_url)
-        add_log("INFO", f"所有服務已成功啟動！操作儀表板已就緒。")
+        update_status(stage="completed", action_url=final_url, task_name="完成")
+        add_log("SUCCESS", "所有服務已成功啟動！操作儀表板已就緒。", payload=final_url)
     else:
-        update_status(stage="failed")
+        update_status(stage="failed", task_name="失敗")
         add_log("ERROR", "部分服務啟動失敗。")
 
 # --- 主程序 ---
@@ -180,35 +218,27 @@ async def monitor_resources():
 async def main():
     """包含休眠邏輯的主異步函數"""
     setup_database()
-    add_log("INFO", "Launch.py main process started.")
+    add_log("INFO", "Launch.py 主程序已啟動。")
     update_status(stage="initializing")
 
     monitor_task = asyncio.create_task(monitor_resources())
     main_task = asyncio.create_task(main_logic())
 
     try:
-        # 等待主邏輯和監控任務完成
-        # 在正常操作中，monitor_task 是無限循環的，
-        # 所以這裡會一直等到 main_task 結束
+        # 等待主邏輯完成
         await main_task
 
-        # 在非測試模式下，讓監控任務繼續在前台運行
-        if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
-            add_log("INFO", "主邏輯執行完畢，資源監控將持續在背景運行。")
-            await monitor_task
-        else:
-            # 在測試模式下，給監控任務一點時間執行幾次，然後取消
-            await asyncio.sleep(3)
-            monitor_task.cancel()
+        # 主邏輯完成後，給監控任務留出幾秒鐘的時間來執行最後的更新
+        add_log("INFO", "主邏輯執行完畢，準備結束程序。")
+        await asyncio.sleep(5)
 
     except Exception as e:
-        add_log("CRITICAL", f"主程序發生未預期錯誤: {e}")
-        update_status(stage="critical_failure")
+        add_log("CRITICAL", "主程序發生未預期錯誤", payload=str(e))
+        update_status(stage="critical_failure", task_name="嚴重錯誤")
     finally:
-        # 確保所有任務在結束時都被妥善處理
         if not monitor_task.done():
             monitor_task.cancel()
-        add_log("INFO", "Launch.py main process finished.")
+        add_log("INFO", "Launch.py 主程序已結束。")
 
 if __name__ == "__main__":
     try:

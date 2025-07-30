@@ -3,44 +3,285 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鳳凰之心 - 主操作儀表板</title>
+    <title>🚀 鳳凰之心 - 統一駕駛艙</title>
     <style>
-        body { background-color: #f0f2f5; color: #333; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        h1 { text-align: center; color: #1d3557; }
-        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
-        .panel { border: 1px solid #ddd; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .panel-header { background-color: #457b9d; color: white; padding: 15px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-size: 18px; font-weight: bold; }
-        .panel-body { padding: 20px; }
-        button { background-color: #1d3557; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        .result-box { margin-top: 15px; padding: 15px; background-color: #eaf2f8; border: 1px solid #a8dadc; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; min-height: 50px; }
+        :root {
+            --bg-color: #1a1b26;
+            --panel-bg-color: #24283b;
+            --text-color: #c0caf5;
+            --header-color: #7aa2f7;
+            --border-color: #414868;
+            --success-color: #9ece6a;
+            --warning-color: #e0af68;
+            --error-color: #f7768e;
+            --info-color: #7aa2f7;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
+            margin: 0;
+            padding: 1rem;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 250px;
+            grid-template-rows: auto 1fr;
+            gap: 1rem;
+            max-width: 1200px;
+            margin: auto;
+            height: 95vh;
+            grid-template-areas:
+                "header services"
+                "stream services";
+        }
+        .panel {
+            background-color: var(--panel-bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+        #header-panel { grid-area: header; }
+        #services-panel { grid-area: services; }
+        #stream-panel {
+            grid-area: stream;
+            overflow-y: auto;
+        }
+        .panel-title {
+            font-weight: bold;
+            color: var(--header-color);
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+        .resource-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .resource-bar label {
+            width: 40px;
+        }
+        .progress-bar {
+            flex-grow: 1;
+            height: 10px;
+            background-color: #414868;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .progress-bar div {
+            height: 100%;
+            background-color: var(--info-color);
+            width: 0%;
+            transition: width 0.5s ease-in-out;
+        }
+        .service-status {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .service-status li {
+            margin-bottom: 0.5rem;
+        }
+        .log-entry {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+        }
+        .log-header {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .log-header .level-SUCCESS { color: var(--success-color); }
+        .log-header .level-WARNING { color: var(--warning-color); }
+        .log-header .level-ERROR { color: var(--error-color); }
+        .log-header .level-INFO { color: var(--info-color); }
+        .data-block {
+            background-color: var(--bg-color);
+            padding: 0.5rem;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        #install-progress-container {
+            display: none;
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🚀 鳳凰之心 - 主操作儀表板 🚀</h1>
-        <div class="grid-container">
-            <div id="quant-panel" class="panel">
-                <div class="panel-header">📈 量化分析 App</div>
-                <div class="panel-body">
-                    <button id="run-quant">執行分析</button>
-                    <div id="quant-result" class="result-box"></div>
-                </div>
+    <div class="dashboard-grid">
+        <div id="header-panel" class="panel">
+            <div class="panel-title">🌐 系統狀態與資源</div>
+            <div class="resource-bar">
+                <label>CPU:</label>
+                <div class="progress-bar"><div id="cpu-bar"></div></div>
+                <span id="cpu-text" style="margin-left: 10px; width: 50px;">-</span>
             </div>
-            <div id="transcriber-panel" class="panel">
-                <div class="panel-header">🎤 語音轉寫 App</div>
-                <div class="panel-body">
-                    <form id="upload-form">
-                        <input type="file" name="file" id="audio-file" accept="audio/*" required>
-                        <button type="submit">上傳並轉寫</button>
-                    </form>
-                    <div id="transcriber-result" class="result-box"></div>
+            <div class="resource-bar">
+                <label>RAM:</label>
+                <div class="progress-bar"><div id="ram-bar"></div></div>
+                <span id="ram-text" style="margin-left: 10px; width: 50px;">-</span>
+            </div>
+            <div id="install-progress-container">
+                 <div class="resource-bar">
+                    <label>安裝:</label>
+                    <div class="progress-bar"><div id="install-bar"></div></div>
+                    <span id="install-text" style="margin-left: 10px; width: 120px;">-</span>
                 </div>
+                <div id="current-task-text" style="font-size: 0.8em; text-align: center; margin-top: 5px;"></div>
+            </div>
+        </div>
+        <div id="services-panel" class="panel">
+            <div class="panel-title">⚙️ 核心服務</div>
+            <ul id="service-status-list" class="service-status">
+                <li><span id="status-main_dashboard">-</span> 主儀表板</li>
+                <li><span id="status-quant">-</span> 量化分析引擎</li>
+                <li><span id="status-transcriber">-</span> 語音轉寫服務</li>
+            </ul>
+        </div>
+        <div id="stream-panel" class="panel">
+            <div class="panel-title">📜 主資訊流 (Live Information Stream)</div>
+            <div id="log-container">
+                <div id="initial-status" class="log-entry">⚪ 等待連線...</div>
             </div>
         </div>
     </div>
+
     <script>
-        // JS 邏輯與之前版本相同，此處為示意
+        const API_BASE_URL = '/api';
+
+        // --- DOM Elements ---
+        const cpuBar = document.getElementById('cpu-bar');
+        const cpuText = document.getElementById('cpu-text');
+        const ramBar = document.getElementById('ram-bar');
+        const ramText = document.getElementById('ram-text');
+        const installProgressContainer = document.getElementById('install-progress-container');
+        const installBar = document.getElementById('install-bar');
+        const installText = document.getElementById('install-text');
+        const currentTaskText = document.getElementById('current-task-text');
+        const serviceStatusList = document.getElementById('service-status-list');
+        const logContainer = document.getElementById('log-container');
+        const initialStatus = document.getElementById('initial-status');
+
+        // --- State ---
+        let initialLogsLoaded = false;
+
+        // --- Render Functions ---
+        function renderStatus(status) {
+            // Update resource bars
+            cpuBar.style.width = `${status.cpu_usage || 0}%`;
+            cpuText.textContent = `${(status.cpu_usage || 0).toFixed(1)}%`;
+            ramBar.style.width = `${status.ram_usage || 0}%`;
+            ramText.textContent = `${(status.ram_usage || 0).toFixed(1)}%`;
+
+            // Update installation progress
+            if (status.current_stage === 'installing' && status.total_tasks > 0) {
+                installProgressContainer.style.display = 'block';
+                const percent = (status.completed_tasks / status.total_tasks) * 100;
+                installBar.style.width = `${percent}%`;
+                installText.textContent = `[ ${status.completed_tasks}/${status.total_tasks} ]`;
+                currentTaskText.textContent = `正在處理: ${status.current_task_name}`;
+            } else {
+                installProgressContainer.style.display = 'none';
+            }
+
+            // Update service status
+            const appsStatus = status.apps_status ? JSON.parse(status.apps_status) : {};
+            for (const appName in appsStatus) {
+                const statusEl = document.getElementById(`status-${appName}`);
+                if (statusEl) {
+                    let emoji = '⚪';
+                    if (appsStatus[appName] === 'running') emoji = '🟢';
+                    else if (appsStatus[appName] === 'starting') emoji = '🟡';
+                    else if (appsStatus[appName] === 'failed') emoji = '🔴';
+                    statusEl.textContent = emoji;
+                }
+            }
+        }
+
+        function renderLog(log) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const header = document.createElement('div');
+            header.className = 'log-header';
+            header.innerHTML = `<span class="level-${log.level}">${log.level}</span> [${new Date(log.timestamp).toLocaleTimeString()}] - ${log.summary}`;
+            entry.appendChild(header);
+
+            if (log.type === 'data_block' && log.payload) {
+                try {
+                    const payloadData = JSON.parse(log.payload);
+                    const dataBlock = document.createElement('div');
+                    dataBlock.className = 'data-block';
+                    // Simple pretty print for JSON
+                    dataBlock.textContent = JSON.stringify(payloadData, null, 2);
+                    entry.appendChild(dataBlock);
+                } catch (e) { /* Ignore parsing errors */ }
+            }
+            return entry;
+        }
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logs?limit=50`);
+                if (!response.ok) return;
+                const logs = await response.json();
+
+                if (!initialLogsLoaded) {
+                    logContainer.innerHTML = ''; // Clear initial message
+                    initialLogsLoaded = true;
+                }
+
+                // Add logs to the top
+                logs.reverse().forEach(log => {
+                    logContainer.prepend(renderLog(log));
+                });
+
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+            }
+        }
+
+        async function pollStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/status`);
+                if (!response.ok) {
+                     if (response.status === 404 || response.status === 503) {
+                        initialStatus.textContent = '🟡 初始化中... 後端服務尚未就緒...';
+                    }
+                    return;
+                }
+                const status = await response.json();
+
+                if (initialStatus) {
+                   initialStatus.textContent = '🟢 已連線！正在載入資訊流...';
+                   setTimeout(() => initialStatus.remove(), 2000);
+                }
+
+                renderStatus(status);
+
+            } catch (error) {
+                console.error('Error polling status:', error);
+                initialStatus.textContent = '🔴 連線失敗，請檢查後端服務是否運行。';
+            }
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Instant feedback
+            initialStatus.textContent = '🟡 初始化中...';
+
+            // Start polling
+            pollStatus(); // Poll immediately
+            setInterval(pollStatus, 2000); // Then every 2 seconds
+
+            // Fetch initial logs
+            setTimeout(fetchLogs, 1000); // Fetch logs after 1 second delay
+        });
+
     </script>
 </body>
 </html>
