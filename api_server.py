@@ -12,10 +12,15 @@ CORS(app)  # 允許所有來源的跨域請求
 DB_FILE = Path(os.getenv("DB_FILE", "/tmp/state.db"))
 
 def get_db_connection():
-    """建立到唯讀資料庫的連線"""
-    conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """建立到唯讀資料庫的連線，並加入重試機制"""
+    for _ in range(5):
+        try:
+            conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.OperationalError:
+            time.sleep(1)
+    raise sqlite3.OperationalError(f"無法連接到資料庫: {DB_FILE}")
 
 @app.route('/api/status', methods=['GET'])
 def get_status():

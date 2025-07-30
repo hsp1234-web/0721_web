@@ -21,7 +21,7 @@ from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
 # --- 常數與設定 ---
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 APPS_DIR = PROJECT_ROOT / "apps"
 
 # --- 顏色代碼 ---
