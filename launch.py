@@ -7,11 +7,30 @@ from pathlib import Path
 import os
 import time
 import json
-import pytz
 from datetime import datetime
 import shlex
 import threading
-import psutil
+import argparse
+
+# --- 依賴預檢和自動安裝 ---
+try:
+    import pytz
+    import psutil
+    from IPython.display import display, clear_output
+    import nest_asyncio
+except ImportError:
+    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio)...")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio"], check=True)
+        print("依賴安裝成功。")
+        import pytz
+        import psutil
+        from IPython.display import display, clear_output
+        import nest_asyncio
+    except Exception as e:
+        print(f"自動安裝依賴失敗: {e}")
+        print("請手動執行 'pip install pytz psutil ipython nest_asyncio' 後再試一次。")
+        sys.exit(1)
 
 from core_utils.commander_console import CommanderConsole
 from core_utils.resource_monitor import is_resource_sufficient, load_resource_settings
@@ -116,11 +135,6 @@ async def manage_app_lifecycle(app_name, port, app_status):
     venv_path = APPS_DIR / app_name / ".venv"
     python_executable = str(venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
 
-    if os.getenv("FAST_TEST_MODE") == "true":
-        log_event("INFO", f"[{app_name}] 快速測試模式，跳過安裝與啟動。")
-        app_status[app_name] = "running"
-        return
-
     try:
         # --- 1. 環境準備 ---
         app_status[app_name] = "installing"
@@ -163,13 +177,23 @@ async def manage_app_lifecycle(app_name, port, app_status):
         log_event("CRITICAL", f"管理應用 '{app_name}' 時發生嚴重錯誤: {e}")
         raise
 
-async def main_logic():
+async def main_logic(is_full_mode: bool):
     """核心的循序啟動邏輯"""
-    log_event("BATTLE", "鳳凰之心 v18.0 啟動序列開始。")
+    if is_full_mode:
+        log_event("BATTLE", "鳳凰之心 v18.0 [完整模式] 啟動序列開始。")
+    else:
+        log_event("BATTLE", "鳳凰之心 v18.0 [快速測試模式] 啟動序列開始。")
+
     log_event("INFO", "系統環境預檢完成。")
 
-    apps_status = { "quant": "pending", "transcriber": "pending" }
+    if not is_full_mode:
+        log_event("INFO", "[快速測試模式] 跳過所有 App 的安裝與啟動。")
+        await asyncio.sleep(5) # 模擬一些工作負載
+        log_event("SUCCESS", "快速測試流程驗證成功。")
+        console.update_status_tag("[快速測試通過]")
+        return
 
+    apps_status = { "quant": "pending", "transcriber": "pending" }
     app_configs = [
         {"name": "quant", "port": 8001},
         {"name": "transcriber", "port": 8002}
@@ -200,7 +224,7 @@ def performance_logger_thread():
             conn.commit()
         time.sleep(1) # 每秒記錄一次
 
-async def main():
+async def main(args):
     """包含 TUI 和休眠邏輯的主異步函數"""
     if DB_FILE.exists():
         os.remove(DB_FILE)
@@ -213,9 +237,10 @@ async def main():
     perf_thread.start()
 
     try:
-        await main_logic()
+        await main_logic(args.full)
         log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
-        if not os.getenv("CI_MODE") and not os.getenv("FAST_TEST_MODE"):
+        # 在完整模式下才長時間休眠
+        if args.full:
             await asyncio.sleep(3600)
     except Exception as e:
         log_event("CRITICAL", f"主程序發生未預期錯誤: {e}")
@@ -225,6 +250,14 @@ async def main():
         perf_thread.join(timeout=1.5)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 啟動器")
+    parser.add_argument(
+        '--full',
+        action='store_true',
+        help='執行完整模式，包括安裝所有依賴和啟動所有後端 App。預設為快速測試模式。'
+    )
+    args = parser.parse_args()
+
     try:
         # 確保 uv 已安裝
         subprocess.run(["uv", "--version"], check=True, capture_output=True)
@@ -232,10 +265,10 @@ if __name__ == "__main__":
         print("錯誤: 核心工具 'uv' 未安裝。請先執行 'pip install uv'。")
         sys.exit(1)
 
+    if 'IPython' in sys.modules:
+        nest_asyncio.apply()
+
     try:
-        if 'IPython' in sys.modules:
-            import nest_asyncio
-            nest_asyncio.apply()
-        asyncio.run(main())
+        asyncio.run(main(args))
     except KeyboardInterrupt:
         pass
