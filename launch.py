@@ -11,6 +11,7 @@ from datetime import datetime
 import shlex
 import threading
 import argparse
+import signal
 
 # --- 依賴預檢和自動安裝 ---
 try:
@@ -277,6 +278,13 @@ async def main_logic(config: dict):
         log_event("SUCCESS", "所有核心服務已成功啟動。")
         console.update_status_tag("[服務運行中]")
         update_status(stage="服務運行中")
+        # 在完整模式下才長時間休眠
+        if not config.get("FAST_TEST_MODE", True):
+            log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                log_event("INFO", "系統待命狀態被中斷。")
     else:
         log_event("ERROR", "部分服務啟動失敗，請檢查日誌。")
         console.update_status_tag("[啟動失敗]")
@@ -374,12 +382,24 @@ async def main(db_path: Path):
     # 建立 API 伺服器任務
     api_task = asyncio.create_task(run_api_server())
 
+    # 將主邏輯包裝成一個任務，以便可以取消它
+    main_logic_task = asyncio.create_task(main_logic(config))
+
+    # --- 優雅關閉處理 ---
+    loop = asyncio.get_running_loop()
+    def shutdown_handler(sig):
+        log_event("INFO", f"接收到關閉信號 {sig.name}。正在取消主任務...")
+        if not main_logic_task.done():
+            main_logic_task.cancel()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, shutdown_handler, sig)
+    # --- 優雅關閉處理結束 ---
+
     try:
-        await main_logic(config)
-        log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
-        # 在完整模式下才長時間休眠
-        if not config.get("FAST_TEST_MODE", True):
-            await asyncio.sleep(3600)
+        await main_logic_task
+    except asyncio.CancelledError:
+        log_event("INFO", "主任務已被取消。")
     except Exception as e:
         log_event("CRITICAL", f"主程序發生未預期錯誤: {e}")
     finally:
@@ -388,7 +408,8 @@ async def main(db_path: Path):
         perf_thread.join(timeout=1.5)
 
         # 停止 API 伺服器
-        api_task.cancel()
+        if not api_task.done():
+            api_task.cancel()
         await asyncio.sleep(0.1) # 給予取消操作一點時間
 
         # --- 報告生成 ---
