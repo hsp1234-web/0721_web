@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab HTML 指揮中心 V18 (優雅關閉 & 中文化報告)              ║
+# ║      🚀 Colab HTML 指揮中心 V19 (穩定版)                           ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
-# ║   V18 更新日誌:                                                      ║
+# ║   V19 更新日誌:                                                      ║
 # ║   - 實作優雅關閉機制，確保手動中斷時能完整生成報告。             ║
 # ║   - 將最終產生的報告檔案名稱中文化。                             ║
 # ║   - 修正 Colab 代理 URL 在特定環境下的生成錯誤。                   ║
@@ -37,7 +37,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
     import yaml
 
-#@title 💎 鳳凰之心指揮中心 V17 (趨勢圖版) { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心指揮中心 V19 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
@@ -314,15 +314,6 @@ def render_dashboard_html():
                         </table>
                     </div>
                 </div>
-                <div class="panel">
-                    <div class="title">效能趨勢 (文字圖)</div>
-                    <div class="content">
-                        <table>
-                            <tr><td>CPU</td><td id="cpu-trend">等待數據...</td></tr>
-                            <tr><td>RAM</td><td id="ram-trend">等待數據...</td></tr>
-                        </table>
-                    </div>
-                </div>
             </div>
             <div class="panel">
                 <div class="title">啟動程序日誌</div>
@@ -347,21 +338,6 @@ def render_dashboard_html():
         }};
         const apiUrl = 'http://localhost:8088/api/v1/status';
 
-        function generateSparkline(data, ticks = ' ▂▃▄▅▆▇█') {{
-            if (!data || data.length === 0) return '';
-            const min = Math.min(...data);
-            const max = Math.max(...data);
-            const range = max - min;
-            if (range === 0) {{
-                return data.map(() => ticks[Math.floor(ticks.length / 2)]).join('');
-            }}
-            const scale = (val) => {{
-                let index = Math.floor(((val - min) / range) * (ticks.length - 1));
-                return ticks[index];
-            }};
-            return data.map(scale).join('');
-        }}
-
         function updateDashboard() {{
             fetch(apiUrl)
                 .then(response => {{
@@ -374,24 +350,6 @@ def render_dashboard_html():
                     // 更新系統資源
                     document.getElementById('cpu-usage').textContent = `${{data.status.cpu_usage ? data.status.cpu_usage.toFixed(1) : '0.0'}}%`;
                     document.getElementById('ram-usage').textContent = `${{data.status.ram_usage ? data.status.ram_usage.toFixed(1) : '0.0'}}%`;
-
-                    // 更新效能趨勢圖
-                    const history = data.performance_history || [];
-                    const cpuHistory = history.map(h => h.cpu_usage).filter(v => v !== null && v !== undefined);
-                    const ramHistory = history.map(h => h.ram_usage).filter(v => v !== null && v !== undefined);
-
-                    const cpuTrendEl = document.getElementById('cpu-trend');
-                    const ramTrendEl = document.getElementById('ram-trend');
-
-                    const cpuSparkline = generateSparkline(cpuHistory);
-                    if (cpuSparkline) {{
-                        cpuTrendEl.textContent = cpuSparkline;
-                    }}
-
-                    const ramSparkline = generateSparkline(ramHistory);
-                    if (ramSparkline) {{
-                        ramTrendEl.textContent = ramSparkline;
-                    }}
 
                     // 更新微服務狀態
                     const appStatusTable = document.getElementById('app-status-table').querySelector('tbody');
@@ -474,33 +432,14 @@ def final_report_processing(project_path, archive_folder_name, timezone_str):
         update_status(log=f"⚠️ 找不到日誌目錄 {logs_dir}，跳過報告處理。")
         return
 
-    # --- 1. 報告檔名中文化 ---
-    update_status(task="報告中文化", log="正在將報告檔案重新命名為繁體中文...")
-    rename_map = {
-        "summary_report.md": "任務總結報告.md",
-        "performance_report.md": "效能分析報告.md",
-        "detailed_log_report.md": "詳細日誌報告.md"
-    }
-    renamed_files = []
-    for old_name, new_name in rename_map.items():
-        old_path = logs_dir / old_name
-        new_path = logs_dir / new_name
-        if old_path.exists():
-            try:
-                old_path.rename(new_path)
-                update_status(log=f"  - 已重新命名: {old_name} -> {new_name}")
-                renamed_files.append(new_name)
-            except Exception as e:
-                update_status(log=f"  - ❌ 重新命名失敗: {e}")
-        else:
-            update_status(log=f"  - 警告: 找不到原始報告檔案 {old_name}")
-
-    # --- 2. 整合報告生成 ---
+    # --- 1. 整合報告生成 (從原始英文檔案) ---
     update_status(task="生成整合報告", log="正在合併報告分卷...")
+    original_reports = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
+    consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告產生時間:** {datetime.now(pytz.timezone(timezone_str)).isoformat()}\n\n---\n\n"
+    final_report_path = project_path / "最終運行報告.md"
+
     try:
-        # 使用已重新命名的中文檔案來生成整合報告
-        consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告產生時間:** {datetime.now(pytz.timezone(timezone_str)).isoformat()}\n\n---\n\n"
-        for report_file in renamed_files:
+        for report_file in original_reports:
             report_path = logs_dir / report_file
             if report_path.exists():
                 consolidated_content += f"## 原始報告: {report_file}\n\n"
@@ -508,13 +447,33 @@ def final_report_processing(project_path, archive_folder_name, timezone_str):
                 consolidated_content += "\n\n---\n\n"
 
         if len(consolidated_content) > 200:
-            final_report_path = project_path / "最終運行報告.md" # 整合報告也使用中文名
             final_report_path.write_text(consolidated_content, encoding='utf-8')
             update_status(log="✅ 整合報告已生成: 最終運行報告.md")
         else:
             update_status(log="沒有足夠的報告分卷來生成整合報告。")
     except Exception as e:
         update_status(log=f"❌ 生成整合報告時發生錯誤: {e}")
+
+    # --- 2. 報告檔名中文化 ---
+    update_status(task="報告中文化", log="正在將報告檔案重新命名為繁體中文...")
+    rename_map = {
+        "summary_report.md": "任務總結報告.md",
+        "performance_report.md": "效能分析報告.md",
+        "detailed_log_report.md": "詳細日誌報告.md"
+    }
+    renamed_paths_for_archive = []
+    for old_name, new_name in rename_map.items():
+        old_path = logs_dir / old_name
+        new_path = logs_dir / new_name
+        if old_path.exists():
+            try:
+                old_path.rename(new_path)
+                update_status(log=f"  - 已重新命名: {old_name} -> {new_name}")
+                renamed_paths_for_archive.append(new_path)
+            except Exception as e:
+                update_status(log=f"  - ❌ 重新命名失敗: {e}")
+        else:
+            update_status(log=f"  - 警告: 找不到原始報告檔案 {old_name}，無法重新命名。")
 
     # --- 3. 歸檔 ---
     if not archive_folder_name:
@@ -529,20 +488,30 @@ def final_report_processing(project_path, archive_folder_name, timezone_str):
         archive_target_path.mkdir()
 
         update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告至: {archive_target_path}")
-        # 不再使用 glob，因為它對非 ASCII 字元的處理可能不可靠。
-        # 改為使用我們在重新命名步驟中建立的 `renamed_files` 列表，這樣更穩健。
-        files_to_archive = [logs_dir / f for f in renamed_files]
+
+        # 建立一個包含所有要歸檔檔案的列表
+        files_to_archive = renamed_paths_for_archive
+        if final_report_path.exists():
+            files_to_archive.append(final_report_path)
+
         for source_file in files_to_archive:
             if source_file.exists():
+                # shutil.move 需要字串路徑
                 shutil.move(str(source_file), str(archive_target_path / source_file.name))
                 update_status(log=f"  - 已移動: {source_file.name}")
+
+        # 如果整合報告不在 project_path, 也要檢查 logs/
+        if not final_report_path.exists() and (logs_dir / final_report_path.name).exists():
+             shutil.move(str(logs_dir / final_report_path.name), str(archive_target_path / final_report_path.name))
+             update_status(log=f"  - 已移動: {final_report_path.name}")
+
         update_status(log="✅ 報告歸檔完成。")
     except Exception as e:
         update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
 
 
 def main():
-    update_status(log="指揮中心 V17 (API驅動版) 啟動。")
+    update_status(log="指揮中心 V19 (API驅動版) 啟動。")
 
     clear_output(wait=True)
     display(HTML(render_dashboard_html()))

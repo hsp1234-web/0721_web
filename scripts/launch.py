@@ -309,14 +309,12 @@ async def main_logic(config: dict):
         update_status(stage="主儀表板運行中，準備啟動背景服務")
 
         # --- Colab 代理 URL 生成 ---
-        # 進行更嚴格的檢查，確保不僅在 Colab 環境中，而且 `google.colab.output` 和其必要的功能都真實可用
         if ('google.colab' in sys.modules or 'COLAB_GPU' in os.environ):
             log_event("INFO", "偵測到 Colab 環境，正在嘗試生成主儀表板的公開代理 URL...")
             try:
+                # 整個區塊使用 try...except 包裹，確保任何來自 google.colab 模組的錯誤都不會中斷主程序
                 from google.colab import output
-                # 檢查 output 和 eval_js 是否真實可用
                 if output and hasattr(output, 'eval_js') and callable(output.eval_js):
-                    # 使用更安全的 JS 呼叫，在 JS 端檢查 kernel 物件是否存在，避免 Python 端發生錯誤
                     js_code = f"(window.google && google.colab && google.colab.kernel) ? google.colab.kernel.proxyPort({dashboard_config['port']}) : null"
                     proxy_url = output.eval_js(js_code)
 
@@ -324,11 +322,12 @@ async def main_logic(config: dict):
                         log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
                         update_status(url=proxy_url)
                     else:
-                        log_event("WARN", "無法生成 Colab 代理 URL，可能是因為 kernel 尚未完全初始化。")
+                        log_event("WARN", "無法生成 Colab 代理 URL，可能是因為 kernel 尚未完全初始化或功能不完整。")
                 else:
                     log_event("WARN", "Colab `output` 模組可用，但其功能不完整，跳過代理 URL 生成。")
             except Exception as e:
-                log_event("ERROR", f"生成 Colab 代理 URL 時發生錯誤: {e}")
+                # 捕獲所有可能的異常，記錄錯誤，然後繼續執行，確保主程序穩定性
+                log_event("CRITICAL", f"生成 Colab 代理 URL 時發生了未預期的嚴重錯誤: {e}")
         # --- Colab 代理 URL 生成結束 ---
 
     except Exception as e:
@@ -560,19 +559,22 @@ async def main(db_path: Path):
                 ]
                 log_event("CMD", f"Executing: {' '.join(report_cmd)}")
                 result = subprocess.run(report_cmd, capture_output=True, text=True, encoding='utf-8')
+                log_event("INFO", f"報告生成腳本執行完畢，返回碼: {result.returncode}")
 
-                for line in result.stdout.strip().split('\n'):
-                    if line:
-                        log_event("INFO", f"[ReportGenerator] {line}")
+                # 無論成功或失敗，都記錄 stdout 和 stderr
+                if result.stdout:
+                    for line in result.stdout.strip().split('\n'):
+                        if line:
+                            log_event("INFO", f"[ReportGenerator-STDOUT] {line}")
+                if result.stderr:
+                    for line in result.stderr.strip().split('\n'):
+                        if line:
+                            log_event("ERROR", f"[ReportGenerator-STDERR] {line}")
 
                 if result.returncode == 0:
                     log_event("SUCCESS", "所有報告已成功生成。")
                 else:
-                    log_event("ERROR", "報告生成腳本執行失敗。")
-                    if result.stderr:
-                         for line in result.stderr.strip().split('\n'):
-                            if line:
-                                log_event("ERROR", f"[ReportGenerator] {line}")
+                    log_event("ERROR", "報告生成腳本執行失敗。將以錯誤碼退出。")
                     sys.exit(1) # 報告生成失敗，以錯誤碼退出
 
         except Exception as e:
