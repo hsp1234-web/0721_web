@@ -3,13 +3,11 @@
 核心工具：安全安裝器 (Safe Installer)
 """
 import logging
-import os
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 from .resource_monitor import is_resource_sufficient, load_resource_settings
 

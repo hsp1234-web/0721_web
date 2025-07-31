@@ -9,6 +9,27 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+import time
+import sqlite3
+import json
+from IPython.display import display, HTML, clear_output
+import pytz
+from datetime import datetime
+import threading
+from collections import deque
+try:
+    import yaml
+except ImportError:
+    # Colab 環境通常預裝了，但以防萬一
+    print("正在安裝 PyYAML...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
+    import yaml
+
 #@title 💎 鳳凰之心指揮中心 V17 (趨勢圖版) { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
@@ -60,26 +81,6 @@ SHOW_LOG_LEVEL_PERF = False #@param {type:"boolean"}
 # ==============================================================================
 # 🚀 核心邏輯
 # ==============================================================================
-import os
-import sys
-import shutil
-import subprocess
-from pathlib import Path
-import time
-import sqlite3
-import json
-from IPython.display import display, HTML, clear_output
-import pytz
-from datetime import datetime
-import threading
-from collections import deque
-try:
-    import yaml
-except ImportError:
-    # Colab 環境通常預裝了，但以防萬一
-    print("正在安裝 PyYAML...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
-    import yaml
 
 # --- 共享狀態 ---
 shared_status = {
@@ -113,12 +114,12 @@ def background_worker():
         # --- 步驟 1: 準備專案環境 ---
         update_status(task="準備專案環境")
         if FORCE_REPO_REFRESH and project_path.exists():
-            update_status(log=f"偵測到強制刷新，正在刪除舊的專案資料夾...")
+            update_status(log="偵測到強制刷新，正在刪除舊的專案資料夾...")
             shutil.rmtree(project_path)
             update_status(log="✅ 舊資料夾已刪除。")
 
         if not project_path.exists():
-            update_status(log=f"正在從 Github 下載程式碼...")
+            update_status(log="正在從 Github 下載程式碼...")
             process = subprocess.run(
                 ["git", "clone", "--depth", "1", "--branch", TARGET_BRANCH_OR_TAG, REPOSITORY_URL, str(project_path)],
                 capture_output=True, text=True
@@ -154,7 +155,7 @@ def background_worker():
         config_file = project_path / "config.json"
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=4, ensure_ascii=False)
-        update_status(log=f"✅ Colab 設定檔 (config.json) 已生成。")
+        update_status(log="✅ Colab 設定檔 (config.json) 已生成。")
 
         # --- 步驟 2.5: 同步後端設定檔 ---
         update_status(task="同步後端設定檔")
@@ -492,7 +493,7 @@ def main():
                 if len(consolidated_content) > 200: # 確保有內容可寫
                     final_report_path = project_path / "final_run_report.md" # 存在根目錄
                     final_report_path.write_text(consolidated_content, encoding='utf-8')
-                    update_status(log=f"✅ 整合報告已生成: final_run_report.md")
+                    update_status(log="✅ 整合報告已生成: final_run_report.md")
                 else:
                     update_status(log="沒有足夠的報告分卷來生成整合報告。")
 

@@ -338,7 +338,8 @@ def run_general_tests():
     general_test_files = [
         "tests/test_resource_protection.py",
         "tests/test_e2e_dashboard.py",
-        "tests/test_launch_installer.py" # 也將這個納入通用測試
+        "tests/test_launch_installer.py", # 也將這個納入通用測試
+        "tests/test_estimate_deps_size.py" # 新增的依賴分析工具測試
     ]
 
     # 檢查檔案是否存在

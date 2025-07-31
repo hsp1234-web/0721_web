@@ -5,7 +5,7 @@
 import time
 import threading
 from collections import deque
-from IPython.display import display, clear_output
+from IPython.display import clear_output
 import psutil
 import datetime
 

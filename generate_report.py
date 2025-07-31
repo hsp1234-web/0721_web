@@ -110,7 +110,6 @@ class ReportGenerator:
         events = []
         # 使用正則表達式來捕捉更通用的模式
         start_pattern = r"開始為 (.*) 安裝"
-        end_pattern = r"\[(.*)\] 所有依賴已成功安裝"
 
         # 尋找安裝任務
         for index, log in task_logs.iterrows():
@@ -145,7 +144,8 @@ class ReportGenerator:
 
     def _generate_summary_report(self, top_events: pd.DataFrame) -> str:
         """生成綜合戰情簡報"""
-        if self.df.empty: return "# 綜合戰情簡報\n\n無數據。"
+        if self.df.empty:
+            return "# 綜合戰情簡報\n\n無數據。"
 
         # 效能摘要
         perf_df = self.df[self.df['level'] == 'PERF'].copy()
@@ -197,10 +197,12 @@ class ReportGenerator:
 
     def _generate_performance_report(self) -> str:
         """生成詳細效能報告"""
-        if self.df.empty: return "# 效能分析報告\n\n無數據。"
+        if self.df.empty:
+            return "# 效能分析報告\n\n無數據。"
 
         perf_df = self.df[self.df['level'] == 'PERF'].copy()
-        if perf_df.empty: return "# 效能分析報告\n\n無效能數據。"
+        if perf_df.empty:
+            return "# 效能分析報告\n\n無效能數據。"
 
         summary = {
             'CPU 使用率': (perf_df['cpu_usage'].mean(), perf_df['cpu_usage'].max(), perf_df['cpu_usage'].min()),
@@ -231,10 +233,12 @@ class ReportGenerator:
 
     def _generate_log_report(self) -> str:
         """生成詳細日誌報告"""
-        if self.df.empty: return "# 詳細日誌報告\n\n無數據。"
+        if self.df.empty:
+            return "# 詳細日誌報告\n\n無數據。"
 
         log_df = self.df[self.df['level'] != 'PERF']
-        if log_df.empty: return "# 詳細日誌報告\n\n無日誌數據。"
+        if log_df.empty:
+            return "# 詳細日誌報告\n\n無日誌數據。"
 
         md = f"""# 📝 詳細日誌報告
 
@@ -251,9 +255,7 @@ class ReportGenerator:
 if __name__ == "__main__":
     # 確保腳本執行時，其相依的核心套件都已安裝
     try:
-        import pandas
         import pytz
-        import tabulate
     except ImportError:
         print("偵測到缺少報告生成所需的核心依賴，請先執行：")
         print("pip install pandas pytz tabulate")
