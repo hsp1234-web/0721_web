@@ -316,9 +316,15 @@ async def main_logic(config: dict):
                 from google.colab import output
                 # 檢查 output 和 eval_js 是否真實可用
                 if output and hasattr(output, 'eval_js') and callable(output.eval_js):
-                    proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
-                    log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
-                    update_status(url=proxy_url)
+                    # 使用更安全的 JS 呼叫，在 JS 端檢查 kernel 物件是否存在，避免 Python 端發生錯誤
+                    js_code = f"(window.google && google.colab && google.colab.kernel) ? google.colab.kernel.proxyPort({dashboard_config['port']}) : null"
+                    proxy_url = output.eval_js(js_code)
+
+                    if proxy_url:
+                        log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
+                        update_status(url=proxy_url)
+                    else:
+                        log_event("WARN", "無法生成 Colab 代理 URL，可能是因為 kernel 尚未完全初始化。")
                 else:
                     log_event("WARN", "Colab `output` 模組可用，但其功能不完整，跳過代理 URL 生成。")
             except Exception as e:

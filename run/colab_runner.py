@@ -45,7 +45,7 @@ except ImportError:
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.5.1" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.5.2" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -250,6 +250,27 @@ def render_dashboard_html():
         .log-level-ERROR, .log-level-CRITICAL { color: #ff5370; }
         .log-level-INFO { color: #89ddff; }
         .log-level-WARN { color: #ffcb6b; }
+        .colab-link-panel {
+            display: none; /* 預設隱藏 */
+            padding: 0.8em;
+            margin-bottom: 1em;
+            background-color: #2c3e50;
+            border: 1px solid #3498db;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 1.1em;
+        }
+        .colab-link-panel strong {
+            color: #ffffff;
+        }
+        .colab-link-panel a {
+            color: #f1c40f;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        .colab-link-panel a:hover {
+            text-decoration: underline;
+        }
         #entry-point-panel {
             display: none; /* 預設隱藏 */
             grid-column: 1 / -1; /* 橫跨所有欄 */
@@ -275,6 +296,9 @@ def render_dashboard_html():
 
     html_body = """
     <div class="container">
+        <div id="colab-link-container" class="colab-link-panel">
+             🔗 <strong>Colab 代理連結:</strong> <a href="#" id="colab-proxy-link" target="_blank">正在生成中...</a>
+        </div>
         <div class="grid">
             <div>
                 <div class="panel">
@@ -313,7 +337,8 @@ def render_dashboard_html():
     </div>
     """
 
-    javascript = f"""
+    # 使用 .format() 方法，並對所有 JS 的大括號進行轉義 ({{ ... }})
+    javascript = """
     <script type="text/javascript">
         const statusMap = {{
             "running": "🟢 運行中", "pending": "🟡 等待中",
@@ -321,6 +346,21 @@ def render_dashboard_html():
             "failed": "🔴 失敗", "unknown": "❓ 未知"
         }};
         const apiUrl = 'http://localhost:8088/api/v1/status';
+
+        function generateSparkline(data, ticks = ' ▂▃▄▅▆▇█') {{
+            if (!data || data.length === 0) return '';
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const range = max - min;
+            if (range === 0) {{
+                return data.map(() => ticks[Math.floor(ticks.length / 2)]).join('');
+            }}
+            const scale = (val) => {{
+                let index = Math.floor(((val - min) / range) * (ticks.length - 1));
+                return ticks[index];
+            }};
+            return data.map(scale).join('');
+        }}
 
         function updateDashboard() {{
             fetch(apiUrl)
@@ -334,6 +374,24 @@ def render_dashboard_html():
                     // 更新系統資源
                     document.getElementById('cpu-usage').textContent = `${{data.status.cpu_usage ? data.status.cpu_usage.toFixed(1) : '0.0'}}%`;
                     document.getElementById('ram-usage').textContent = `${{data.status.ram_usage ? data.status.ram_usage.toFixed(1) : '0.0'}}%`;
+
+                    // 更新效能趨勢圖
+                    const history = data.performance_history || [];
+                    const cpuHistory = history.map(h => h.cpu_usage).filter(v => v !== null && v !== undefined);
+                    const ramHistory = history.map(h => h.ram_usage).filter(v => v !== null && v !== undefined);
+
+                    const cpuTrendEl = document.getElementById('cpu-trend');
+                    const ramTrendEl = document.getElementById('ram-trend');
+
+                    const cpuSparkline = generateSparkline(cpuHistory);
+                    if (cpuSparkline) {{
+                        cpuTrendEl.textContent = cpuSparkline;
+                    }}
+
+                    const ramSparkline = generateSparkline(ramHistory);
+                    if (ramSparkline) {{
+                        ramTrendEl.textContent = ramSparkline;
+                    }}
 
                     // 更新微服務狀態
                     const appStatusTable = document.getElementById('app-status-table').querySelector('tbody');
@@ -371,15 +429,24 @@ def render_dashboard_html():
                     const footer = document.getElementById('footer-status');
                     const entryPointPanel = document.getElementById('entry-point-panel');
                     const entryPointButton = document.getElementById('entry-point-button');
+                    const colabLinkContainer = document.getElementById('colab-link-container');
+                    const colabProxyLink = document.getElementById('colab-proxy-link');
 
                     if (data.status.action_url) {{
-                        // 當 URL 可用時，顯示主控台入口面板
+                        // --- 更新 Colab 代理連結 ---
+                        colabLinkContainer.style.display = 'block';
+                        colabProxyLink.href = data.status.action_url;
+                        colabProxyLink.textContent = data.status.action_url;
+
+                        // --- 更新舊的主控台入口 (保持相容) ---
                         entryPointPanel.style.display = 'block';
                         entryPointButton.href = data.status.action_url;
+
                         // 頁腳可以顯示最終狀態
                         footer.textContent = `指揮中心後端任務: ${{data.status.current_stage || '所有服務運行中'}}`;
                     }} else {{
                         // URL 不可用時，隱藏面板並在頁腳顯示進度
+                        colabLinkContainer.style.display = 'none';
                         entryPointPanel.style.display = 'none';
                         footer.textContent = `指揮中心後端任務: ${{data.status.current_stage || '執行中...'}}`;
                     }}
@@ -394,7 +461,7 @@ def render_dashboard_html():
         updateDashboard();
         setInterval(updateDashboard, {refresh_interval_ms});
     </script>
-    """
+    """.format(refresh_interval_ms=refresh_interval_ms)
     return css + html_body + javascript
 
 def final_report_processing(project_path, archive_folder_name, timezone_str):
@@ -529,6 +596,9 @@ def main():
 
         # 將報告處理邏輯統一到一個函式中
         final_report_processing(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
+
+        # 加入一個短暫的延遲，給予前端最後一次機會輪詢 API 以更新最終狀態 (例如 "報告已歸檔")
+        time.sleep(2)
 
         # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
         # 我們只打印一個最終訊息。
