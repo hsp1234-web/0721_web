@@ -514,23 +514,39 @@ async def main(db_path: Path):
         # --- 報告生成 ---
         log_event("INFO", "開始生成最終報告...")
         try:
+            # 步驟 1: 安裝報告生成腳本的依賴
+            report_deps = ["pandas", "pytz", "sparklines", "tabulate"]
+            log_event("INFO", f"正在為報告生成器安裝依賴: {', '.join(report_deps)}")
+            install_cmd = [sys.executable, "-m", "pip", "install", "-q", *report_deps]
+            dep_result = subprocess.run(install_cmd, capture_output=True, text=True, encoding='utf-8')
+
+            if dep_result.returncode != 0:
+                log_event("ERROR", "報告生成器依賴安裝失敗。")
+                if dep_result.stderr:
+                    for line in dep_result.stderr.strip().split('\n'):
+                        if line:
+                            log_event("ERROR", f"[PipInstaller] {line}")
+                sys.exit(1) # 依賴安裝失敗，以錯誤碼退出
+
+            log_event("SUCCESS", "報告生成器依賴已就緒。")
+
+            # 步驟 2: 執行報告生成腳本
             config_path = Path("config.json")
             if not config_path.exists():
                 log_event("WARN", "找不到設定檔 (config.json)，無法生成報告。")
+                sys.exit(1) # 設定檔缺失，視為錯誤
             elif not DB_FILE.exists():
                 log_event("WARN", f"找不到資料庫檔案 ({DB_FILE})，無法生成報告。")
+                sys.exit(1) # 資料庫缺失，視為錯誤
             else:
                 report_cmd = [
-                    sys.executable, "generate_report.py",
+                    sys.executable, "scripts/generate_report.py",
                     "--db-file", str(DB_FILE),
                     "--config-file", str(config_path)
                 ]
                 log_event("CMD", f"Executing: {' '.join(report_cmd)}")
-                # 使用 subprocess.run 執行，因為這是在主程序結束時
-                # 我們希望它同步執行並看到其輸出
                 result = subprocess.run(report_cmd, capture_output=True, text=True, encoding='utf-8')
 
-                # 將報告生成腳本的輸出也記錄到主日誌中
                 for line in result.stdout.strip().split('\n'):
                     if line:
                         log_event("INFO", f"[ReportGenerator] {line}")
@@ -543,9 +559,11 @@ async def main(db_path: Path):
                          for line in result.stderr.strip().split('\n'):
                             if line:
                                 log_event("ERROR", f"[ReportGenerator] {line}")
+                    sys.exit(1) # 報告生成失敗，以錯誤碼退出
 
         except Exception as e:
             log_event("CRITICAL", f"調用報告生成腳本時發生嚴重錯誤: {e}")
+            sys.exit(1) # 發生未預期異常，以錯誤碼退出
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 後端啟動器")

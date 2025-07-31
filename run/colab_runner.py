@@ -398,7 +398,8 @@ def archive_reports(project_path, archive_folder_name, timezone_str):
         archive_target_path.mkdir()
 
         source_reports_path = project_path / "logs"
-        report_files = ["綜合戰情簡報.md", "效能分析報告.md", "詳細日誌報告.md"]
+        # The generated filenames are in English.
+        report_files = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
 
         update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告至: {archive_target_path}")
         for report_name in report_files:
@@ -478,7 +479,8 @@ def main():
             update_status(task="生成整合報告", log="正在合併報告分卷...")
             try:
                 logs_dir = project_path / "logs"
-                report_files = ["綜合戰情簡報.md", "效能分析報告.md", "詳細日誌報告.md"]
+                # The generated filenames are in English.
+                report_files = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
                 consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告生成時間:** {datetime.now(pytz.timezone(TIMEZONE)).isoformat()}\n\n---\n\n"
 
                 for report_file in report_files:
