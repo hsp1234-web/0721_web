@@ -253,18 +253,31 @@ class ReportGenerator:
         return md.strip()
 
 if __name__ == "__main__":
-    # 確保腳本執行時，其相依的核心套件都已安裝
     try:
-        import pytz
-    except ImportError:
-        print("偵測到缺少報告生成所需的核心依賴，請先執行：")
-        print("pip install pandas pytz tabulate")
+        # 確保腳本執行時，其相依的核心套件都已安裝
+        try:
+            import pandas
+            import pytz
+            import sparklines
+            import tabulate
+        except ImportError as e:
+            print(f"❌ 錯誤：缺少報告生成所需的依賴套件: {e}", file=sys.stderr)
+            print("請確保已安裝 pandas, pytz, sparklines, tabulate。", file=sys.stderr)
+            sys.exit(1)
+
+        parser = argparse.ArgumentParser(description="鳳凰之心 V16 報告生成器")
+        parser.add_argument("--db-file", type=Path, required=True, help="來源 SQLite 資料庫的路徑")
+        parser.add_argument("--config-file", type=Path, required=True, help="對應的 JSON 設定檔路徑")
+        args = parser.parse_args()
+
+        print("報告生成器已啟動...")
+        generator = ReportGenerator(db_path=args.db_file, config_path=args.config_file)
+        generator.generate_all_reports()
+        print("報告生成器執行完畢。")
+
+    except Exception as e:
+        # 捕獲所有未預期的錯誤，確保不會靜默失敗
+        import traceback
+        print(f"❌ 報告生成腳本發生致命錯誤: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
-
-    parser = argparse.ArgumentParser(description="鳳凰之心 V16 報告生成器")
-    parser.add_argument("--db-file", type=Path, required=True, help="來源 SQLite 資料庫的路徑")
-    parser.add_argument("--config-file", type=Path, required=True, help="對應的 JSON 設定檔路徑")
-    args = parser.parse_args()
-
-    generator = ReportGenerator(db_path=args.db_file, config_path=args.config_file)
-    generator.generate_all_reports()

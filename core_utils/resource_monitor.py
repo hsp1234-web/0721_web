@@ -70,21 +70,20 @@ def is_resource_sufficient(settings: Dict[str, Any]) -> tuple[bool, str]:
     resources = get_system_resources()
     thresholds = settings.get("resource_monitoring", {})
 
-    mem_threshold = thresholds.get("memory_usage_threshold_percent", 75.0)
+    # 根據使用者回饋，為提升在 Colab 等環境的穩定性，已移除記憶體檢查。
+    # mem_threshold = thresholds.get("memory_usage_threshold_percent", 75.0)
     disk_threshold_mb = thresholds.get("min_disk_space_mb", 512)
 
-    mem_ok = resources["memory"]["used_percent"] < mem_threshold
+    # mem_ok = resources["memory"]["used_percent"] < mem_threshold
     disk_ok = resources["disk"]["free_mb"] > disk_threshold_mb
 
-    # 產生詳細的訊息
-    mem_percent = resources["memory"]["used_percent"]
+    # 產生詳細的訊息 (已移除記憶體部分)
     disk_free_mb = resources["disk"]["free_mb"]
     message = (
-        f"Memory: {mem_percent:.1f}% < {mem_threshold:.1f}% -> {'OK' if mem_ok else 'FAIL'}. "
         f"Disk: {disk_free_mb:.0f}MB > {disk_threshold_mb}MB -> {'OK' if disk_ok else 'FAIL'}."
     )
 
-    return mem_ok and disk_ok, message
+    return disk_ok, message
 
 if __name__ == "__main__":
     # 這個區塊允許我們獨立執行此檔案進行快速測試
