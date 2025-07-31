@@ -430,6 +430,27 @@ def render_dashboard_html():
                 }});
         }}
 
+        function triggerShutdown() {
+            if (confirm('您確定要關閉所有後端服務嗎？此操作將會終止所有執行中的任務。')) {
+                document.getElementById('shutdown-button').disabled = true;
+                document.getElementById('shutdown-button').textContent = '正在發送關閉信號...';
+
+                const shutdownUrl = 'http://localhost:8088/api/v1/shutdown';
+                fetch(shutdownUrl, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Shutdown initiated:', data);
+                        // 後續的狀態更新將由儀表板的常規輪詢來處理
+                    })
+                    .catch(error => {
+                        console.error('Error triggering shutdown:', error);
+                        alert('發送關閉信號失敗，請檢查後端日誌。');
+                        document.getElementById('shutdown-button').disabled = false;
+                        document.getElementById('shutdown-button').textContent = '🛑 手動關閉所有服務';
+                    });
+            }
+        }
+
         // 立即執行一次，然後設定定時器
         updateDashboard();
         setInterval(updateDashboard, {refresh_interval_ms});
@@ -542,64 +563,32 @@ def main():
     )
     url_service_thread.start()
 
-    launch_process_local = None
+    # 新的簡化邏輯：前端只負責啟動，並透過長時間 sleep 來保持儲存格運行。
+    # 所有的關閉和清理工作都由後端的 API 觸發和執行。
     try:
-        # 等待背景工作執行緒啟動後端程序
+        # 等待後端程序 handle 被建立
+        launch_process_local = None
         while not launch_process_local:
             with status_lock:
                 launch_process_local = shared_status.get("launch_process")
-                worker_error = shared_status.get("worker_error")
-            if worker_error:
-                raise RuntimeError(f"背景工作執行緒出錯: {worker_error}")
             if not worker_thread.is_alive() and not launch_process_local:
-                raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
+                 raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
             time.sleep(0.5)
 
-        # 進入非阻塞的監控迴圈
-        update_status(log="[前端] 進入主監控迴圈，等待後端程序結束或手動中斷...")
-        while launch_process_local.poll() is None:
-            time.sleep(1)
+        update_status(log="[前端] 後端已啟動，前端進入待命模式。請使用儀表板上的關閉按鈕來結束服務。")
 
-    except KeyboardInterrupt:
-        # 實現即時回饋：使用者按下停止按鈕，立即更新狀態
-        update_status(task="已接收到關閉指令", log="🛑 正在準備終止服務...")
-    except Exception as e:
-        update_status(task="前端偵測到嚴重錯誤", log=f"❌ {e}")
-    finally:
-        with status_lock:
-            launch_process_local = shared_status.get("launch_process")
-            project_path = shared_status.get("project_path")
+        # 進入長時間休眠以保持儲存格運行
+        while True:
+            time.sleep(3600)
 
-        update_status(task="執行最終清理", log="正在準備結束程序...")
-
-        # 確保後端程序被終止
-        if launch_process_local and launch_process_local.poll() is None:
-            update_status(log="...向後端服務發送終止信號 (SIGTERM)...")
-            launch_process_local.terminate()
-
-        # 確保背景工作執行緒也結束
-        worker_thread.join(timeout=5)
-
-        # 等待後端程序完全結束（這一步至關重要，確保報告已生成）
-        if launch_process_local:
-            update_status(log="...等待後端程序完成最終報告生成...")
-            try:
-                launch_process_local.wait(timeout=20) # 給予足夠時間生成報告
-                update_status(log=f"✅ 後端服務已確認結束 (返回碼: {launch_process_local.poll()})。")
-            except subprocess.TimeoutExpired:
-                update_status(log="⚠️ 等待後端服務超時，將強制終結 (SIGKILL)。")
-                launch_process_local.kill()
-
-        # 現在後端已結束，執行前端的歸檔任務
-        final_report_processing(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
-
-        # 加入一個短暫的延遲，給予前端最後一次機會輪詢 API 以更新最終狀態 (例如 "報告已歸檔")
-        time.sleep(2)
-
-        # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
-        # 我們只打印一個最終訊息。
-        final_message = f"✅ [{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 所有程序已順利結束。"
-        print(f"\n{final_message}")
+    except (KeyboardInterrupt, Exception) as e:
+        # 即使被手動中斷，我們也不再執行複雜的清理邏輯。
+        # 而是提示使用者使用 UI 按鈕。
+        print("\n" + "="*80)
+        print("🛑 前端 runner 已被手動中斷。")
+        print("   請注意：這不會優雅地關閉後端服務或生成報告。")
+        print("   強烈建議使用儀表板上提供的「關閉服務」按鈕來操作。")
+        print("="*80)
 
 def run_main():
     """

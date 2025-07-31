@@ -47,6 +47,9 @@ APPS_DIR = Path("apps")
 # 全域控制台物件
 console = CommanderConsole()
 
+# 全域關閉事件
+shutdown_event = asyncio.Event()
+
 def setup_database():
     """初始化 SQLite 資料庫，建立前端所需的所有表。"""
     with sqlite3.connect(DB_FILE) as conn:
@@ -339,12 +342,13 @@ async def main_logic(config: dict):
         console.update_status_tag("[部分服務失敗]")
         update_status(stage="部分服務失敗")
 
-    # 在完整模式下長時間休眠
-    log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
+    # 進入待命狀態，等待關閉事件
+    log_event("INFO", "任務流程執行完畢，系統進入待命狀態。等待關閉指令...")
     try:
-        await asyncio.sleep(3600)
+        await shutdown_event.wait()
+        log_event("INFO", "關閉事件已觸發，結束待命狀態。")
     except asyncio.CancelledError:
-        log_event("INFO", "系統待命狀態被中斷。")
+        log_event("INFO", "系統待命狀態被外部信號中斷。")
 
 # --- 主程序 ---
 def performance_logger_thread():
@@ -433,10 +437,17 @@ async def get_status_api(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def shutdown_api(request):
+    """API 端點，用於觸發優雅關閉。"""
+    log_event("BATTLE", "接收到 API 關閉指令，準備關閉服務...")
+    shutdown_event.set()
+    return web.json_response({"status": "shutdown_initiated"}, status=200)
+
 async def run_api_server():
     """運行 aiohttp API 伺服器"""
     app = web.Application()
     app.router.add_get("/api/v1/status", get_status_api)
+    app.router.add_post("/api/v1/shutdown", shutdown_api)
     runner = web.AppRunner(app)
     await runner.setup()
     # 使用一個前端不太可能衝突的埠
