@@ -335,9 +335,31 @@ async def get_status_api(request):
             cursor.execute("SELECT * FROM status_table WHERE id = 1")
             status_data = cursor.fetchone()
 
-            # 獲取最新的 20 條日誌
-            cursor.execute("SELECT timestamp, level, message FROM phoenix_logs ORDER BY id DESC LIMIT 20")
-            logs_data = cursor.fetchall()
+            # 獲取日誌等級設定
+            config = load_config()
+            levels_to_show = config.get("LOG_LEVELS_TO_SHOW", {})
+
+            # 預設顯示所有等級，除非設定明確為 False
+            if not levels_to_show:
+                 # 如果 LOG_LEVELS_TO_SHOW 是空的或不存在，則顯示所有等級
+                 allowed_levels_clause = ""
+            else:
+                allowed_levels = [level for level, show in levels_to_show.items() if show]
+                if not allowed_levels:
+                    # 如果所有等級都被設置為 False，則不顯示任何日誌
+                    logs_data = []
+                    allowed_levels_clause = "WHERE 1=0" # A trick to get no results
+                else:
+                    placeholders = ','.join('?' for _ in allowed_levels)
+                    allowed_levels_clause = f"WHERE level IN ({placeholders})"
+
+            if 'logs_data' not in locals():
+                query = f"SELECT timestamp, level, message FROM phoenix_logs {allowed_levels_clause} ORDER BY id DESC LIMIT 20"
+                if allowed_levels_clause and "WHERE 1=0" not in allowed_levels_clause:
+                    cursor.execute(query, allowed_levels)
+                else:
+                    cursor.execute(query)
+                logs_data = cursor.fetchall()
 
         if not status_data:
             return web.json_response({"error": "Status not found"}, status=404)

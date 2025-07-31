@@ -43,6 +43,17 @@ FAST_TEST_MODE = True #@param {type:"boolean"}
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
 #@markdown > **注意：執行結束後若看到 `SystemExit: 0`，此為程式正常結束的預期提示，代表所有任務已順利完成，請放心。**
 #@markdown ---
+#@markdown ### **Part 3: 日誌顯示設定**
+#@markdown > **選擇您想在儀表板上看到的日誌等級。**
+SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_SUCCESS = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_INFO = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_CMD = False #@param {type:"boolean"}
+SHOW_LOG_LEVEL_SHELL = False #@param {type:"boolean"}
+SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_PERF = False #@param {type:"boolean"}
+#@markdown ---
 
 # ==============================================================================
 # 🚀 核心邏輯
@@ -118,12 +129,24 @@ def background_worker():
 
         # --- 步驟 2: 生成設定檔 ---
         update_status(task="生成專案設定檔")
+        log_levels_to_show = {
+            "BATTLE": SHOW_LOG_LEVEL_BATTLE,
+            "SUCCESS": SHOW_LOG_LEVEL_SUCCESS,
+            "INFO": SHOW_LOG_LEVEL_INFO,
+            "CMD": SHOW_LOG_LEVEL_CMD,
+            "SHELL": SHOW_LOG_LEVEL_SHELL,
+            "ERROR": SHOW_LOG_LEVEL_ERROR,
+            "CRITICAL": SHOW_LOG_LEVEL_CRITICAL,
+            "PERF": SHOW_LOG_LEVEL_PERF,
+        }
+
         config_data = {
             "REFRESH_RATE_SECONDS": REFRESH_RATE_SECONDS,
             "LOG_DISPLAY_LINES": LOG_DISPLAY_LINES,
             "LOG_ARCHIVE_FOLDER_NAME": LOG_ARCHIVE_FOLDER_NAME,
             "TIMEZONE": TIMEZONE,
-            "FAST_TEST_MODE": FAST_TEST_MODE
+            "FAST_TEST_MODE": FAST_TEST_MODE,
+            "LOG_LEVELS_TO_SHOW": {level: show for level, show in log_levels_to_show.items() if show}
         }
         config_file = project_path / "config.json"
         with open(config_file, "w", encoding="utf-8") as f:
