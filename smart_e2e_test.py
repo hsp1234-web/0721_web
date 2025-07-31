@@ -288,6 +288,40 @@ def test_database_driven_flow():
     return True
 
 
+def run_general_tests():
+    """執行不屬於任何特定 App 的通用測試和 E2E 測試。"""
+    print_header("步驟 5: 執行通用與端對端(E2E)測試")
+
+    # 為了讓 pytest 能找到專案的模組 (如 core_utils)
+    test_env = os.environ.copy()
+    test_env["PYTHONPATH"] = str(PROJECT_ROOT)
+
+    # 我們可以指定要運行的測試檔案，這樣更精確
+    general_test_files = [
+        "tests/test_resource_protection.py",
+        "tests/test_e2e_dashboard.py",
+        "tests/test_launch_installer.py" # 也將這個納入通用測試
+    ]
+
+    # 檢查檔案是否存在
+    existing_test_files = [f for f in general_test_files if (PROJECT_ROOT / f).exists()]
+    if not existing_test_files:
+        print_warn("未找到任何通用測試檔案，跳過此步驟。")
+        return True
+
+    print_info(f"將執行以下測試檔案: {', '.join(existing_test_files)}")
+
+    # 注意：E2E 測試可能很慢，pytest-timeout 已在 test case 中設定
+    # 我們可以透過 -m "not very_slow" 來跳過非常慢的測試
+    pytest_cmd = [sys.executable, "-m", "pytest", *existing_test_files]
+
+    if run_command(pytest_cmd, env=test_env) != 0:
+        print_fail("通用或 E2E 測試失敗。")
+        return False
+
+    print_success("通用與 E2E 測試通過！")
+    return True
+
 def main():
     """主函數"""
     test_mode = os.environ.get("TEST_MODE", "mock")
@@ -314,12 +348,16 @@ def main():
     # 執行資料庫流程測試
     db_flow_test_success = test_database_driven_flow()
 
+    # 執行通用和 E2E 測試
+    general_tests_success = run_general_tests()
+
     print_header("所有測試已完成")
-    if app_failures == 0 and db_flow_test_success:
-        print_success("🎉 恭喜！所有 App 的測試都已成功通過！")
+    total_failures = app_failures + (0 if db_flow_test_success else 1) + (0 if general_tests_success else 1)
+
+    if total_failures == 0:
+        print_success("🎉 恭喜！所有測試流程都已成功通過！")
         sys.exit(0)
     else:
-        total_failures = app_failures + (0 if db_flow_test_success else 1)
         print_fail(f"總共有 {total_failures} 個測試流程未通過。請檢查上面的日誌。")
         sys.exit(1)
 

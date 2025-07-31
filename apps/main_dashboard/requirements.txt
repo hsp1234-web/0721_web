@@ -12,6 +12,8 @@ click==8.2.1
     # via uvicorn
 fastapi==0.116.1
     # via -r apps/main_dashboard/requirements.in
+gunicorn==23.0.0
+    # via -r apps/main_dashboard/requirements.in
 h11==0.16.0
     # via uvicorn
 idna==3.10
@@ -20,6 +22,8 @@ jinja2==3.1.6
     # via -r apps/main_dashboard/requirements.in
 markupsafe==3.0.2
     # via jinja2
+packaging==25.0
+    # via gunicorn
 pydantic==2.11.7
     # via fastapi
 pydantic-core==2.33.2

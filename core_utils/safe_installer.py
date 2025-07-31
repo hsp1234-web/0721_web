@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -101,6 +102,8 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
                 "--python", python_executable,
                 package
             ]
+
+            start_time = time.monotonic()
             # 使用 subprocess.run 來執行命令並捕獲輸出
             result = subprocess.run(
                 command,
@@ -109,8 +112,11 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
                 check=True,  # 如果返回非零結束代碼，則引發 CalledProcessError
                 encoding='utf-8'
             )
+            end_time = time.monotonic()
+            duration = end_time - start_time
+
             logger.debug(f"'{package}' 安裝命令輸出:\n{result.stdout}")
-            logger.info(f"套件 '{package}' 安裝成功。")
+            logger.info(f"✅ 套件 '{package}' 安裝成功，耗時: {duration:.2f} 秒。")
 
         except subprocess.CalledProcessError as e:
             logger.error(f"安裝套件 '{package}' 時發生錯誤。返回碼: {e.returncode}")
