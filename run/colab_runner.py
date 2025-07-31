@@ -544,6 +544,7 @@ def main():
 
     launch_process_local = None
     try:
+        # 等待背景工作執行緒啟動後端程序
         while not launch_process_local:
             with status_lock:
                 launch_process_local = shared_status.get("launch_process")
@@ -554,14 +555,16 @@ def main():
                 raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
             time.sleep(0.5)
 
-        # 等待後端服務程序執行結束
-        launch_process_local.wait()
+        # 進入非阻塞的監控迴圈
+        update_status(log="[前端] 進入主監控迴圈，等待後端程序結束或手動中斷...")
+        while launch_process_local.poll() is None:
+            time.sleep(1)
 
-    except (KeyboardInterrupt, RuntimeError) as e:
-        if isinstance(e, KeyboardInterrupt):
-            update_status(task="偵測到手動中斷", log="🛑 正在準備終止程序...")
-        else:
-            update_status(task="前端偵測到錯誤", log=f"❌ {e}")
+    except KeyboardInterrupt:
+        # 實現即時回饋：使用者按下停止按鈕，立即更新狀態
+        update_status(task="已接收到關閉指令", log="🛑 正在準備終止服務...")
+    except Exception as e:
+        update_status(task="前端偵測到嚴重錯誤", log=f"❌ {e}")
     finally:
         with status_lock:
             launch_process_local = shared_status.get("launch_process")
@@ -569,27 +572,23 @@ def main():
 
         update_status(task="執行最終清理", log="正在準備結束程序...")
 
+        # 確保後端程序被終止
         if launch_process_local and launch_process_local.poll() is None:
-            update_status(log="偵測到後端服務仍在運行，正在嘗試正常終止 (SIGTERM)...")
-            launch_process_local.terminate() # 發送 SIGTERM
-            try:
-                # 給予後端寬裕的時間(例如 15 秒)來處理關閉、生成報告
-                update_status(log="給予後端 15 秒時間進行關機與報告生成...")
-                launch_process_local.wait(timeout=15)
-                update_status(log="✅ 後端服務已成功終止。")
-            except subprocess.TimeoutExpired:
-                update_status(log="⚠️ 後端服務未能及時回應，將強制終結 (SIGKILL)。")
-                launch_process_local.kill()
-        elif launch_process_local:
-            update_status(log=f"✅ 後端服務已自行結束 (返回碼: {launch_process_local.poll()})。")
+            update_status(log="...向後端服務發送終止信號 (SIGTERM)...")
+            launch_process_local.terminate()
 
         # 確保背景工作執行緒也結束
         worker_thread.join(timeout=5)
 
-        # 等待後端程序完全結束（這很關鍵，確保報告已生成）
-        if launch_process_local and launch_process_local.poll() is None:
+        # 等待後端程序完全結束（這一步至關重要，確保報告已生成）
+        if launch_process_local:
             update_status(log="...等待後端程序完成最終報告生成...")
-            launch_process_local.wait(timeout=15)
+            try:
+                launch_process_local.wait(timeout=20) # 給予足夠時間生成報告
+                update_status(log=f"✅ 後端服務已確認結束 (返回碼: {launch_process_local.poll()})。")
+            except subprocess.TimeoutExpired:
+                update_status(log="⚠️ 等待後端服務超時，將強制終結 (SIGKILL)。")
+                launch_process_local.kill()
 
         # 現在後端已結束，執行前端的歸檔任務
         final_report_processing(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
