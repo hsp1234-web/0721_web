@@ -152,8 +152,16 @@ async def safe_install_packages(app_name: str, requirements_path: Path, python_e
         log_event("WARN", f"找不到 {requirements_path}，跳過安裝。")
         return
 
-    with open(requirements_path, "r") as f:
-        packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    with open(requirements_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    packages = []
+    for line in lines:
+        # 去除行內註解 (從 '#' 開始的部分)
+        line_content = line.split('#')[0].strip()
+        # 只有在處理後還有內容時才加入列表
+        if line_content:
+            packages.append(line_content)
 
     log_event("BATTLE", f"開始為 {app_name} 安裝 {len(packages)} 個依賴。")
 
@@ -291,8 +299,11 @@ async def main_logic(config: dict):
         update_status(stage="啟動失敗")
 
 # --- 主程序 ---
-def performance_logger_thread():
+def performance_logger_thread(settings: dict):
     """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
+    # 從 settings 中獲取刷新率，如果沒有則使用預設值 1 秒
+    refresh_interval = settings.get('resource_monitoring', {}).get('monitor_refresh_seconds', 1.0)
+
     while not console._stop_event.is_set():
         # 更新 status_table
         update_status(cpu=console.cpu_usage, ram=console.ram_usage)
