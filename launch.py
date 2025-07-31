@@ -299,10 +299,11 @@ async def main_logic(config: dict):
         update_status(stage="啟動失敗")
 
 # --- 主程序 ---
-def performance_logger_thread(settings: dict):
+def performance_logger_thread():
     """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
-    # 從 settings 中獲取刷新率，如果沒有則使用預設值 1 秒
-    refresh_interval = settings.get('resource_monitoring', {}).get('monitor_refresh_seconds', 1.0)
+    # 這裡我們不傳入 settings，而是在執行緒內部讀取一次性的設定
+    config = load_config()
+    refresh_interval = config.get("PERFORMANCE_MONITOR_RATE_SECONDS", 1.0)
 
     while not console._stop_event.is_set():
         # 更新 status_table
@@ -321,7 +322,7 @@ def performance_logger_thread(settings: dict):
         except Exception as e:
             print(f"Error in perf logger: {e}")
 
-        time.sleep(1) # 每秒記錄一次
+        time.sleep(refresh_interval)
 
 # --- API 伺服器邏輯 ---
 async def get_status_api(request):
@@ -354,11 +355,15 @@ async def get_status_api(request):
                     allowed_levels_clause = f"WHERE level IN ({placeholders})"
 
             if 'logs_data' not in locals():
-                query = f"SELECT timestamp, level, message FROM phoenix_logs {allowed_levels_clause} ORDER BY id DESC LIMIT 20"
+                log_display_lines = config.get("LOG_DISPLAY_LINES", 20)
+                query = f"SELECT timestamp, level, message FROM phoenix_logs {allowed_levels_clause} ORDER BY id DESC LIMIT ?"
+
+                params = []
                 if allowed_levels_clause and "WHERE 1=0" not in allowed_levels_clause:
-                    cursor.execute(query, allowed_levels)
-                else:
-                    cursor.execute(query)
+                    params.extend(allowed_levels)
+                params.append(log_display_lines)
+
+                cursor.execute(query, tuple(params))
                 logs_data = cursor.fetchall()
 
         if not status_data:
@@ -405,11 +410,8 @@ async def main(db_path: Path):
     config = load_config()
     console.start()
 
-    # 讀取資源設定以傳遞給效能日誌記錄執行緒
-    resource_settings = load_resource_settings()
-
     # 啟動專門的效能日誌記錄執行緒
-    perf_thread = threading.Thread(target=performance_logger_thread, args=(resource_settings,), daemon=True)
+    perf_thread = threading.Thread(target=performance_logger_thread, daemon=True)
     perf_thread.start()
 
     # 建立 API 伺服器任務

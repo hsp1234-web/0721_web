@@ -28,7 +28,10 @@ FORCE_REPO_REFRESH = True #@param {type:"boolean"}
 #@markdown > **設定指揮中心的核心運行參數。**
 #@markdown ---
 #@markdown **儀表板更新頻率 (秒) (REFRESH_RATE_SECONDS)**
-REFRESH_RATE_SECONDS = 0.25 #@param {type:"number"}
+REFRESH_RATE_SECONDS = 1.0 #@param {type:"number"}
+#@markdown **效能監控更新頻率 (秒) (PERFORMANCE_MONITOR_RATE_SECONDS)**
+#@markdown > **建議小於等於儀表板更新頻率，以確保數據即時性。**
+PERFORMANCE_MONITOR_RATE_SECONDS = 0.5 #@param {type:"number"}
 #@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
 LOG_DISPLAY_LINES = 20 #@param {type:"integer"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_FOLDER_NAME)**
@@ -40,9 +43,6 @@ TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 #@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。
 FAST_TEST_MODE = True #@param {type:"boolean"}
 #@markdown ---
-#@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
-#@markdown > **注意：執行結束後若看到 `SystemExit: 0`，此為程式正常結束的預期提示，代表所有任務已順利完成，請放心。**
-#@markdown ---
 #@markdown ### **Part 3: 日誌顯示設定**
 #@markdown > **選擇您想在儀表板上看到的日誌等級。**
 SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
@@ -53,6 +53,8 @@ SHOW_LOG_LEVEL_SHELL = False #@param {type:"boolean"}
 SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
 SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
 SHOW_LOG_LEVEL_PERF = False #@param {type:"boolean"}
+#@markdown ---
+#@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
 #@markdown ---
 
 # ==============================================================================
@@ -142,6 +144,7 @@ def background_worker():
 
         config_data = {
             "REFRESH_RATE_SECONDS": REFRESH_RATE_SECONDS,
+            "PERFORMANCE_MONITOR_RATE_SECONDS": PERFORMANCE_MONITOR_RATE_SECONDS,
             "LOG_DISPLAY_LINES": LOG_DISPLAY_LINES,
             "LOG_ARCHIVE_FOLDER_NAME": LOG_ARCHIVE_FOLDER_NAME,
             "TIMEZONE": TIMEZONE,
@@ -461,7 +464,6 @@ def main():
         if project_path:
             archive_reports(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
 
-        update_status(task="所有程序已結束。")
         # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
         # 我們只打印一個最終訊息。
         final_message = f"✅ [{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 所有程序已順利結束。"
