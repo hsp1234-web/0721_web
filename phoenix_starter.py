@@ -27,6 +27,9 @@ from pathlib import Path
 import os
 import shlex
 import re
+import time
+import threading
+from collections import deque
 
 # --- 常數與設定 ---
 APPS_DIR = Path("apps")
@@ -151,10 +154,12 @@ async def prepare_app_environment(app: App, install_large_deps=False):
         # 1. 建立虛擬環境
         venv_cmd = f"uv venv {shlex.quote(str(app.venv_path))} --seed"
         return_code = await run_command_async(venv_cmd, cwd=PROJECT_ROOT, app=app)
-        if return_code != 0: raise RuntimeError("建立虛擬環境失敗")
+        if return_code != 0:
+            raise RuntimeError("建立虛擬環境失敗")
 
         python_executable = app.venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
-        if not python_executable.exists(): raise FileNotFoundError(f"找不到 Python 解譯器: {python_executable}")
+        if not python_executable.exists():
+            raise FileNotFoundError(f"找不到 Python 解譯器: {python_executable}")
 
         # 2. 安裝通用測試依賴 (這些通常很小，直接安裝)
         common_deps = "pytest pytest-mock ruff httpx"
@@ -162,15 +167,13 @@ async def prepare_app_environment(app: App, install_large_deps=False):
         await run_command_async(pip_cmd, cwd=PROJECT_ROOT, app=app)
 
         # 找出最新的日誌檔案以進行監控
-        log_dir = Path("logs")
-        list_of_logs = list(log_dir.glob(f"install_{app.name}_*.log"))
         # 這裡我們假設在執行此函式前，safe_installer 尚未建立日誌
         # 我們將在啟動安裝執行緒後，再開始尋找日誌
 
         # 3. 安裝 App 核心依賴
         reqs_file = app.path / "requirements.txt"
         if reqs_file.exists():
-            app.add_log(f"啟動核心依賴的安全安裝程序...")
+            app.add_log("啟動核心依賴的安全安裝程序...")
             # 我們需要找到 safe_installer 將要建立的日誌檔
             # 為了簡化，我們讓 safe_installer 返回日誌檔路徑
             logger = setup_logger(app.name)
@@ -244,44 +247,6 @@ def check_system_resources(required_disk_gb: float = 10.0, required_ram_gb: floa
 
     is_sufficient = available_disk_gb >= required_disk_gb and available_ram_gb >= required_ram_gb
     return is_sufficient, available_disk_gb, available_ram_gb
-
-async def main_logic():
-    """主要的業務邏輯協調器"""
-    # 發現應用
-    apps = discover_apps()
-    print("發現的應用:")
-    for app in apps:
-        print(f"- {app.name}")
-
-    # 決定安裝模式
-    print("\n正在檢查系統資源...")
-    is_sufficient, disk_gb, ram_gb = check_system_resources()
-    print(f"檢測結果: 可用磁碟空間 {disk_gb:.1f} GB, 可用記憶體 {ram_gb:.1f} GB")
-
-    install_large_deps = is_sufficient
-    if install_large_deps:
-        print("資源充足，將執行「完整安裝」模式。")
-    else:
-        print("資源不足，將執行「模擬安裝」模式（跳過大型依賴）。")
-
-    # 準備所有應用的環境
-    for app in apps:
-        print(f"\n--- 正在準備 {app.name} ---")
-        success = await prepare_app_environment(app, install_large_deps)
-        if success:
-            print(f"✅ {app.name} 環境準備就緒。")
-        else:
-            print(f"❌ {app.name} 環境準備失敗。")
-
-        print("日誌輸出:")
-        for log_entry in app.log:
-            print(f"  {log_entry}")
-
-
-import time
-import threading
-import re
-from collections import deque
 
 # --- ANSI Escape Codes ---
 class ANSI:
@@ -368,8 +333,10 @@ class ANSIDashboard:
             disk = psutil.disk_usage('/')
 
             ram_color = ANSI.GREEN
-            if ram.percent > 85: ram_color = ANSI.RED
-            elif ram.percent > 70: ram_color = ANSI.YELLOW
+            if ram.percent > 85:
+                ram_color = ANSI.RED
+            elif ram.percent > 70:
+                ram_color = ANSI.YELLOW
 
             status_text = (f"{ANSI.GREEN}🟢 運行中{ANSI.RESET}   "
                            f"核心: {psutil.cpu_percent():2.1f}%   "
@@ -403,7 +370,6 @@ class ANSIDashboard:
             color = ANSI.RED
         elif "warn" in message.lower():
             level = "WARN"
-            color = ANSI.YELLOW
 
         log_line = f"{ANSI.move_cursor(0,0)}[{timestamp}] [{level}] {message}"
         self.log_queue.append(log_line)
@@ -502,13 +468,11 @@ def ensure_core_deps():
     print("正在檢查核心依賴...")
     try:
         subprocess.check_output(["uv", "--version"], stderr=subprocess.STDOUT)
-        import psutil
-        import yaml
         print("✅ 核心依賴已滿足。")
-    except (ImportError, FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, subprocess.CalledProcessError):
         print("⚠️ 缺少核心依賴，正在嘗試安裝...")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "uv", "psutil", "pyyaml"])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "uv"])
             print("✅ 核心依賴安裝成功！")
         except subprocess.CalledProcessError as e:
             print(f"❌ 核心依賴安裝失敗: {e}")

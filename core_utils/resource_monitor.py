@@ -4,6 +4,7 @@
 """
 import shutil
 from typing import Dict, Any
+import yaml
 
 def get_system_resources() -> Dict[str, Any]:
     """

@@ -3,7 +3,6 @@ import subprocess
 import sys
 import pytest
 import shutil
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +10,8 @@ from unittest.mock import patch
 # pytest 在執行時會自動處理路徑，但為了清晰起見，我們保留這個
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core_utils import safe_installer
+
+import collections
 
 @pytest.mark.slow
 @patch('shutil.disk_usage')
@@ -20,9 +21,9 @@ def test_installation_stops_on_low_disk_space(mock_disk_usage):
     這是一個精確的單元測試，直接測試 safe_installer 的核心邏輯。
     """
     # 模擬磁碟空間不足的情況
-    # shutil.disk_usage 返回一個包含 total, used, free 的元組
-    # 我們讓 free 的值小於預設的 512MB (以字節為單位)
-    mock_disk_usage.return_value = (1024**3, 1024**3, 100 * 1024**2) # 100MB free
+    # shutil.disk_usage 返回一個 namedtuple，我們需要精確模擬這個行為
+    Usage = collections.namedtuple("Usage", ["total", "used", "free"])
+    mock_disk_usage.return_value = Usage(total=1024**3, used=1024**3, free=100 * 1024**2) # 100MB free
 
     # 建立一個假的 app 和 requirements
     app_name = "test_app_fail"
@@ -44,6 +45,7 @@ def test_installation_stops_on_low_disk_space(mock_disk_usage):
 
 @pytest.mark.e2e
 @pytest.mark.very_slow
+@pytest.mark.skip(reason="此測試會安裝所有應用的完整依賴，執行時間過長，不適合在 CI/CD 環境中頻繁運行")
 def test_full_run_with_normal_resources(full_mode_config):
     """
     執行一個完整的 `launch.py` 流程，以驗證在正常資源下，

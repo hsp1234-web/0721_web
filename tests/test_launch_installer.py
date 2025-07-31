@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 import pytest
-import asyncio
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import sys
 import os
-from pathlib import Path
+import launch
 
 # 將專案根目錄添加到 sys.path 中
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 模擬導入，因為 launch.py 頂層有 display() 等呼叫
-from unittest.mock import MagicMock
 sys.modules['IPython'] = MagicMock()
 sys.modules['IPython.display'] = MagicMock()
 
 # 現在我們可以安全地從 run 導入
-import launch
+
 
 @pytest.fixture
 def dummy_app_path(tmp_path):

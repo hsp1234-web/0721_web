@@ -6,24 +6,20 @@
 """
 語音轉寫 App 的 API 點火測試
 """
-# --- 標準函式庫導入 ---
 import io
 import os
 import sys
 import time
 from pathlib import Path
-
-# --- 第三方函式庫導入 ---
 import pytest
 from fastapi.testclient import TestClient
+from apps.transcriber.main import app
 
-# --- 本地應用導入 ---
 # 設置導入路徑，確保可以找到 App 的主模組
 # 我們需要將專案的根目錄 (包含 apps/ 和 tests/ 的目錄) 加入 sys.path
 # 這樣 Python 才能找到 `transcriber` 模組
 project_root = Path.cwd()
 sys.path.insert(0, str(project_root))
-from apps.transcriber.main import app
 
 # 使用 FastAPI 的測試客戶端
 client = TestClient(app)

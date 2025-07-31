@@ -16,30 +16,19 @@ import signal
 # --- 依賴預檢和自動安裝 ---
 try:
     import pytz
-    import psutil
-    from IPython.display import display, clear_output
     import nest_asyncio
     from aiohttp import web
-    import pandas
-    import tabulate
-    import sparklines # 確保 sparklines 也被檢查
 except ImportError:
-    # 新增 sparklines 到依賴列表
-    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio, aiohttp, pandas, tabulate, sparklines)...")
+    print("偵測到缺少核心依賴，正在自動安裝 (pytz, nest_asyncio, aiohttp)...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio", "aiohttp", "pandas", "tabulate", "sparklines"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "nest_asyncio", "aiohttp"], check=True)
         print("依賴安裝成功。")
         import pytz
-        import psutil
-        from IPython.display import display, clear_output
         import nest_asyncio
         from aiohttp import web
-        import pandas
-        import tabulate
-        import sparklines
     except Exception as e:
         print(f"自動安裝依賴失敗: {e}")
-        print("請手動執行 'pip install pytz psutil ipython nest_asyncio aiohttp pandas tabulate sparklines' 後再試一次。")
+        print("請手動執行 'pip install pytz nest_asyncio aiohttp' 後再試一次。")
         sys.exit(1)
 
 from core_utils.commander_console import CommanderConsole
@@ -86,7 +75,8 @@ def setup_database():
 
 def update_status(stage=None, apps_status=None, url=None, cpu=None, ram=None):
     """安全地更新 status_table 中的狀態。"""
-    if not DB_FILE: return
+    if not DB_FILE:
+        return
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
@@ -108,12 +98,15 @@ def update_status(stage=None, apps_status=None, url=None, cpu=None, ram=None):
 
 def log_event(level, message, cpu=None, ram=None):
     """將事件記錄到 TUI 和 SQLite 資料庫"""
-    if not cpu: cpu = console.cpu_usage
-    if not ram: ram = console.ram_usage
+    if not cpu:
+        cpu = console.cpu_usage
+    if not ram:
+        ram = console.ram_usage
 
     console.add_log(f"[{level}] {message}")
 
-    if not DB_FILE: return
+    if not DB_FILE:
+        return
     timestamp = datetime.now(TAIWAN_TZ).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -536,7 +529,8 @@ async def main(db_path: Path):
 
                 # 將報告生成腳本的輸出也記錄到主日誌中
                 for line in result.stdout.strip().split('\n'):
-                    if line: log_event("INFO", f"[ReportGenerator] {line}")
+                    if line:
+                        log_event("INFO", f"[ReportGenerator] {line}")
 
                 if result.returncode == 0:
                     log_event("SUCCESS", "所有報告已成功生成。")
@@ -544,7 +538,8 @@ async def main(db_path: Path):
                     log_event("ERROR", "報告生成腳本執行失敗。")
                     if result.stderr:
                          for line in result.stderr.strip().split('\n'):
-                            if line: log_event("ERROR", f"[ReportGenerator] {line}")
+                            if line:
+                                log_event("ERROR", f"[ReportGenerator] {line}")
 
         except Exception as e:
             log_event("CRITICAL", f"調用報告生成腳本時發生嚴重錯誤: {e}")
