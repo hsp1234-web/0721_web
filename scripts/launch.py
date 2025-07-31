@@ -308,26 +308,39 @@ async def main_logic(config: dict):
         log_event("SUCCESS", f"主儀表板 ({dashboard_config['name']}) 已成功啟動。")
         update_status(stage="主儀表板運行中，準備啟動背景服務")
 
-        # --- Colab 代理 URL 生成 ---
+        # --- Colab 代理 URL 生成 (帶重試機制) ---
         if ('google.colab' in sys.modules or 'COLAB_GPU' in os.environ):
-            log_event("INFO", "偵測到 Colab 環境，正在嘗試生成主儀表板的公開代理 URL...")
-            try:
-                # 整個區塊使用 try...except 包裹，確保任何來自 google.colab 模組的錯誤都不會中斷主程序
-                from google.colab import output
-                if output and hasattr(output, 'eval_js') and callable(output.eval_js):
+            log_event("INFO", "偵測到 Colab 環境，開始嘗試生成主儀表板代理 URL...")
+
+            proxy_url = None
+            max_retries = 10
+            retry_delay_seconds = 5
+
+            for attempt in range(max_retries):
+                try:
+                    from google.colab import output
+                    if not (output and hasattr(output, 'eval_js') and callable(output.eval_js)):
+                        log_event("WARN", f"[第 {attempt + 1}/{max_retries} 次嘗試] Colab 'output' 模組功能不完整。")
+                        await asyncio.sleep(retry_delay_seconds)
+                        continue
+
                     js_code = f"(window.google && google.colab && google.colab.kernel) ? google.colab.kernel.proxyPort({dashboard_config['port']}) : null"
                     proxy_url = output.eval_js(js_code)
 
                     if proxy_url:
-                        log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
+                        log_event("SUCCESS", f"✅ 成功獲取 Colab 代理 URL: {proxy_url}")
                         update_status(url=proxy_url)
+                        break  # 成功獲取，跳出迴圈
                     else:
-                        log_event("WARN", "無法生成 Colab 代理 URL，可能是因為 kernel 尚未完全初始化或功能不完整。")
-                else:
-                    log_event("WARN", "Colab `output` 模組可用，但其功能不完整，跳過代理 URL 生成。")
-            except Exception as e:
-                # 捕獲所有可能的異常，記錄錯誤，然後繼續執行，確保主程序穩定性
-                log_event("CRITICAL", f"生成 Colab 代理 URL 時發生了未預期的嚴重錯誤: {e}")
+                        log_event("WARN", f"[第 {attempt + 1}/{max_retries} 次嘗試] 無法獲取 URL (kernel 未就緒?)，將在 {retry_delay_seconds} 秒後重試...")
+                        await asyncio.sleep(retry_delay_seconds)
+
+                except Exception as e:
+                    log_event("ERROR", f"[第 {attempt + 1}/{max_retries} 次嘗試] 發生未預期錯誤: {e}，將在 {retry_delay_seconds} 秒後重試...")
+                    await asyncio.sleep(retry_delay_seconds)
+
+            if not proxy_url:
+                log_event("CRITICAL", f"在嘗試 {max_retries} 次後，依然無法生成 Colab 代理 URL。")
         # --- Colab 代理 URL 生成結束 ---
 
     except Exception as e:
