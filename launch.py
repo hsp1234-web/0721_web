@@ -291,8 +291,11 @@ async def main_logic(config: dict):
         update_status(stage="啟動失敗")
 
 # --- 主程序 ---
-def performance_logger_thread():
+def performance_logger_thread(settings: dict):
     """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
+    # 從 settings 中獲取刷新率，如果沒有則使用預設值 1 秒
+    refresh_interval = settings.get('resource_monitoring', {}).get('monitor_refresh_seconds', 1.0)
+
     while not console._stop_event.is_set():
         # 更新 status_table
         update_status(cpu=console.cpu_usage, ram=console.ram_usage)

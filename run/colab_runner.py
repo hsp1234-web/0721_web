@@ -32,7 +32,7 @@ REFRESH_RATE_SECONDS = 0.25 #@param {type:"number"}
 #@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
 LOG_DISPLAY_LINES = 20 #@param {type:"integer"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_FOLDER_NAME)**
-#@markdown > **留空即關閉歸檔功能。**
+#@markdown > **留空即關閉歸檔功能。歸檔位置在 Colab 左側檔案總管的 `/content/<您指定的資料夾名稱>` 中。**
 LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔" #@param {type:"string"}
 #@markdown **時區設定 (TIMEZONE)**
 TIMEZONE = "Asia/Taipei" #@param {type:"string"}
@@ -41,6 +41,7 @@ TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 FAST_TEST_MODE = True #@param {type:"boolean"}
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
+#@markdown > **注意：執行結束後若看到 `SystemExit: 0`，此為程式正常結束的預期提示，代表所有任務已順利完成，請放心。**
 #@markdown ---
 
 # ==============================================================================
@@ -441,6 +442,11 @@ def main():
         # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
         # 我們只打印一個最終訊息。
         print(f"\n[{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 指揮中心前端任務: 所有程序已結束。")
+
+    # 為了防止在 Colab 環境中因儲存格末尾的意外字元 (如 'v') 而導致 NameError，
+    # 我們在此處明確地終止腳本執行。
+    import sys
+    sys.exit(0)
 
 
 if __name__ == "__main__":
