@@ -31,11 +31,14 @@ import threading
 from collections import deque
 try:
     import yaml
+    import httpx
+    from google.colab import output as colab_output
 except ImportError:
-    # Colab 環境通常預裝了，但以防萬一
-    print("正在安裝 PyYAML...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
+    print("正在安裝指揮中心核心依賴 (PyYAML, httpx)...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml", "httpx"])
     import yaml
+    import httpx
+    from google.colab import output as colab_output
 
 #@title 💎 鳳凰之心指揮中心 V19 { vertical-output: true, display-mode: "form" }
 #@markdown ---
@@ -89,6 +92,16 @@ SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
 SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
 #@markdown **顯示效能日誌 (SHOW_LOG_LEVEL_PERF)**
 SHOW_LOG_LEVEL_PERF = False #@param {type:"boolean"}
+
+#@markdown ---
+#@markdown ### **Part 4: Colab 連線設定**
+#@markdown > **設定如何獲取 Colab 的公開代理網址。**
+#@markdown ---
+#@markdown **URL 獲取重試次數 (COLAB_URL_RETRIES)**
+COLAB_URL_RETRIES = 12 #@param {type:"integer"}
+#@markdown **URL 獲取重試延遲 (秒) (COLAB_URL_RETRY_DELAY)**
+COLAB_URL_RETRY_DELAY = 5 #@param {type:"integer"}
+
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
 #@markdown ---
@@ -165,7 +178,9 @@ def background_worker():
             "LOG_ARCHIVE_FOLDER_NAME": LOG_ARCHIVE_FOLDER_NAME,
             "TIMEZONE": TIMEZONE,
             "FAST_TEST_MODE": FAST_TEST_MODE,
-            "LOG_LEVELS_TO_SHOW": {level: show for level, show in log_levels_to_show.items() if show}
+            "LOG_LEVELS_TO_SHOW": {level: show for level, show in log_levels_to_show.items() if show},
+            "COLAB_URL_RETRIES": COLAB_URL_RETRIES,
+            "COLAB_URL_RETRY_DELAY": COLAB_URL_RETRY_DELAY,
         }
         config_file = project_path / "config.json"
         with open(config_file, "w", encoding="utf-8") as f:
@@ -510,6 +525,43 @@ def final_report_processing(project_path, archive_folder_name, timezone_str):
         update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
 
 
+async def check_backend_ready(url: str, timeout: int = 2) -> bool:
+    """非同步檢查後端服務是否已就緒。"""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            # 我們預期主儀表板的根目錄或 /health 能回傳 200 OK
+            response = await client.get(url)
+            return response.status_code == 200
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return False
+
+async def serve_proxy_url_with_retry(health_check_url: str, port: int, retries: int, delay: int):
+    """
+    帶重試邏輯，檢查後端並顯示 Colab 代理 URL。
+    這應在一個獨立的執行緒中執行，以避免阻塞主執行緒。
+    """
+    import asyncio
+    update_status(log=f"🔗 [URL 服務] 已啟動，開始監控後端健康狀態...")
+    for attempt in range(retries):
+        if await check_backend_ready(health_check_url):
+            update_status(log=f"✅ [URL 服務] 後端服務已就緒，正在生成代理 URL...")
+            try:
+                colab_output.serve_kernel_port_as_window(
+                    port,
+                    anchor_text=f'🚀 點此開啟主控台 (連接埠 {port})'
+                )
+                update_status(log="✅ [URL 服務] Colab 代理 URL 已成功顯示。")
+            except Exception as e:
+                update_status(log=f"❌ [URL 服務] 呼叫 serve_kernel_port_as_window 失敗: {e}")
+            return # 任務完成，無論成功或失敗
+
+        if attempt < retries - 1:
+            update_status(log=f"🟡 [URL 服務] 後端尚未就緒 (嘗試 {attempt + 1}/{retries})，將在 {delay} 秒後重試...")
+            await asyncio.sleep(delay)
+
+    update_status(log=f"❌ [URL 服務] 在 {retries} 次嘗試後，後端服務仍未回應。URL 無法生成。")
+
+
 def main():
     update_status(log="指揮中心 V19 (API驅動版) 啟動。")
 
@@ -518,6 +570,20 @@ def main():
 
     worker_thread = threading.Thread(target=background_worker)
     worker_thread.start()
+
+    # 啟動 URL 服務執行緒
+    # 這個執行緒會等待後端服務就緒，然後嘗試顯示 Colab URL
+    import asyncio
+    url_service_thread = threading.Thread(
+        target=lambda: asyncio.run(serve_proxy_url_with_retry(
+            health_check_url="http://localhost:8000/docs", # FastAPI 的 /docs 是一個很好的健康檢查點
+            port=8000,
+            retries=COLAB_URL_RETRIES,
+            delay=COLAB_URL_RETRY_DELAY
+        )),
+        daemon=True
+    )
+    url_service_thread.start()
 
     launch_process_local = None
     try:

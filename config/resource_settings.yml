@@ -32,3 +32,9 @@ resource_monitoring:
   # 控制前端儀表板的更新頻率。較低的值會提供更即時的反應，但可能增加
   # CPU 負擔。建議值在 0.2 到 1.0 之間。
   monitor_refresh_seconds: 0.2
+
+  # --- Colab 特定設定 (Colab Specific Settings) ---
+
+  # 在 Colab 環境中，前端獲取代理 URL 的重試次數。
+  # 此設定由 run/colab_runner.py 讀取並寫入動態的 config.json。
+  colab_url_retries: 10

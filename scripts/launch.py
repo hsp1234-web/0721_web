@@ -308,41 +308,6 @@ async def main_logic(config: dict):
         log_event("SUCCESS", f"主儀表板 ({dashboard_config['name']}) 已成功啟動。")
         update_status(stage="主儀表板運行中，準備啟動背景服務")
 
-        # --- Colab 代理 URL 生成 (帶重試機制) ---
-        if ('google.colab' in sys.modules or 'COLAB_GPU' in os.environ):
-            log_event("INFO", "偵測到 Colab 環境，開始嘗試生成主儀表板代理 URL...")
-
-            proxy_url = None
-            max_retries = 10
-            retry_delay_seconds = 5
-
-            for attempt in range(max_retries):
-                try:
-                    from google.colab import output
-                    if not (output and hasattr(output, 'eval_js') and callable(output.eval_js)):
-                        log_event("WARN", f"[第 {attempt + 1}/{max_retries} 次嘗試] Colab 'output' 模組功能不完整。")
-                        await asyncio.sleep(retry_delay_seconds)
-                        continue
-
-                    js_code = f"(window.google && google.colab && google.colab.kernel) ? google.colab.kernel.proxyPort({dashboard_config['port']}) : null"
-                    proxy_url = output.eval_js(js_code)
-
-                    if proxy_url:
-                        log_event("SUCCESS", f"✅ 成功獲取 Colab 代理 URL: {proxy_url}")
-                        update_status(url=proxy_url)
-                        break  # 成功獲取，跳出迴圈
-                    else:
-                        log_event("WARN", f"[第 {attempt + 1}/{max_retries} 次嘗試] 無法獲取 URL (kernel 未就緒?)，將在 {retry_delay_seconds} 秒後重試...")
-                        await asyncio.sleep(retry_delay_seconds)
-
-                except Exception as e:
-                    log_event("ERROR", f"[第 {attempt + 1}/{max_retries} 次嘗試] 發生未預期錯誤: {e}，將在 {retry_delay_seconds} 秒後重試...")
-                    await asyncio.sleep(retry_delay_seconds)
-
-            if not proxy_url:
-                log_event("CRITICAL", f"在嘗試 {max_retries} 次後，依然無法生成 Colab 代理 URL。")
-        # --- Colab 代理 URL 生成結束 ---
-
     except Exception as e:
         log_event("CRITICAL", f"主儀表板 ({dashboard_config['name']}) 啟動失敗: {e}，中止所有操作。")
         console.update_status_tag("[主儀表板啟動失敗]")
