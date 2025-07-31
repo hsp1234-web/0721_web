@@ -234,6 +234,26 @@ def render_dashboard_html():
         .log-level-ERROR, .log-level-CRITICAL { color: #ff5370; }
         .log-level-INFO { color: #89ddff; }
         .log-level-WARN { color: #ffcb6b; }
+        #entry-point-panel {
+            display: none; /* 預設隱藏 */
+            grid-column: 1 / -1; /* 橫跨所有欄 */
+            text-align: center;
+            padding: 1em;
+            background-color: #2d2d2d;
+            border: 1px solid #50fa7b;
+        }
+        #entry-point-button {
+            display: inline-block;
+            padding: 10px 20px;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1a1a1a;
+            background-color: #50fa7b;
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+            cursor: pointer;
+        }
     </style>
     """
 
@@ -268,6 +288,10 @@ def render_dashboard_html():
                 <div class="title">啟動程序日誌</div>
                 <div class="content log" id="log-container">等待日誌...</div>
             </div>
+        </div>
+        <div id="entry-point-panel">
+             <a id="entry-point-button" href="#" target="_blank">🚀 進入主控台</a>
+             <p style="font-size:0.9em; margin-top: 8px;">主儀表板已就緒，點擊上方按鈕進入操作介面。</p>
         </div>
         <div class="footer" id="footer-status">指揮中心前端任務: 初始化中...</div>
     </div>
@@ -327,11 +351,20 @@ def render_dashboard_html():
                     }}
                     logContainer.innerHTML = logEntries;
 
-                    // 更新頁腳狀態
+                    // 更新頁腳和主控台入口
                     const footer = document.getElementById('footer-status');
+                    const entryPointPanel = document.getElementById('entry-point-panel');
+                    const entryPointButton = document.getElementById('entry-point-button');
+
                     if (data.status.action_url) {{
-                        footer.innerHTML = `✅ 服務啟動完成！操作儀表板: <a href="${{data.status.action_url}}" target="_blank" style="color: #50fa7b;">${{data.status.action_url}}</a>`;
+                        // 當 URL 可用時，顯示主控台入口面板
+                        entryPointPanel.style.display = 'block';
+                        entryPointButton.href = data.status.action_url;
+                        // 頁腳可以顯示最終狀態
+                        footer.textContent = `指揮中心後端任務: ${{data.status.current_stage || '所有服務運行中'}}`;
                     }} else {{
+                        // URL 不可用時，隱藏面板並在頁腳顯示進度
+                        entryPointPanel.style.display = 'none';
                         footer.textContent = `指揮中心後端任務: ${{data.status.current_stage || '執行中...'}}`;
                     }}
                 }})

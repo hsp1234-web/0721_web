@@ -17,12 +17,15 @@ import os
 import subprocess
 import sys
 import shutil
+import hashlib
 from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
 # --- 常數與設定 ---
 PROJECT_ROOT = Path(__file__).parent.resolve()
 APPS_DIR = PROJECT_ROOT / "apps"
+VENV_CACHE_DIR = PROJECT_ROOT / ".venv_cache"
+VENV_CACHE_DIR.mkdir(exist_ok=True)
 
 # --- 顏色代碼 ---
 class C:
@@ -105,8 +108,15 @@ def discover_apps() -> list[Path]:
     print_info(f"發現了 {len(apps)} 個 App: {[app.name for app in apps]}")
     return apps
 
+def get_reqs_hash(req_file: Path) -> str:
+    """計算 requirements 檔案的 SHA256 hash"""
+    if not req_file.exists():
+        return "no-reqs-file"
+    content = req_file.read_bytes()
+    return hashlib.sha256(content).hexdigest()[:16]
+
 def test_app(app_path: Path, test_mode: str) -> bool:
-    """對單個 App 進行隔離化測試"""
+    """對單個 App 進行隔離化測試，並使用快取機制"""
     app_name = app_path.name
     print_header(f"--- 開始測試 App: {app_name} (模式: {test_mode}) ---")
 
@@ -119,38 +129,66 @@ def test_app(app_path: Path, test_mode: str) -> bool:
         print_warn(f"在 '{tests_dir}' 中找不到測試檔案，跳過。")
         return True # 沒有測試也算成功
 
-    # 1. 建立隔離的測試虛擬環境
-    print_info(f"[{app_name}] 1. 建立隔離的測試虛擬環境...")
+    # 快取邏輯
+    reqs_hash = get_reqs_hash(reqs_file)
+    cached_venv_path = VENV_CACHE_DIR / f"{app_name}-{reqs_hash}.venv"
+
     if venv_dir.exists():
-        print_warn(f"發現舊的虛擬環境，正在刪除: {venv_dir}")
         shutil.rmtree(venv_dir)
-    if run_command(["uv", "venv", str(venv_dir), "--seed"]) != 0:
-        print_fail(f"[{app_name}] 建立虛擬環境失敗。")
-        return False
+
+    if cached_venv_path.exists():
+        print_info(f"[{app_name}] 發現快取虛擬環境，正在複製...")
+        try:
+            shutil.copytree(cached_venv_path, venv_dir)
+            print_success(f"[{app_name}] ✅ 快取命中！成功從快取還原環境。")
+        except Exception as e:
+            print_warn(f"[{app_name}] 從快取複製環境失敗: {e}。將執行全新安裝。")
+            if venv_dir.exists(): shutil.rmtree(venv_dir)
+            # 觸發全新安裝
+    else:
+        print_warn(f"[{app_name}] ⚠️ 快取未命中。準備執行全新安裝...")
+
+    # 如果 venv 目錄不存在 (快取未命中或複製失敗)，則執行完整安裝
+    if not venv_dir.exists():
+        # 1. 建立隔離的測試虛擬環境
+        print_info(f"[{app_name}] 1. 建立隔離的測試虛擬環境...")
+        if run_command(["uv", "venv", str(venv_dir), "--seed"]) != 0:
+            print_fail(f"[{app_name}] 建立虛擬環境失敗。")
+            return False
+
+        python_exec = str(venv_dir / "bin" / "python")
+
+        # 2. 安裝通用測試依賴
+        print_info(f"[{app_name}] 2. 安裝通用測試依賴 (pytest, xdist, timeout, etc.)...")
+        common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout", "pip-audit"]
+        if run_command(["uv", "pip", "install", "-p", python_exec, *common_deps]) != 0:
+            print_fail(f"[{app_name}] 安裝通用依賴失敗。")
+            return False
+
+        # 3. 啟動智慧型安全安裝程序
+        print_info(f"[{app_name}] 3. 啟動智慧型安全安裝程序...")
+        safe_installer_cmd = [
+            sys.executable,
+            "-m", "core_utils.safe_installer",
+            app_name,
+            str(reqs_file),
+            python_exec
+        ]
+        # 需要先安裝核心依賴到虛擬環境中
+        run_command(["uv", "pip", "install", "-p", python_exec, "pyyaml", "psutil"])
+        if run_command(safe_installer_cmd) != 0:
+            print_fail(f"[{app_name}] 安全安裝核心依賴失敗。")
+            return False
+
+        # 安裝成功後，儲存到快取
+        print_info(f"[{app_name}] 全新安裝成功，正在儲存至快取...")
+        try:
+            shutil.copytree(venv_dir, cached_venv_path)
+            print_success(f"[{app_name}] 已成功快取虛擬環境至 {cached_venv_path}")
+        except Exception as e:
+            print_warn(f"[{app_name}] 儲存快取失敗: {e}")
 
     python_exec = str(venv_dir / "bin" / "python")
-
-    # 2. 安裝通用測試依賴
-    print_info(f"[{app_name}] 2. 安裝通用測試依賴 (pytest, xdist, timeout, etc.)...")
-    common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout", "pip-audit"]
-    if run_command(["uv", "pip", "install", "-p", python_exec, *common_deps]) != 0:
-        print_fail(f"[{app_name}] 安裝通用依賴失敗。")
-        return False
-
-    # 3. 啟動智慧型安全安裝程序
-    print_info(f"[{app_name}] 3. 啟動智慧型安全安裝程序...")
-    safe_installer_cmd = [
-        sys.executable,
-        "-m", "core_utils.safe_installer",
-        app_name,
-        str(reqs_file),
-        python_exec
-    ]
-    # 需要先安裝核心依賴到虛擬環境中
-    run_command(["uv", "pip", "install", "-p", python_exec, "pyyaml", "psutil"])
-    if run_command(safe_installer_cmd) != 0:
-        print_fail(f"[{app_name}] 安全安裝核心依賴失敗。")
-        return False
 
     # 4. 根據測試模式決定是否安裝大型依賴
     app_mock_mode = "true"
@@ -288,6 +326,40 @@ def test_database_driven_flow():
     return True
 
 
+def run_general_tests():
+    """執行不屬於任何特定 App 的通用測試和 E2E 測試。"""
+    print_header("步驟 5: 執行通用與端對端(E2E)測試")
+
+    # 為了讓 pytest 能找到專案的模組 (如 core_utils)
+    test_env = os.environ.copy()
+    test_env["PYTHONPATH"] = str(PROJECT_ROOT)
+
+    # 我們可以指定要運行的測試檔案，這樣更精確
+    general_test_files = [
+        "tests/test_resource_protection.py",
+        "tests/test_e2e_dashboard.py",
+        "tests/test_launch_installer.py" # 也將這個納入通用測試
+    ]
+
+    # 檢查檔案是否存在
+    existing_test_files = [f for f in general_test_files if (PROJECT_ROOT / f).exists()]
+    if not existing_test_files:
+        print_warn("未找到任何通用測試檔案，跳過此步驟。")
+        return True
+
+    print_info(f"將執行以下測試檔案: {', '.join(existing_test_files)}")
+
+    # 注意：E2E 測試可能很慢，pytest-timeout 已在 test case 中設定
+    # 我們可以透過 -m "not very_slow" 來跳過非常慢的測試
+    pytest_cmd = [sys.executable, "-m", "pytest", *existing_test_files]
+
+    if run_command(pytest_cmd, env=test_env) != 0:
+        print_fail("通用或 E2E 測試失敗。")
+        return False
+
+    print_success("通用與 E2E 測試通過！")
+    return True
+
 def main():
     """主函數"""
     test_mode = os.environ.get("TEST_MODE", "mock")
@@ -314,12 +386,16 @@ def main():
     # 執行資料庫流程測試
     db_flow_test_success = test_database_driven_flow()
 
+    # 執行通用和 E2E 測試
+    general_tests_success = run_general_tests()
+
     print_header("所有測試已完成")
-    if app_failures == 0 and db_flow_test_success:
-        print_success("🎉 恭喜！所有 App 的測試都已成功通過！")
+    total_failures = app_failures + (0 if db_flow_test_success else 1) + (0 if general_tests_success else 1)
+
+    if total_failures == 0:
+        print_success("🎉 恭喜！所有測試流程都已成功通過！")
         sys.exit(0)
     else:
-        total_failures = app_failures + (0 if db_flow_test_success else 1)
         print_fail(f"總共有 {total_failures} 個測試流程未通過。請檢查上面的日誌。")
         sys.exit(1)
 
