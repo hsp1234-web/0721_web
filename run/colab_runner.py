@@ -430,26 +430,26 @@ def render_dashboard_html():
                 }});
         }}
 
-        function triggerShutdown() {
-            if (confirm('您確定要關閉所有後端服務嗎？此操作將會終止所有執行中的任務。')) {
+        function triggerShutdown() {{
+            if (confirm('您確定要關閉所有後端服務嗎？此操作將會終止所有執行中的任務。')) {{
                 document.getElementById('shutdown-button').disabled = true;
                 document.getElementById('shutdown-button').textContent = '正在發送關閉信號...';
 
                 const shutdownUrl = 'http://localhost:8088/api/v1/shutdown';
-                fetch(shutdownUrl, { method: 'POST' })
+                fetch(shutdownUrl, {{ method: 'POST' }})
                     .then(response => response.json())
-                    .then(data => {
+                    .then(data => {{
                         console.log('Shutdown initiated:', data);
                         // 後續的狀態更新將由儀表板的常規輪詢來處理
-                    })
-                    .catch(error => {
+                    }})
+                    .catch(error => {{
                         console.error('Error triggering shutdown:', error);
                         alert('發送關閉信號失敗，請檢查後端日誌。');
                         document.getElementById('shutdown-button').disabled = false;
                         document.getElementById('shutdown-button').textContent = '🛑 手動關閉所有服務';
-                    });
-            }
-        }
+                    }});
+            }}
+        }}
 
         // 立即執行一次，然後設定定時器
         updateDashboard();
