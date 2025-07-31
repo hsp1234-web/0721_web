@@ -152,8 +152,16 @@ async def safe_install_packages(app_name: str, requirements_path: Path, python_e
         log_event("WARN", f"找不到 {requirements_path}，跳過安裝。")
         return
 
-    with open(requirements_path, "r") as f:
-        packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    with open(requirements_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    packages = []
+    for line in lines:
+        # 去除行內註解 (從 '#' 開始的部分)
+        line_content = line.split('#')[0].strip()
+        # 只有在處理後還有內容時才加入列表
+        if line_content:
+            packages.append(line_content)
 
     log_event("BATTLE", f"開始為 {app_name} 安裝 {len(packages)} 個依賴。")
 
@@ -293,6 +301,10 @@ async def main_logic(config: dict):
 # --- 主程序 ---
 def performance_logger_thread():
     """一個獨立的執行緒，專門用來將效能數據寫入資料庫"""
+    # 這裡我們不傳入 settings，而是在執行緒內部讀取一次性的設定
+    config = load_config()
+    refresh_interval = config.get("PERFORMANCE_MONITOR_RATE_SECONDS", 1.0)
+
     while not console._stop_event.is_set():
         # 更新 status_table
         update_status(cpu=console.cpu_usage, ram=console.ram_usage)
@@ -310,7 +322,7 @@ def performance_logger_thread():
         except Exception as e:
             print(f"Error in perf logger: {e}")
 
-        time.sleep(1) # 每秒記錄一次
+        time.sleep(refresh_interval)
 
 # --- API 伺服器邏輯 ---
 async def get_status_api(request):
@@ -324,9 +336,35 @@ async def get_status_api(request):
             cursor.execute("SELECT * FROM status_table WHERE id = 1")
             status_data = cursor.fetchone()
 
-            # 獲取最新的 20 條日誌
-            cursor.execute("SELECT timestamp, level, message FROM phoenix_logs ORDER BY id DESC LIMIT 20")
-            logs_data = cursor.fetchall()
+            # 獲取日誌等級設定
+            config = load_config()
+            levels_to_show = config.get("LOG_LEVELS_TO_SHOW", {})
+
+            # 預設顯示所有等級，除非設定明確為 False
+            if not levels_to_show:
+                 # 如果 LOG_LEVELS_TO_SHOW 是空的或不存在，則顯示所有等級
+                 allowed_levels_clause = ""
+            else:
+                allowed_levels = [level for level, show in levels_to_show.items() if show]
+                if not allowed_levels:
+                    # 如果所有等級都被設置為 False，則不顯示任何日誌
+                    logs_data = []
+                    allowed_levels_clause = "WHERE 1=0" # A trick to get no results
+                else:
+                    placeholders = ','.join('?' for _ in allowed_levels)
+                    allowed_levels_clause = f"WHERE level IN ({placeholders})"
+
+            if 'logs_data' not in locals():
+                log_display_lines = config.get("LOG_DISPLAY_LINES", 20)
+                query = f"SELECT timestamp, level, message FROM phoenix_logs {allowed_levels_clause} ORDER BY id DESC LIMIT ?"
+
+                params = []
+                if allowed_levels_clause and "WHERE 1=0" not in allowed_levels_clause:
+                    params.extend(allowed_levels)
+                params.append(log_display_lines)
+
+                cursor.execute(query, tuple(params))
+                logs_data = cursor.fetchall()
 
         if not status_data:
             return web.json_response({"error": "Status not found"}, status=404)
@@ -372,11 +410,8 @@ async def main(db_path: Path):
     config = load_config()
     console.start()
 
-    # 讀取資源設定以傳遞給效能日誌記錄執行緒
-    resource_settings = load_resource_settings()
-
     # 啟動專門的效能日誌記錄執行緒
-    perf_thread = threading.Thread(target=performance_logger_thread, args=(resource_settings,), daemon=True)
+    perf_thread = threading.Thread(target=performance_logger_thread, daemon=True)
     perf_thread.start()
 
     # 建立 API 伺服器任務

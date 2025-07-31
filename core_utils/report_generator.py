@@ -62,9 +62,9 @@ class ReportGenerator:
             return
 
         reports = {
-            "綜合戰情簡報.md": self._generate_summary_report,
-            "效能分析報告.md": self._generate_performance_report,
-            "詳細日誌報告.md": self._generate_log_report,
+            "summary_report.md": self._generate_summary_report,
+            "performance_report.md": self._generate_performance_report,
+            "detailed_log_report.md": self._generate_log_report,
         }
 
         for filename, generator_func in reports.items():
