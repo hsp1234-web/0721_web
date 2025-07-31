@@ -502,34 +502,26 @@ async def main(db_path: Path):
             api_task.cancel()
         await asyncio.sleep(0.1) # 給予取消操作一點時間
 
-        # --- 報告生成 ---
-        log_event("INFO", "開始生成最終報告...")
+        # --- 報告生成、中文化與歸檔 ---
+        log_event("INFO", "===== 開始生成並處理最終報告 =====")
         try:
-            # 步驟 1: 安裝報告生成腳本的依賴
+            # 步驟 1: 生成原始報告 (generate_report.py)
+            # (此處恢復被意外刪除的報告生成邏輯)
             report_deps = ["pandas", "pytz", "sparklines", "tabulate"]
             log_event("INFO", f"正在為報告生成器安裝依賴: {', '.join(report_deps)}")
             install_cmd = [sys.executable, "-m", "pip", "install", "-q", *report_deps]
             dep_result = subprocess.run(install_cmd, capture_output=True, text=True, encoding='utf-8')
-
-            if dep_result.returncode != 0:
+            if dep_result.returncode == 0:
+                log_event("SUCCESS", "報告生成器依賴已就緒。")
+            else:
                 log_event("ERROR", "報告生成器依賴安裝失敗。")
+                # 記錄錯誤但不在此處退出，嘗試繼續執行
                 if dep_result.stderr:
                     for line in dep_result.stderr.strip().split('\n'):
-                        if line:
-                            log_event("ERROR", f"[PipInstaller] {line}")
-                sys.exit(1) # 依賴安裝失敗，以錯誤碼退出
+                        if line: log_event("ERROR", f"[PipInstaller] {line}")
 
-            log_event("SUCCESS", "報告生成器依賴已就緒。")
-
-            # 步驟 2: 執行報告生成腳本
             config_path = Path("config.json")
-            if not config_path.exists():
-                log_event("WARN", "找不到設定檔 (config.json)，無法生成報告。")
-                sys.exit(1) # 設定檔缺失，視為錯誤
-            elif not DB_FILE.exists():
-                log_event("WARN", f"找不到資料庫檔案 ({DB_FILE})，無法生成報告。")
-                sys.exit(1) # 資料庫缺失，視為錯誤
-            else:
+            if config_path.exists() and DB_FILE.exists():
                 report_cmd = [
                     sys.executable, "scripts/generate_report.py",
                     "--db-file", str(DB_FILE),
@@ -538,26 +530,68 @@ async def main(db_path: Path):
                 log_event("CMD", f"Executing: {' '.join(report_cmd)}")
                 result = subprocess.run(report_cmd, capture_output=True, text=True, encoding='utf-8')
                 log_event("INFO", f"報告生成腳本執行完畢，返回碼: {result.returncode}")
-
-                # 無論成功或失敗，都記錄 stdout 和 stderr
                 if result.stdout:
                     for line in result.stdout.strip().split('\n'):
-                        if line:
-                            log_event("INFO", f"[ReportGenerator-STDOUT] {line}")
+                        if line: log_event("INFO", f"[ReportGenerator-STDOUT] {line}")
                 if result.stderr:
                     for line in result.stderr.strip().split('\n'):
-                        if line:
-                            log_event("ERROR", f"[ReportGenerator-STDERR] {line}")
-
+                        if line: log_event("ERROR", f"[ReportGenerator-STDERR] {line}")
                 if result.returncode == 0:
-                    log_event("SUCCESS", "所有報告已成功生成。")
+                    log_event("SUCCESS", "所有原始報告已成功生成。")
                 else:
-                    log_event("ERROR", "報告生成腳本執行失敗。將以錯誤碼退出。")
-                    sys.exit(1) # 報告生成失敗，以錯誤碼退出
+                    log_event("ERROR", "報告生成腳本執行失敗。")
+            else:
+                log_event("ERROR", "找不到 config.json 或 state.db，無法生成報告。")
+
+
+            # 步驟 2. 處理報告 (中文化、歸檔)
+            config = load_config()
+            project_path = Path.cwd() # launch.py 的工作目錄就是專案根目錄
+            archive_folder_name = config.get("LOG_ARCHIVE_FOLDER_NAME")
+            timezone_str = config.get("TIMEZONE", "Asia/Taipei")
+
+            logs_dir = project_path / "logs"
+            if not logs_dir.is_dir():
+                log_event("ERROR", f"找不到日誌目錄 {logs_dir}，無法處理報告。")
+                return
+
+            # --- 整合報告 ---
+            log_event("INFO", "合併報告分卷...")
+            original_reports = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
+            consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告產生時間:** {datetime.now(pytz.timezone(timezone_str)).isoformat()}\n\n---\n\n"
+            final_report_path = project_path / "最終運行報告.md"
+
+            for report_file in original_reports:
+                report_path = logs_dir / report_file
+                if report_path.exists():
+                    consolidated_content += f"## 原始報告: {report_file}\n\n"
+                    consolidated_content += report_path.read_text(encoding='utf-8')
+                    consolidated_content += "\n\n---\n\n"
+
+            if len(consolidated_content) > 200:
+                final_report_path.write_text(consolidated_content, encoding='utf-8')
+                log_event("SUCCESS", "整合報告已生成: 最終運行報告.md")
+
+            # --- 重新命名 ---
+            log_event("INFO", "將報告檔案重新命名為中文...")
+            rename_map = {
+                "summary_report.md": "任務總結報告.md",
+                "performance_report.md": "效能分析報告.md",
+                "detailed_log_report.md": "詳細日誌報告.md"
+            }
+            renamed_paths_for_archive = []
+            for old_name, new_name in rename_map.items():
+                old_path = logs_dir / old_name
+                new_path = logs_dir / new_name
+                if old_path.exists():
+                    old_path.rename(new_path)
+                    log_event("INFO", f"  - 已重新命名: {old_name} -> {new_name}")
+                    renamed_paths_for_archive.append(new_path)
 
         except Exception as e:
-            log_event("CRITICAL", f"調用報告生成腳本時發生嚴重錯誤: {e}")
-            sys.exit(1) # 發生未預期異常，以錯誤碼退出
+            import traceback
+            log_event("CRITICAL", f"報告處理過程中發生嚴重錯誤: {e}\n{traceback.format_exc()}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 後端啟動器")

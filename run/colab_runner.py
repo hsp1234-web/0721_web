@@ -438,63 +438,27 @@ def render_dashboard_html():
     return css + html_body + javascript
 
 def final_report_processing(project_path, archive_folder_name, timezone_str):
-    """處理報告的重新命名、整合與歸檔"""
-    if not project_path:
+    """
+    (前端職責) 處理報告的最終歸檔。
+    此函式假定後端已完成報告的生成與重新命名。
+    """
+    if not project_path or not archive_folder_name:
+        update_status(log="ℹ️ 歸檔功能已關閉或專案路徑無效，跳過歸檔。")
         return
+
+    update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告...")
 
     logs_dir = project_path / "logs"
-    if not logs_dir.is_dir():
-        update_status(log=f"⚠️ 找不到日誌目錄 {logs_dir}，跳過報告處理。")
-        return
-
-    # --- 1. 整合報告生成 (從原始英文檔案) ---
-    update_status(task="生成整合報告", log="正在合併報告分卷...")
-    original_reports = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
-    consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告產生時間:** {datetime.now(pytz.timezone(timezone_str)).isoformat()}\n\n---\n\n"
-    final_report_path = project_path / "最終運行報告.md"
+    # 已知由後端生成的報告檔案
+    files_to_archive_names = [
+        "任務總結報告.md",
+        "效能分析報告.md",
+        "詳細日誌報告.md",
+        "最終運行報告.md" # 這個在專案根目錄
+    ]
 
     try:
-        for report_file in original_reports:
-            report_path = logs_dir / report_file
-            if report_path.exists():
-                consolidated_content += f"## 原始報告: {report_file}\n\n"
-                consolidated_content += report_path.read_text(encoding='utf-8')
-                consolidated_content += "\n\n---\n\n"
-
-        if len(consolidated_content) > 200:
-            final_report_path.write_text(consolidated_content, encoding='utf-8')
-            update_status(log="✅ 整合報告已生成: 最終運行報告.md")
-        else:
-            update_status(log="沒有足夠的報告分卷來生成整合報告。")
-    except Exception as e:
-        update_status(log=f"❌ 生成整合報告時發生錯誤: {e}")
-
-    # --- 2. 報告檔名中文化 ---
-    update_status(task="報告中文化", log="正在將報告檔案重新命名為繁體中文...")
-    rename_map = {
-        "summary_report.md": "任務總結報告.md",
-        "performance_report.md": "效能分析報告.md",
-        "detailed_log_report.md": "詳細日誌報告.md"
-    }
-    renamed_paths_for_archive = []
-    for old_name, new_name in rename_map.items():
-        old_path = logs_dir / old_name
-        new_path = logs_dir / new_name
-        if old_path.exists():
-            try:
-                old_path.rename(new_path)
-                update_status(log=f"  - 已重新命名: {old_name} -> {new_name}")
-                renamed_paths_for_archive.append(new_path)
-            except Exception as e:
-                update_status(log=f"  - ❌ 重新命名失敗: {e}")
-        else:
-            update_status(log=f"  - 警告: 找不到原始報告檔案 {old_name}，無法重新命名。")
-
-    # --- 3. 歸檔 ---
-    if not archive_folder_name:
-        update_status(log="ℹ️ 日誌歸檔功能已關閉。")
-        return
-    try:
+        # 準備歸檔目標路徑
         archive_base_path = Path("/content") / archive_folder_name
         archive_base_path.mkdir(exist_ok=True)
         tz = pytz.timezone(timezone_str)
@@ -502,25 +466,20 @@ def final_report_processing(project_path, archive_folder_name, timezone_str):
         archive_target_path = archive_base_path / timestamp_folder_name
         archive_target_path.mkdir()
 
-        update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告至: {archive_target_path}")
+        for filename in files_to_archive_names:
+            # 檢查 logs 目錄和專案根目錄
+            source_path = logs_dir / filename
+            if not source_path.exists():
+                source_path = project_path / filename
 
-        # 建立一個包含所有要歸檔檔案的列表
-        files_to_archive = renamed_paths_for_archive
-        if final_report_path.exists():
-            files_to_archive.append(final_report_path)
+            if source_path.exists():
+                shutil.move(str(source_path), str(archive_target_path / source_path.name))
+                update_status(log=f"  - 已歸檔: {source_path.name}")
+            else:
+                update_status(log=f"  - 警告: 未找到報告檔案 {filename}，無法歸檔。")
 
-        for source_file in files_to_archive:
-            if source_file.exists():
-                # shutil.move 需要字串路徑
-                shutil.move(str(source_file), str(archive_target_path / source_file.name))
-                update_status(log=f"  - 已移動: {source_file.name}")
+        update_status(log=f"✅ 報告歸檔完成至 {archive_target_path}")
 
-        # 如果整合報告不在 project_path, 也要檢查 logs/
-        if not final_report_path.exists() and (logs_dir / final_report_path.name).exists():
-             shutil.move(str(logs_dir / final_report_path.name), str(archive_target_path / final_report_path.name))
-             update_status(log=f"  - 已移動: {final_report_path.name}")
-
-        update_status(log="✅ 報告歸檔完成。")
     except Exception as e:
         update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
 
@@ -546,13 +505,11 @@ async def serve_proxy_url_with_retry(health_check_url: str, port: int, retries: 
         if await check_backend_ready(health_check_url):
             update_status(log=f"✅ [URL 服務] 後端服務已就緒，正在生成代理 URL...")
             try:
-                colab_output.serve_kernel_port_as_window(
-                    port,
-                    anchor_text=f'🚀 點此開啟主控台 (連接埠 {port})'
-                )
-                update_status(log="✅ [URL 服務] Colab 代理 URL 已成功顯示。")
+                # 根據 Colab 的建議，改用更穩定的 iframe 方法
+                colab_output.serve_kernel_port_as_iframe(port, height=800)
+                update_status(log="✅ [URL 服務] Colab 代理 iframe 已成功顯示。")
             except Exception as e:
-                update_status(log=f"❌ [URL 服務] 呼叫 serve_kernel_port_as_window 失敗: {e}")
+                update_status(log=f"❌ [URL 服務] 呼叫 serve_kernel_port_as_iframe 失敗: {e}")
             return # 任務完成，無論成功或失敗
 
         if attempt < retries - 1:
@@ -576,7 +533,7 @@ def main():
     import asyncio
     url_service_thread = threading.Thread(
         target=lambda: asyncio.run(serve_proxy_url_with_retry(
-            health_check_url="http://localhost:8000/docs", # FastAPI 的 /docs 是一個很好的健康檢查點
+            health_check_url="http://localhost:8000/health", # 使用我們新增的、更可靠的健康檢查端點
             port=8000,
             retries=COLAB_URL_RETRIES,
             delay=COLAB_URL_RETRY_DELAY
@@ -629,7 +586,12 @@ def main():
         # 確保背景工作執行緒也結束
         worker_thread.join(timeout=5)
 
-        # 將報告處理邏輯統一到一個函式中
+        # 等待後端程序完全結束（這很關鍵，確保報告已生成）
+        if launch_process_local and launch_process_local.poll() is None:
+            update_status(log="...等待後端程序完成最終報告生成...")
+            launch_process_local.wait(timeout=15)
+
+        # 現在後端已結束，執行前端的歸檔任務
         final_report_processing(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
 
         # 加入一個短暫的延遲，給予前端最後一次機會輪詢 API 以更新最終狀態 (例如 "報告已歸檔")
