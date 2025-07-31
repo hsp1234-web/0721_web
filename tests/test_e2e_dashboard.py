@@ -25,7 +25,7 @@ def live_server(): # 移除 full_mode_config 來啟用 launch.py 的預設快速
     try:
         # 使用 subprocess.Popen 在背景啟動 launch.py
         # launch.py 在沒有 FAST_TEST_MODE: False 的情況下，預設進入快速模式
-        command = [sys.executable, "launch.py", "--db-file", str(db_path)]
+        command = [sys.executable, "scripts/launch.py", "--db-file", str(db_path)]
 
         with open("logs/e2e_test_server.log", "w") as log_file:
             process = subprocess.Popen(

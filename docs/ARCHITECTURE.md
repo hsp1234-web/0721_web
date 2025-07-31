@@ -26,62 +26,75 @@
 
 ---
 
-## 二、 v17 終極檔案結構與核心工具鏈
+## 二、 v18 檔案結構與核心工具鏈
 
-這是專案的最終檔案結構，精準反映了所有關鍵組件及其職責。
+這是專案的最終檔案結構，精準反映了所有關鍵組件及其職責（v18 版，已重構）。
 
 ```
 .
-├── ALL_DATE/                 # 舊專案封存 (按使用者指示保留)
-├── README.md                 # 您正在閱讀的檔案
-├── WEB1/
-│   └── config.json           # 由 Colab Runner 產生的設定檔
-├── apps/                       # 所有獨立微服務的家
-│   ├── dashboard_api/
-│   ├── main_dashboard/
-│   ├── quant/
-│   └── transcriber/
-├── config/                   # 全域設定中心
-│   └── resource_settings.yml
-├── core_utils/               # 核心工具模組
-│   ├── __init__.py
-│   ├── commander_console.py
-│   ├── resource_monitor.py
-│   └── safe_installer.py
-├── docs/                       # 專案文件
-│   ├── ARCHITECTURE.md
-│   ├── Colab_Guide.md
-│   ├── MISSION_DEBRIEFING.md
-│   └── TEST.md
-├── generate_report.py        # 【新】獨立的報告生成插件
-├── launch.py                 # 主啟動腳本 (TUI 介面)
-├── logs/                       # 日誌與報告的輸出目錄
-├── phoenix_starter.py        # (可選) 視覺化啟動器
-├── requirements-dev.in       # 開發環境的依賴聲明檔案
-├── requirements-dev.txt      # 鎖定版本的開發依賴
-├── run/                        # 特定環境的執行器
-│   └── colab_runner.py
-├── smart_e2e_test.py         # 智能測試腳本
-├── temp/                       # 【新】暫存檔案、測試產物等的歸檔目錄
-│   ├── proxy/
-│   ├── test.db
-│   ├── test.mp3
-│   ├── test_phoenix_state.json
-│   ├── transcriber_uploads/
-│   └── uploads/
-└── tests/                      # 品質保證中心
-    ├── quant/
+├── README.md
+├── WEB1
+│   └── config.json
+├── apps
+│   ├── dashboard_api
+│   ├── main_dashboard
+│   ├── quant
+│   └── transcriber
+├── config
+│   └── resource_settings.yml
+├── core_utils
+│   ├── __init__.py
+│   ├── commander_console.py
+│   ├── resource_monitor.py
+│   └── safe_installer.py
+├── docs
+│   ├── ARCHITECTURE.md
+│   ├── Colab_Guide.md
+│   ├── MISSION_DEBRIEFING.md
+│   └── TEST.md
+├── logs
+├── pytest.ini
+├── requirements-dev.in
+├── requirements-dev.txt
+├── run
+│   └── colab_runner.py
+├── scripts
+│   ├── __init__.py
+│   ├── estimate_deps_size.py
+│   ├── generate_report.py
+│   ├── launch.py
+│   ├── phoenix_starter.py
+│   └── smart_e2e_test.py
+├── temp
+└── tests
+    ├── conftest.py
+    ├── quant
+    ├── test_e2e_dashboard.py
+    ├── test_estimate_deps_size.py
     ├── test_launch_installer.py
-    └── transcriber/
+    ├── test_resource_protection.py
+    └── transcriber
 ```
 
-### **核心工具鏈詳解:**
-*   **`launch.py`**: 專案的**核心入口**。它負責啟動 TUI 介面、協調後端服務、監控資源，並在結束時觸發報告生成。它內建了依賴自動安裝和快速測試模式，是開發和執行的主要工具。
-*   **`smart_e2e_test.py`**: 新一代的 Python **智能測試指揮官**。它取代了傳統的 shell 腳本，透過 `multiprocessing` 和 `pytest-xdist` 實現了前所未有的平行化測試能力，並整合 `pytest-timeout` 確保流程穩定性。
-*   **`generate_report.py`**: 一個獨立的**報告生成「插件」**。它由 `launch.py` 在任務結束時透過 `subprocess` 呼叫，負責從 SQLite 資料庫中讀取數據並產生多維度的 Markdown 分析報告（包含趨勢圖和瓶頸分析），實現了報告與主邏輯的解耦。
-*   **`run/colab_runner.py`**: 專為 Google Colab 設計的 **HTML 儀表板啟動器**。它透過讀寫分離的資料庫驅動架構，為使用者提供了一個視覺化的、即時更新的操作介面。
-*   **`core_utils/`**: 專案的**「引擎室」**。包含了 `safe_installer.py` (原子化安全安裝)、`resource_monitor.py` (資源健康檢查) 和 `commander_console.py` (TUI 介面渲染) 等關鍵模組。
-*   **`docs/`**: 包含本文件在內的**權威性技術文件**，是理解專案設計與演進的最佳起點。
+### **核心目錄與檔案詳解:**
+
+*   **`README.md`**: 專案的入口文件，提供高層次的概覽和快速上手指南。
+*   **`apps/`**: **微服務應用目錄**。每個子目錄都是一個獨立的 FastAPI 應用，擁有自己的 `requirements.txt`。這種模組化設計使得每個服務都可以被獨立開發、測試和部署。
+*   **`config/`**: **全域設定中心**。存放專案範圍的設定檔，例如 `resource_settings.yml`，用於控制資源監控的閾值。
+*   **`core_utils/`**: **核心工具模組**。專案的「引擎室」，提供共享的底層功能。
+    *   `safe_installer.py`: 原子化的安全安裝程序，確保在安裝依賴前檢查系統資源，並在安裝後即時清理，解決了 CI/CD 環境中的空間瓶頸。
+    *   `commander_console.py`: 負責 TUI (文字使用者介面) 的渲染與日誌顯示。
+    *   `resource_monitor.py`: 提供跨平台的系統資源 (CPU, RAM) 監控功能。
+*   **`docs/`**: **專案文件庫**。包含此架構藍圖、Colab 使用指南和其他重要的技術文件。
+*   **`logs/`**: **日誌與報告目錄**。所有由 `launch.py` 和 `generate_report.py` 產生的日誌和 Markdown 報告都會存放在這裡。
+*   **`run/`**: **特定環境執行器**。
+    *   `colab_runner.py`: 專為 Google Colab 設計的啟動器，提供一個視覺化的 HTML 儀表板來監控後端進程。
+*   **`scripts/`**: **主要腳本與工具**。這是所有使用者可直接執行的主要工具的家。
+    *   `launch.py`: 專案的**核心入口**。負責啟動 TUI 介面、協調後端服務、監控資源，並在結束時觸發報告生成。
+    *   `smart_e2e_test.py`: **智能測試指揮官**。使用 Python 的 `multiprocessing` 實現了高效的平行化測試，並整合了超時控制，確保了測試流程的穩定性。
+    *   `generate_report.py`: 獨立的**報告生成插件**。由 `launch.py` 在任務結束時呼叫，從資料庫中讀取數據並產生分析報告。
+    *   `estimate_deps_size.py`: **依賴大小估算工具**。一個輔助工具，可以在不實際安裝的情況下，預估 `requirements.in` 檔案的完整依賴樹的總下載大小，有助於評估部署成本。
+*   **`tests/`**: **品質保證中心**。包含所有 `pytest` 單元測試、整合測試和端對端測試。
 
 ---
 

@@ -187,7 +187,7 @@ def background_worker():
 
         update_status(log="🚀 使用真實後端模式啟動...")
         command = [
-            sys.executable, str(project_path / "launch.py"),
+            sys.executable, str(project_path / "scripts" / "launch.py"),
             "--db-file", str(db_file_path)
         ]
         backend_name = "真實後端 (launch.py)"

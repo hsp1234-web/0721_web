@@ -17,19 +17,20 @@
 
 ### 核心工具鏈:
 
-- **`phoenix_starter.py` (推薦)**: 專案的**視覺化啟動器**。一鍵完成資源檢查、智慧型安裝、執行測試，並提供精美的儀表板全程監控。
-- **`launch.py`**: **核心啟動腳本 (預設快速模式)**。這是專案的唯一入口點。預設情況下，它會以快速測試模式運行，在幾秒鐘內驗證 TUI 和日誌系統。使用 `--full` 旗標可觸發完整安裝和服務啟動。
-- **`smart_e2e_test.py`**: 新一代**智能測試指揮官 (Python版)**。它以平行化的方式執行所有端對端測試，並整合了 `pytest-xdist` 和 `pytest-timeout` 來實現快速、穩健的測試。
+- **`scripts/`**: **主要腳本與工具目錄**。
+  - **`phoenix_starter.py` (推薦)**: 專案的**視覺化啟動器**。一鍵完成資源檢查、智慧型安裝、執行測試，並提供精美的儀表板全程監控。
+  - **`launch.py`**: **核心啟動腳本 (預設快速模式)**。這是專案的唯一入口點。預設情況下，它會以快速測試模式運行，在幾秒鐘內驗證 TUI 和日誌系統。使用 `--full` 旗標可觸發完整安裝和服務啟動。
+  - **`smart_e2e_test.py`**: 新一代**智能測試指揮官 (Python版)**。它以平行化的方式執行所有端對端測試，並整合了 `pytest-xdist` 和 `pytest-timeout` 來實現快速、穩健的測試。
 - **`core_utils/`**: 核心工具模組，包含 `safe_installer.py` (安全安裝器) 和 `resource_monitor.py` (資源監控器)。
 - **`config/resource_settings.yml`**: **全域資源設定中心**。
 - **`logs/`**: **日誌中心**，所有安裝與啟動過程的詳細日誌都儲存在此。
 - **uv**: 我們唯一的環境管理與安裝工具，由安全安裝模組在底層呼叫。
 - **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
 
-### v16+ 新增亮點：
+### v18+ 新增亮點：
 
 - **模組化與視覺化報告系統**:
-  - **獨立報告插件**: 報告系統已完全模組化為 `generate_report.py`，與主程序解耦，可獨立執行與測試。
+  - **獨立報告插件**: 報告系統已完全模組化為 `scripts/generate_report.py`，與主程序解耦，可獨立執行與測試。
   - **文字趨勢圖**: 效能報告中新增了 CPU 與 RAM 使用率的文字走勢圖 (`sparklines`)，讓效能趨勢一目了然。
   - **自動瓶頸分析**: 摘要報告現在能透過事件分析，自動列出耗時最長的任務 Top 5，幫助開發者快速定位效能瓶頸。
 - **可客製化的 Colab 儀表板**:
@@ -37,7 +38,7 @@
   - **獨立效能監控頻率**: 系統資源 (CPU/RAM) 的更新頻率可以獨立設定，實現更即時的監控。
 - **依賴鎖定與掃描**:
   - **`pip-tools` 整合**: 所有 `requirements.txt` 現在都由 `pip-compile` 生成，確保了依賴版本的精確鎖定，提升了環境的可重現性。
-  - **自動化弱點掃描**: 透過整合 `pip-audit`，`smart_e2e_test.py` 現在會在測試流程中自動掃描已知的安全漏洞。
+  - **自動化弱點掃描**: 透過整合 `pip-audit`，`scripts/smart_e2e_test.py` 現在會在測試流程中自動掃描已知的安全漏洞。
 
 ---
 
@@ -48,52 +49,22 @@
 在任何支持 Python 的環境中，只需一個命令即可啟動鳳凰之心視覺化啟動器：
 
 ```bash
-python phoenix_starter.py
+python scripts/phoenix_starter.py
 ```
 
-這個命令會自動為您完成**所有事情**，並在一個精美的儀表板上顯示所有進度，最終畫面如下：
-
-```text
-┌─ 🚀 鳳凰之心視覺化啟動器 v9.2 ───────────────────────────────────────────────┐
-│                                                                              │
-├─ 🌐 系統狀態 (System Status) ────────────────────────────────────────────────┤
-│ 🟢 運行中   核心: 25.6%   RAM: 0.3/8.3 GB (6.8%)   DISK: 1.0/10.5 GB (10.2%)  │
-│                                                                              │
-├─ 📦 應用程式狀態 (Application Status) ───────────────────────────────────────┤
-│ 📈 Quant App         [🟢 測試通過]         🎤 Transcriber App   [🟢 測試通過]         │
-│                                                                              │
-├─ 📜 即時日誌 (Live Logs) ────────────────────────────────────────────────────┤
-│ [04:59:53] [INFO] ============================== 4 passed in 2.62s =============================== │
-│ [04:59:53] [INFO] --- 開始為 App 'transcriber' 進行安全安裝 ---             │
-│ [04:59:53] [INFO] --- [4/4] 準備安裝: pydantic ---                          │
-│ [04:59:53] [INFO] 資源充足。開始安裝 'pydantic'...                         │
-│ [04:59:55] [INFO] ========================= 4 passed, 1 skipped in 0.63s ========================= │
-│                                                                              │
-├─ ✨ 當前任務 (Current Task) ─────────────────────────────────────────────────┤
-│ [空閒]                                                                       │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-**核心流程：**
-1.  檢查並安裝 `uv`, `psutil`, `pyyaml` 等核心工具。
-2.  讀取 `config/resource_settings.yml` 中的資源閾值。
-3.  為 `apps/` 下的每一個 App 建立獨立的虛擬環境。
-4.  呼叫**安全安裝模組**，在監控下逐一安全地為每個 App 安裝依賴。
-5.  在儀表板上即時顯示詳細的安裝日誌。
-6.  執行所有測試 (`tests/`)。
-7.  所有任務完成後，畫面將會保留，直到您按下 Enter 鍵。
+這個命令會自動為您完成**所有事情**，並在一個精美的儀表板上顯示所有進度。
 
 ### 2.2. 快速啟動與完整部署 (推薦)
 
-`launch.py` 是專案的**主要入口點**，提供兩種模式：
+`scripts/launch.py` 是專案的**主要入口點**，提供兩種模式：
 
 **1. 快速驗證 (預設行為)**
 
-直接執行 `launch.py`，無需任何參數。它將在幾秒鐘內啟動 TUI 並完成一次模擬運行，非常適合快速檢查介面和日誌功能。
+直接執行 `scripts/launch.py`，無需任何參數。它將在幾秒鐘內啟動 TUI 並完成一次模擬運行，非常適合快速檢查介面和日誌功能。
 
 ```bash
 # 快速驗證 TUI 和日誌系統
-python launch.py
+python scripts/launch.py
 ```
 
 **2. 完整部署**
@@ -102,18 +73,18 @@ python launch.py
 
 ```bash
 # 執行完整的安裝和服務啟動
-python launch.py --full
+python scripts/launch.py --full
 ```
 
 ---
 
 ## 三、 Google Colab 使用指南
 
-在 Colab 環境中，直接使用 `launch.py` 即可獲得最佳化的體驗。
+在 Colab 環境中，直接使用 `scripts/launch.py` 即可獲得最佳化的體驗。
 
-- **快速驗證 (預設)**：在 Colab 儲存格中執行 `!python launch.py`，可以立即看到 TUI 儀表板的渲染效果。
-- **完整執行**：執行 `!python launch.py --full` 來觸發完整的應用安裝和啟動流程。
-- **V4 原生 TUI 架構**：`launch.py` 會直接在 Colab 的輸出儲存格中渲染一個高效、穩定的雙區塊儀表板，無需任何額外設定。
+- **快速驗證 (預設)**：在 Colab 儲存格中執行 `!python scripts/launch.py`，可以立即看到 TUI 儀表板的渲染效果。
+- **完整執行**：執行 `!python scripts/launch.py --full` 來觸發完整的應用安裝和啟動流程。
+- **V4 原生 TUI 架構**：`scripts/launch.py` 會直接在 Colab 的輸出儲存格中渲染一個高效、穩定的雙區塊儀表板，無需任何額外設定。
 
 ---
 
@@ -134,58 +105,36 @@ pip install -r requirements-dev.txt
 
 ### 執行測試
 
-當您的開發環境設定完成後，您可以隨時執行完整的測試套件來驗證程式碼的正確性：
+當您的開發環境設定完成後，您可以隨時執行完整的測試套件來驗證程式碼的正確性。推薦使用我們提供的智能測試腳本：
 
 ```bash
-# 執行所有測試
-pytest
+# 執行所有測試 (推薦方式)
+python scripts/smart_e2e_test.py
 ```
 
 ---
 
-## 六、 檔案結構總覽 (v17 - 精確版)
+## 六、 檔案結構總覽 (v18 - 重構版)
+
+以下是專案經過重構後的高層次檔案結構。更詳細的架構藍圖、設計哲學及每個模組的深入說明，請參閱 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
 
 ```
 .
-├── ALL_DATE/                 # 舊專案封存 (按使用者指示保留)
-├── README.md                 # 您正在閱讀的檔案
-├── WEB1/
-│   └── config.json           # 由 Colab Runner 產生的設定檔
-├── apps/                       # 所有獨立微服務的家
-│   ├── dashboard_api/
-│   ├── main_dashboard/
-│   ├── quant/
-│   └── transcriber/
-├── config/                   # 全域設定中心
-│   └── resource_settings.yml
-├── core_utils/               # 核心工具模組
-│   ├── __init__.py
-│   ├── commander_console.py
-│   ├── resource_monitor.py
-│   └── safe_installer.py
-├── docs/                       # 專案文件
-│   ├── ARCHITECTURE.md
-│   ├── Colab_Guide.md
-│   ├── MISSION_DEBRIEFING.md
-│   └── TEST.md
-├── generate_report.py        # 【新】獨立的報告生成插件
-├── launch.py                 # 主啟動腳本 (TUI 介面)
-├── logs/                       # 日誌與報告的輸出目錄
-├── phoenix_starter.py        # (可選) 視覺化啟動器
-├── requirements-dev.in       # 開發環境的依賴聲明檔案
-├── requirements-dev.txt      # 鎖定版本的開發依賴
-├── run/                        # 特定環境的執行器
-│   └── colab_runner.py
-├── smart_e2e_test.py         # 智能測試腳本
-├── temp/                       # 【新】暫存檔案、測試產物等的歸檔目錄
-│   ├── proxy/
-│   ├── test.db
-│   ├── test.mp3
-│   ├── test_phoenix_state.json
-│   ├── transcriber_uploads/
-│   └── uploads/
-└── tests/                      # 品質保證中心
-    ├── quant/
-    ├── test_launch_installer.py
-    └── transcriber/
+├── README.md
+├── apps/
+│   ├── dashboard_api/
+│   ├── main_dashboard/
+│   ├── quant/
+│   └── transcriber/
+├── config/
+├── core_utils/
+├── docs/
+│   └── ARCHITECTURE.md
+├── logs/
+├── run/
+├── scripts/
+│   ├── launch.py
+│   ├── smart_e2e_test.py
+│   └── ... (其他工具)
+└── tests/
 ```

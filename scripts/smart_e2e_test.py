@@ -22,7 +22,7 @@ from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
 # --- 常數與設定 ---
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve() # 專案根目錄現在是腳本所在目錄的上一層
 APPS_DIR = PROJECT_ROOT / "apps"
 VENV_CACHE_DIR = PROJECT_ROOT / ".venv_cache"
 VENV_CACHE_DIR.mkdir(exist_ok=True)
@@ -90,10 +90,12 @@ def check_core_tools():
     try:
         import psutil
         import yaml
-        print_success("核心 Python 依賴 (psutil, PyYAML) 已滿足。")
+        import trio
+        import anyio
+        print_success("核心 Python 依賴 (psutil, PyYAML, trio, anyio) 已滿足。")
     except ImportError:
-        print_warn("缺少核心依賴 (psutil, PyYAML)，正在安裝...")
-        if run_command([sys.executable, "-m", "pip", "install", "-q", "psutil", "pyyaml"]) != 0:
+        print_warn("缺少核心依賴 (psutil, PyYAML, trio, anyio)，正在安裝...")
+        if run_command([sys.executable, "-m", "pip", "install", "-q", "psutil", "pyyaml", "trio", "anyio"]) != 0:
             print_fail("安裝核心依賴失敗。")
             sys.exit(1)
         print_success("核心依賴安裝成功。")
@@ -263,7 +265,7 @@ def test_database_driven_flow():
 
     # 2. 執行 launch.py，並透過命令列參數傳遞 db_file
     print_info(f"執行 launch.py (後端主力部隊) 並將狀態寫入 {db_file}")
-    command = [sys.executable, "launch.py", "--db-file", str(db_file)]
+    command = [sys.executable, "scripts/launch.py", "--db-file", str(db_file)]
     result = run_command(command, env=os.environ.copy())
 
     # 清理設定檔

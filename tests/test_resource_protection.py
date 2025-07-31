@@ -63,7 +63,7 @@ def test_full_run_with_normal_resources(full_mode_config):
     try:
         # 執行 launch.py。它會使用 conftest.py 中的 full_mode_config
         result = subprocess.run(
-            [sys.executable, "launch.py", "--db-file", str(db_file)],
+        [sys.executable, "scripts/launch.py", "--db-file", str(db_file)],
             capture_output=True,
             text=True,
             timeout=1800, # 30 分鐘超時

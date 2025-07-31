@@ -31,6 +31,9 @@ except ImportError:
         print("請手動執行 'pip install pytz nest_asyncio aiohttp' 後再試一次。")
         sys.exit(1)
 
+# 解決腳本移動到 scripts/ 後的路徑問題
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from core_utils.commander_console import CommanderConsole
 from core_utils.resource_monitor import is_resource_sufficient, load_resource_settings
 
