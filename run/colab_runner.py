@@ -32,7 +32,7 @@ REFRESH_RATE_SECONDS = 0.25 #@param {type:"number"}
 #@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
 LOG_DISPLAY_LINES = 20 #@param {type:"integer"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_FOLDER_NAME)**
-#@markdown > **留空即關閉歸檔功能。**
+#@markdown > **留空即關閉歸檔功能。歸檔位置在 Colab 左側檔案總管的 `/content/<您指定的資料夾名稱>` 中。**
 LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔" #@param {type:"string"}
 #@markdown **時區設定 (TIMEZONE)**
 TIMEZONE = "Asia/Taipei" #@param {type:"string"}
@@ -41,6 +41,7 @@ TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 FAST_TEST_MODE = True #@param {type:"boolean"}
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
+#@markdown > **注意：執行結束後若看到 `SystemExit: 0`，此為程式正常結束的預期提示，代表所有任務已順利完成，請放心。**
 #@markdown ---
 
 # ==============================================================================
@@ -440,8 +441,32 @@ def main():
         update_status(task="所有程序已結束。")
         # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
         # 我們只打印一個最終訊息。
-        print(f"\n[{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 指揮中心前端任務: 所有程序已結束。")
+        final_message = f"✅ [{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 所有程序已順利結束。"
+        print(f"\n{final_message}")
+
+def run_main():
+    """
+    執行主函數並優雅地處理結束流程，以提供乾淨的 Colab 輸出。
+    """
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit) as e:
+        # 如果是手動中斷或良性退出，我們不需要顯示任何錯誤。
+        # 腳本的 finally 區塊已經處理了清理工作。
+        # 我們可以在這裡印一個更明確的「手動停止」訊息。
+        if isinstance(e, KeyboardInterrupt):
+            print("\n🛑 操作已被使用者手動中斷。")
+    except Exception as e:
+        # 捕捉其他所有未預期的錯誤，並以更友好的方式顯示。
+        print(f"\n❌ 發生未預期的錯誤: {e}")
+        # 如果需要，可以在這裡顯示詳細的 traceback
+        # import traceback
+        # traceback.print_exc()
+    finally:
+        # 為了進一步抑制 IPython 的 "To exit" UserWarning，我們可以在這裡導入 warnings 並過濾它
+        # 但通常讓腳本自然結束是最好的方法。
+        pass
 
 
 if __name__ == "__main__":
-    main()
+    run_main()
