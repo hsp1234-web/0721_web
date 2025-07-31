@@ -17,13 +17,11 @@
 
 ### 核心工具鏈:
 
-- **`scripts/`**: **主要腳本與工具目錄**。
-  - **`phoenix_starter.py` (推薦)**: 專案的**視覺化啟動器**。一鍵完成資源檢查、智慧型安裝、執行測試，並提供精美的儀表板全程監控。
-  - **`launch.py`**: **核心啟動腳本 (預設快速模式)**。這是專案的唯一入口點。預設情況下，它會以快速測試模式運行，在幾秒鐘內驗證 TUI 和日誌系統。使用 `--full` 旗標可觸發完整安裝和服務啟動。
-  - **`smart_e2e_test.py`**: 新一代**智能測試指揮官 (Python版)**。它以平行化的方式執行所有端對端測試，並整合了 `pytest-xdist` 和 `pytest-timeout` 來實現快速、穩健的測試。
+- **`run/colab_runner.py`**: **Google Colab 啟動器**。在 Colab 環境中運行的主要入口，提供視覺化的 HTML 儀表板來監控後端進程。
+- **`scripts/smart_e2e_test.py`**: **智能測試指揮官**。用於在本機或 CI/CD 環境中執行完整的端對端平行化測試。
+- **`scripts/launch.py`**: **核心後端服務**。此腳本由 `colab_runner.py` 或 `smart_e2e_test.py` 在背景啟動，負責協調所有微服務的生命週期。
 - **`core_utils/`**: 核心工具模組，包含 `safe_installer.py` (安全安裝器) 和 `resource_monitor.py` (資源監控器)。
 - **`config/resource_settings.yml`**: **全域資源設定中心**。
-- **`logs/`**: **日誌中心**，所有安裝與啟動過程的詳細日誌都儲存在此。
 - **uv**: 我們唯一的環境管理與安裝工具，由安全安裝模組在底層呼叫。
 - **FastAPI**: 我們所有微服務使用的現代、高效能 Web 框架。
 
@@ -44,51 +42,42 @@
 
 ## 二、 如何開始 (Getting Started)
 
-### 2.1. 視覺化啟動與測試 (推薦)
+本專案提供兩種主要的使用情境：
 
-在任何支持 Python 的環境中，只需一個命令即可啟動鳳凰之心視覺化啟動器：
+### 2.1. 在 Google Colab 中進行視覺化部署
 
+此為體驗本專案完整功能的推薦方式。
+
+1.  打開 Google Colab。
+2.  將 `run/colab_runner.py` 的內容複製到一個 Colab 儲存格中。
+3.  根據您的需求修改儲存格頂部的參數（例如 `TARGET_BRANCH_OR_TAG`）。
+4.  執行該儲存格。
+
+一個視覺化的 HTML 儀表板將會出現，顯示詳細的部署進度、微服務狀態和即時日誌。
+
+### 2.2. 在本機環境進行開發與測試
+
+當您需要在本機進行開發或執行測試時，請遵循以下步驟：
+
+**1. 設定開發環境**
+
+首先，安裝所有測試和開發所需的依賴：
 ```bash
-python scripts/phoenix_starter.py
+# 安裝所有開發與測試所需的依賴
+pip install -r requirements-dev.txt
 ```
 
-這個命令會自動為您完成**所有事情**，並在一個精美的儀表板上顯示所有進度。
+**2. 執行完整測試套件**
 
-### 2.2. 快速啟動與完整部署 (推薦)
-
-`scripts/launch.py` 是專案的**主要入口點**，提供兩種模式：
-
-**1. 快速驗證 (預設行為)**
-
-直接執行 `scripts/launch.py`，無需任何參數。它將在幾秒鐘內啟動 TUI 並完成一次模擬運行，非常適合快速檢查介面和日誌功能。
-
+使用我們的智能測試腳本來驗證所有功能是否正常。此腳本會以平行化的方式執行所有測試，快速又高效。
 ```bash
-# 快速驗證 TUI 和日誌系統
-python scripts/launch.py
-```
-
-**2. 完整部署**
-
-當您需要安裝所有依賴並實際啟動後端服務時，請使用 `--full` 旗標。
-
-```bash
-# 執行完整的安裝和服務啟動
-python scripts/launch.py --full
+# 執行所有測試
+python scripts/smart_e2e_test.py
 ```
 
 ---
 
-## 三、 Google Colab 使用指南
-
-在 Colab 環境中，直接使用 `scripts/launch.py` 即可獲得最佳化的體驗。
-
-- **快速驗證 (預設)**：在 Colab 儲存格中執行 `!python scripts/launch.py`，可以立即看到 TUI 儀表板的渲染效果。
-- **完整執行**：執行 `!python scripts/launch.py --full` 來觸發完整的應用安裝和啟動流程。
-- **V4 原生 TUI 架構**：`scripts/launch.py` 會直接在 Colab 的輸出儲存格中渲染一個高效、穩定的雙區塊儀表板，無需任何額外設定。
-
----
-
-## 五、 開發與測試 (Development & Testing)
+## 三、 檔案結構總覽 (v18 - 重構版)
 
 為了確保開發環境的一致性並簡化測試流程，本專案提供了一個專門用於開發和測試的依賴檔案。
 

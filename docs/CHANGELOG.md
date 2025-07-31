@@ -6,6 +6,23 @@
 
 ---
 
+## 2025-07-31: v19 - 穩定性強化與專案清理
+
+**目標**：修復報告生成流程中的潛在錯誤，並對專案進行全面清理，移除過時檔案，使結構更清晰。
+
+### 1. 核心流程強化 (Core Flow Hardening)
+*   **錯誤傳遞修復**：修正了 `scripts/launch.py`，確保其在呼叫 `scripts/generate_report.py` 失敗時，能以非零錯誤碼退出。這解決了先前錯誤被「靜默」處理，導致上層測試（如 `smart_e2e_test.py`）無法偵測到失敗的問題。
+*   **依賴自動化**：`scripts/launch.py` 現在會在使用 `pip` 執行報告生成前，自動安裝 `pandas`, `sparklines` 等必要依賴，確保了報告功能的開箱即用性。
+
+### 2. 專案清理 (Project Cleanup)
+*   **移除過時腳本**：刪除了 `scripts/phoenix_starter.py`，因其功能已完全被 `scripts/launch.py` 和 `scripts/smart_e2e_test.py` 的組合所取代。
+*   **清理執行產物**：從版本控制中移除了多個在執行時才會產生的目錄和檔案，例如 `logs/`, `temp/`, `WEB1/`, `*.db` 檔案以及各種 `__pycache__` 目錄。
+*   **強化 `.gitignore`**：更新了 `.gitignore` 檔案，確保所有被移除的執行產物在未來不會被意外地再次提交。
+
+### 3. 文件現代化 (Documentation Modernization)
+*   **`README.md` 更新**：完全重寫了「如何開始」部分，移除了對已刪除腳本的引用，並提供了基於 `run/colab_runner.py`（Colab 環境）和 `scripts/smart_e2e_test.py`（本機開發）的最新、最準確的操作指南。
+*   **`docs/ARCHITECTURE.md` 更新**：修正了 Mermaid 圖表中的語法錯誤，並移除了描述過時 V4 架構的章節，使其內容與專案的 v18+ 架構保持一致。
+
 ## 2025-07-31: v18 - 專案結構重構與文件現代化
 
 **目標**：提升專案的長期可維護性，使目錄結構更符合直覺，並讓技術文件與實際狀態保持同步。

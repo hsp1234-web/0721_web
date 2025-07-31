@@ -111,8 +111,8 @@
 ```mermaid
 graph TD
     subgraph "後端核心"
-        D[🚀 scripts/launch.py<br>(背景主力部隊)] -- 寫入 --> C[(state.db)];
-        E[🌐 aiohttp API<br>(由 launch.py 啟動)] -- 讀取 --> C;
+        D["🚀 scripts/launch.py<br>(背景主力部隊)"] -- 寫入 --> C[(state.db)];
+        E["🌐 aiohttp API<br>(由 launch.py 啟動)"] -- 讀取 --> C;
     end
 
     subgraph "前端顯示"
@@ -121,7 +121,7 @@ graph TD
     end
 
     subgraph "離線分析"
-        F[📄 scripts/generate_report.py] -- 讀取 --> C;
+        F["📄 scripts/generate_report.py"] -- 讀取 --> C;
     end
 
     style C fill:#f9f,stroke:#333,stroke-width:2px
@@ -162,29 +162,3 @@ graph TD
 - **成功的解決方案 (v17)**: **核心依賴前置檢查與自動安裝**。我們在 `launch.py` 和 `generate_report.py` 的入口處，加入了對所有核心依賴（包括 `pandas`, `tabulate`, `sparklines` 等）的檢查。如果發現缺少，腳本會嘗試自動安裝，若安裝失敗則會清晰地提示使用者如何手動安裝。這確保了腳本的開箱即用性，極大改善了使用者體驗。
 
 ---
-
-## 五、V4 核心架構：預設快速驗證與參數化完整執行
-
-V4 架構在 V3 的基礎上進行了關鍵的易用性改進，將**快速驗證模式設為預設行為**，同時保留了執行完整任務的能力。這使得開發者可以近乎即時地檢查 TUI 和核心日誌功能，極大地提升了日常開發和偵錯的效率。
-
-### 核心變更：
-*   **預設快速模式**：直接執行 `python launch.py` 將**不再**安裝任何大型依賴或啟動後端 App。它會立即啟動 TUI，模擬一個簡短的執行流程，並在幾秒鐘內完成。這成為了驗證系統核心顯示和日誌功能的標準方法。
-*   **參數化完整模式**：過去的完整執行流程現在需要透過一個明確的命令列旗標來啟動：`python launch.py --full`。只有在指定此旗標時，系統才會執行完整的依賴安裝和後端服務啟動。
-*   **內建依賴引導**：`launch.py` 現在能夠自我檢測並自動安裝其運行所需的核心 Python 套件（如 `pytz`, `psutil`, `ipython`, `nest_asyncio`），免除了使用者的手動設定步驟。
-
-### 新的標準執行流程
-1.  **日常開發與驗證 (預設)**:
-    ```bash
-    python launch.py
-    ```
-    *   **目的**：快速檢查 TUI 是否正常渲染，日誌是否可以生成。
-    *   **耗時**：< 5 秒。
-
-2.  **完整部署與測試 (手動觸發)**:
-    ```bash
-    python launch.py --full
-    ```
-    *   **目的**：執行完整的端到端流程，包括安裝所有應用的依賴、啟動後端服務。
-    *   **耗時**：數分鐘（取決於網路速度和依賴大小）。
-
-這個改進使得 `launch.py` 同時滿足了**快速迭代**和**完整執行**兩種核心需求，並透過將簡單性設為預設值，提供了更流暢的開發者體驗。

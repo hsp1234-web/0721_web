@@ -29,7 +29,15 @@ test_final_archive/
 
 # Logs
 # 忽略 logs 目錄下的所有 .log 檔案
-logs/*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+.ruff_cache/
+.venv_cache/
+transcriber_uploads/
+temp/
+WEB1/
 
 # IDE / Editor specific
 .vscode/
