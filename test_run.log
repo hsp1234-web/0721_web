@@ -1,0 +1,14 @@
+
+[95m[1m🚀 鳳凰之心智能測試開始 (模式: mock) 🚀[0m
+
+[95m[1m🚀 步驟 1: 檢查核心工具 🚀[0m
+[96mℹ️ 執行命令: uv --version[0m
+   uv 0.7.21
+[92m✅ uv 已就緒。[0m
+[92m✅ 核心 Python 依賴 (psutil, PyYAML) 已滿足。[0m
+
+[95m[1m🚀 步驟 2: 發現 `apps` 目錄下的所有微服務 🚀[0m
+[96mℹ️ 發現了 4 個 App: ['transcriber', 'dashboard_api', 'main_dashboard', 'quant'][0m
+
+[95m[1m🚀 步驟 3: 開始對 4 個 App 進行平行化測試 🚀[0m
+[96mℹ️ 將使用 4 個平行進程。[0m
