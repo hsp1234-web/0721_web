@@ -442,6 +442,11 @@ def main():
         # 我們只打印一個最終訊息。
         print(f"\n[{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] 指揮中心前端任務: 所有程序已結束。")
 
+    # 為了防止在 Colab 環境中因儲存格末尾的意外字元 (如 'v') 而導致 NameError，
+    # 我們在此處明確地終止腳本執行。
+    import sys
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
