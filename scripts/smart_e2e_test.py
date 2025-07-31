@@ -110,134 +110,95 @@ def discover_apps() -> list[Path]:
     print_info(f"發現了 {len(apps)} 個 App: {[app.name for app in apps]}")
     return apps
 
-def get_reqs_hash(req_file: Path) -> str:
-    """計算 requirements 檔案的 SHA256 hash"""
-    if not req_file.exists():
-        return "no-reqs-file"
-    content = req_file.read_bytes()
-    return hashlib.sha256(content).hexdigest()[:16]
+def install_all_app_dependencies(apps: list[Path]):
+    """一次性安裝所有 App 的所有依賴"""
+    print_header("步驟 3: 統一安裝所有 App 的依賴")
+    all_reqs_content = []
+
+    # 收集通用測試依賴
+    common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout", "pip-audit"]
+    all_reqs_content.extend(common_deps)
+    print_info(f"已加入通用測試依賴: {', '.join(common_deps)}")
+
+    for app_path in apps:
+        app_name = app_path.name
+        req_file = app_path / "requirements.txt"
+        req_large_file = app_path / "requirements.large.txt"
+
+        if req_file.exists():
+            print_info(f"正在讀取 [{app_name}] 的 requirements.txt")
+            all_reqs_content.append(f"# --- From {app_name} ---")
+            all_reqs_content.append(req_file.read_text())
+
+        if req_large_file.exists():
+            print_info(f"正在讀取 [{app_name}] 的 requirements.large.txt")
+            all_reqs_content.append(f"# --- From {app_name} (large) ---")
+            all_reqs_content.append(req_large_file.read_text())
+
+    if not all_reqs_content:
+        print_warn("未找到任何依賴檔案，跳過安裝。")
+        return
+
+    # 將所有內容寫入一個暫存檔案
+    temp_reqs_file = PROJECT_ROOT / "temp_all_reqs.txt"
+    temp_reqs_file.write_text("\n".join(all_reqs_content))
+    print_info(f"所有依賴已合併至 {temp_reqs_file}")
+
+    # 使用 uv 一次性安裝
+    print_info("🚀 開始使用 uv 進行統一安裝...")
+    install_cmd = [
+        "uv", "pip", "install",
+        "--system",  # 允許在非虛擬環境中安裝 (例如在 Docker 容器或 CI 環境中)
+        "-r", str(temp_reqs_file),
+    ]
+    if run_command(install_cmd) != 0:
+        print_fail("統一依賴安裝失敗。")
+        temp_reqs_file.unlink() # 清理暫存檔
+        sys.exit(1)
+
+    print_success("✅ 所有 App 依賴已成功安裝到當前環境。")
+    temp_reqs_file.unlink() # 清理暫存檔
 
 def test_app(app_path: Path, test_mode: str) -> bool:
-    """對單個 App 進行隔離化測試，並使用快取機制"""
+    """對單個 App 進行測試 (在統一環境中)"""
     app_name = app_path.name
     print_header(f"--- 開始測試 App: {app_name} (模式: {test_mode}) ---")
 
-    venv_dir = app_path / ".venv_test_py"
-    reqs_file = app_path / "requirements.txt"
-    reqs_large_file = app_path / "requirements.large.txt"
     tests_dir = PROJECT_ROOT / "tests" / app_name
 
     if not tests_dir.is_dir() or not any(tests_dir.glob("test_*.py")):
         print_warn(f"在 '{tests_dir}' 中找不到測試檔案，跳過。")
         return True # 沒有測試也算成功
 
-    # 快取邏輯
-    reqs_hash = get_reqs_hash(reqs_file)
-    cached_venv_path = VENV_CACHE_DIR / f"{app_name}-{reqs_hash}.venv"
-
-    if venv_dir.exists():
-        shutil.rmtree(venv_dir)
-
-    if cached_venv_path.exists():
-        print_info(f"[{app_name}] 發現快取虛擬環境，正在複製...")
-        try:
-            shutil.copytree(cached_venv_path, venv_dir)
-            print_success(f"[{app_name}] ✅ 快取命中！成功從快取還原環境。")
-        except Exception as e:
-            print_warn(f"[{app_name}] 從快取複製環境失敗: {e}。將執行全新安裝。")
-            if venv_dir.exists(): shutil.rmtree(venv_dir)
-            # 觸發全新安裝
-    else:
-        print_warn(f"[{app_name}] ⚠️ 快取未命中。準備執行全新安裝...")
-
-    # 如果 venv 目錄不存在 (快取未命中或複製失敗)，則執行完整安裝
-    if not venv_dir.exists():
-        # 1. 建立隔離的測試虛擬環境
-        print_info(f"[{app_name}] 1. 建立隔離的測試虛擬環境...")
-        if run_command(["uv", "venv", str(venv_dir), "--seed"]) != 0:
-            print_fail(f"[{app_name}] 建立虛擬環境失敗。")
-            return False
-
-        python_exec = str(venv_dir / "bin" / "python")
-
-        # 2. 安裝通用測試依賴
-        print_info(f"[{app_name}] 2. 安裝通用測試依賴 (pytest, xdist, timeout, etc.)...")
-        common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout", "pip-audit"]
-        if run_command(["uv", "pip", "install", "-p", python_exec, *common_deps]) != 0:
-            print_fail(f"[{app_name}] 安裝通用依賴失敗。")
-            return False
-
-        # 3. 啟動智慧型安全安裝程序
-        print_info(f"[{app_name}] 3. 啟動智慧型安全安裝程序...")
-        safe_installer_cmd = [
-            sys.executable,
-            "-m", "core_utils.safe_installer",
-            app_name,
-            str(reqs_file),
-            python_exec
-        ]
-        # 需要先安裝核心依賴到虛擬環境中
-        run_command(["uv", "pip", "install", "-p", python_exec, "pyyaml", "psutil"])
-        if run_command(safe_installer_cmd) != 0:
-            print_fail(f"[{app_name}] 安全安裝核心依賴失敗。")
-            return False
-
-        # 安裝成功後，儲存到快取
-        print_info(f"[{app_name}] 全新安裝成功，正在儲存至快取...")
-        try:
-            shutil.copytree(venv_dir, cached_venv_path)
-            print_success(f"[{app_name}] 已成功快取虛擬環境至 {cached_venv_path}")
-        except Exception as e:
-            print_warn(f"[{app_name}] 儲存快取失敗: {e}")
-
-    python_exec = str(venv_dir / "bin" / "python")
-
-    # 4. 根據測試模式決定是否安裝大型依賴
-    app_mock_mode = "true"
-    if test_mode == "real":
-        app_mock_mode = "false"
-        if reqs_large_file.exists():
-            print_warn(f"[{app_name}] 偵測到真實模式，準備安全安裝大型依賴...")
-            large_installer_cmd = [
-                sys.executable,
-                "-m", "core_utils.safe_installer",
-                f"{app_name}_large",
-                str(reqs_large_file),
-                python_exec
-            ]
-            if run_command(large_installer_cmd) != 0:
-                print_fail(f"[{app_name}] 安全安裝大型依賴失敗。")
-                return False
-            print_success(f"[{app_name}] 大型依賴安裝完成。")
-    else:
-        print_info(f"[{app_name}] 處於模擬模式，跳過大型依賴。")
-
-    # 5. 執行 Ruff 檢查
-    print_info(f"[{app_name}] 4. 執行 Ruff 檢查...")
-    ruff_cmd = ["uv", "run", "-p", python_exec, "--", "ruff", "check", "--fix", str(app_path)]
+    # 1. 執行 Ruff 檢查
+    print_info(f"[{app_name}] 1. 執行 Ruff 檢查...")
+    # Ruff 現在直接在當前環境執行
+    ruff_cmd = [sys.executable, "-m", "ruff", "check", "--fix", str(app_path)]
     if run_command(ruff_cmd) != 0:
         print_fail(f"[{app_name}] Ruff 檢查失敗。")
         # return False # Ruff 失敗不應阻斷測試
 
-    # 6. 執行 pip-audit 弱點掃描
-    print_info(f"[{app_name}] 5. 執行 pip-audit 弱點掃描...")
-    audit_cmd = ["uv", "run", "-p", python_exec, "--", "pip-audit"]
+    # 2. 執行 pip-audit 弱點掃描
+    print_info(f"[{app_name}] 2. 執行 pip-audit 弱點掃描...")
+    # pip-audit 現在直接在當前環境執行
+    audit_cmd = [sys.executable, "-m", "pip_audit"]
     if run_command(audit_cmd) != 0:
         print_fail(f"[{app_name}] 弱點掃描發現問題。")
         return False
 
-    # 7. 執行 pytest
-    print_info(f"[{app_name}] 6. 執行 pytest (使用 xdist 和 timeout)...")
+    # 3. 執行 pytest
+    print_info(f"[{app_name}] 3. 執行 pytest (使用 xdist 和 timeout)...")
+    app_mock_mode = "true" if test_mode == "mock" else "false"
+
     test_env = os.environ.copy()
     test_env["PYTHONPATH"] = str(PROJECT_ROOT)
     test_env["APP_MOCK_MODE"] = app_mock_mode
-    pytest_cmd = ["uv", "run", "-p", python_exec, "--", "pytest", "-n", "auto", "--timeout=300", str(tests_dir)]
+
+    # Pytest 現在直接使用 sys.executable 執行
+    pytest_cmd = [sys.executable, "-m", "pytest", "-n", "auto", "--timeout=300", str(tests_dir)]
 
     exit_code = run_command(pytest_cmd, env=test_env)
 
-    # 7. 清理
-    print_info(f"清理 {app_name} 的測試環境...")
-    shutil.rmtree(venv_dir)
     print_success(f"--- App: {app_name} 測試完成 ---")
 
     if exit_code != 0:
@@ -375,7 +336,10 @@ def main():
         print_warn("未發現任何 App，測試結束。")
         sys.exit(0)
 
-    print_header(f"步驟 3: 開始對 {len(apps)} 個 App 進行平行化測試")
+    # 新增步驟：統一安裝所有依賴
+    install_all_app_dependencies(apps)
+
+    print_header(f"步驟 4: 開始對 {len(apps)} 個 App 進行平行化測試")
 
     tasks = [(app_path, test_mode) for app_path in apps]
     num_processes = min(cpu_count(), len(apps))

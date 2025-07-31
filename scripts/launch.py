@@ -217,12 +217,12 @@ async def manage_app_lifecycle(app_name, port, app_status):
         env["PORT"] = str(port)
 
         log_file = LOGS_DIR / f"{app_name}_service.log"
-        gunicorn_executable = str(venv_path / ('Scripts/gunicorn' if sys.platform == 'win32' else 'bin/gunicorn'))
-
         # 從 app/{app_name}/main.py 找到 FastAPI app instance, 預設為 "app"
-        # Gunicorn 指令: gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:PORT
+        # Gunicorn 指令: python -m gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:PORT
+        # 改為使用 `python -m gunicorn`，這種方式更可靠，可以避免因環境問題導致找不到 gunicorn 執行檔的問題。
         gunicorn_command = [
-            gunicorn_executable,
+            python_executable, # 使用虛擬環境的 python
+            "-m", "gunicorn",
             "main:app",  # 指向 main.py 中的 app = FastAPI()
             "--workers", "2",  # 啟動 2 個工人進程，可以根據需要調整
             "--worker-class", "uvicorn.workers.UvicornWorker",  # 使用 uvicorn 作為工人
