@@ -1,8 +1,10 @@
 # --- Core Framework ---
 # FastAPI: 我們的核心 Web 框架
 # uvicorn: ASGI 伺服器，用於運行 FastAPI
+# gunicorn: 生產環境下的 WSGI 伺服器與進程管理器
 fastapi
 uvicorn
+gunicorn
 
 # --- Data Science & Numerical ---
 # pandas: 核心數據分析庫，用於處理時間序列和 DataFrame

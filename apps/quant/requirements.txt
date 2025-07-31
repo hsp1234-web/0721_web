@@ -54,6 +54,8 @@ frozenlist==1.7.0
     # via
     #   aiohttp
     #   aiosignal
+gunicorn==23.0.0
+    # via -r apps/quant/requirements.in
 h11==0.16.0
     # via uvicorn
 idna==3.10
@@ -104,7 +106,9 @@ numpy==2.3.2
     #   ta
     #   yfinance
 packaging==25.0
-    # via pytest
+    # via
+    #   gunicorn
+    #   pytest
 pandas==2.3.1
     # via
     #   -r apps/quant/requirements.in

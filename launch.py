@@ -221,12 +221,29 @@ async def manage_app_lifecycle(app_name, port, app_status):
         env["PORT"] = str(port)
 
         log_file = LOGS_DIR / f"{app_name}_service.log"
-        main_script_path = APPS_DIR / app_name / "main.py"
+        gunicorn_executable = str(venv_path / ('Scripts/gunicorn' if sys.platform == 'win32' else 'bin/gunicorn'))
+
+        # 從 app/{app_name}/main.py 找到 FastAPI app instance, 預設為 "app"
+        # Gunicorn 指令: gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:PORT
+        gunicorn_command = [
+            gunicorn_executable,
+            "main:app",  # 指向 main.py 中的 app = FastAPI()
+            "--workers", "2",  # 啟動 2 個工人進程，可以根據需要調整
+            "--worker-class", "uvicorn.workers.UvicornWorker",  # 使用 uvicorn 作為工人
+            "--bind", f"0.0.0.0:{port}",  # 綁定端口
+            "--log-level", "info", # 設置日誌級別
+            "--access-logfile", "-", # 將訪問日誌輸出到 stdout
+            "--error-logfile", "-", # 將錯誤日誌輸出到 stdout
+        ]
+        log_event("INFO", f"使用 Gunicorn 啟動服務: {' '.join(gunicorn_command)}")
+
         with open(log_file, "w") as f:
             subprocess.Popen(
-                [python_executable, str(main_script_path)],
+                gunicorn_command,
                 env=env,
-                stdout=f, stderr=subprocess.STDOUT
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                cwd=APPS_DIR / app_name, # 將工作目錄切換到 app 目錄下
             )
 
         await asyncio.sleep(10) # 給予服務啟動時間
@@ -253,15 +270,22 @@ def load_config():
         return json.load(f)
 
 async def main_logic(config: dict):
-    """核心的循序啟動邏輯"""
+    """核心的兩階段、非同步啟動邏輯"""
     is_full_mode = not config.get("FAST_TEST_MODE", True)
-    apps_status = { "quant": "pending", "transcriber": "pending" }
+
+    # 定義所有應用，將主儀表板放在第一位
+    app_configs = [
+        {"name": "main_dashboard", "port": 8000},
+        {"name": "quant", "port": 8001},
+        {"name": "transcriber", "port": 8002}
+    ]
+    apps_status = {app["name"]: "pending" for app in app_configs}
 
     if is_full_mode:
-        log_event("BATTLE", "鳳凰之心 v18.0 [完整模式] 啟動序列開始。")
+        log_event("BATTLE", "鳳凰之心 v19.0 [完整模式] 啟動序列開始。")
         update_status(stage="系統啟動中 [完整模式]", apps_status=apps_status)
     else:
-        log_event("BATTLE", "鳳凰之心 v18.0 [快速測試模式] 啟動序列開始。")
+        log_event("BATTLE", "鳳凰之心 v19.0 [快速測試模式] 啟動序列開始。")
         update_status(stage="系統啟動中 [快速模式]", apps_status=apps_status)
 
     log_event("INFO", "系統環境預檢完成。")
@@ -269,37 +293,71 @@ async def main_logic(config: dict):
     if not is_full_mode:
         log_event("INFO", "[快速測試模式] 跳過所有 App 的安裝與啟動。")
         update_status(stage="快速測試模式")
-        await asyncio.sleep(5) # 模擬一些工作負載
+        await asyncio.sleep(5)
         log_event("SUCCESS", "快速測試流程驗證成功。")
         console.update_status_tag("[快速測試通過]")
         update_status(stage="快速測試通過")
         return
 
-    update_status(stage="服務安裝/啟動中")
-    app_configs = [
-        {"name": "quant", "port": 8001},
-        {"name": "transcriber", "port": 8002}
-    ]
+    # --- 兩階段啟動 ---
 
-    # 循序執行以避免資源競爭
-    for app_config in app_configs:
-        await manage_app_lifecycle(app_config['name'], app_config['port'], apps_status)
+    # 階段一: 優先啟動主儀表板
+    update_status(stage="階段一：啟動主儀表板")
+    dashboard_config = app_configs[0]
+    try:
+        await manage_app_lifecycle(dashboard_config['name'], dashboard_config['port'], apps_status)
+        log_event("SUCCESS", f"主儀表板 ({dashboard_config['name']}) 已成功啟動。")
+        update_status(stage="主儀表板運行中，準備啟動背景服務")
 
-    if all(status == "running" for status in apps_status.values()):
-        log_event("SUCCESS", "所有核心服務已成功啟動。")
-        console.update_status_tag("[服務運行中]")
-        update_status(stage="服務運行中")
-        # 在完整模式下才長時間休眠
-        if not config.get("FAST_TEST_MODE", True):
-            log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
+        # --- Colab 代理 URL 生成 ---
+        if 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ:
+            log_event("INFO", "偵測到 Colab 環境，正在生成主儀表板的公開代理 URL...")
             try:
-                await asyncio.sleep(3600)
-            except asyncio.CancelledError:
-                log_event("INFO", "系統待命狀態被中斷。")
+                from google.colab import output
+                proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
+                log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
+                update_status(url=proxy_url)
+            except Exception as e:
+                log_event("ERROR", f"生成 Colab 代理 URL 時發生錯誤: {e}")
+        # --- Colab 代理 URL 生成結束 ---
+
+    except Exception as e:
+        log_event("CRITICAL", f"主儀表板 ({dashboard_config['name']}) 啟動失敗: {e}，中止所有操作。")
+        console.update_status_tag("[主儀表板啟動失敗]")
+        update_status(stage="主儀表板啟動失敗")
+        return # 主儀表板失敗，後續流程無法進行
+
+    # 階段二: 在背景並行啟動其他服務
+    update_status(stage="階段二：並行啟動背景服務")
+    background_apps = app_configs[1:]
+    background_tasks = []
+    for app_config in background_apps:
+        task = asyncio.create_task(
+            manage_app_lifecycle(app_config['name'], app_config['port'], apps_status)
+        )
+        background_tasks.append(task)
+
+    # 等待所有背景任務完成
+    if background_tasks:
+        await asyncio.gather(*background_tasks)
+
+    # 檢查最終狀態
+    final_statuses = {name: status for name, status in apps_status.items() if name != dashboard_config['name']}
+    if all(status == "running" for status in final_statuses.values()):
+        log_event("SUCCESS", "所有核心服務已成功啟動。")
+        console.update_status_tag("[所有服務運行中]")
+        update_status(stage="所有服務運行中")
     else:
-        log_event("ERROR", "部分服務啟動失敗，請檢查日誌。")
-        console.update_status_tag("[啟動失敗]")
-        update_status(stage="啟動失敗")
+        log_event("WARN", "部分背景服務啟動失敗，請檢查日誌。")
+        console.update_status_tag("[部分服務失敗]")
+        update_status(stage="部分服務失敗")
+
+    # 在完整模式下長時間休眠
+    log_event("INFO", "任務流程執行完畢，系統進入待命狀態。")
+    try:
+        await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        log_event("INFO", "系統待命狀態被中斷。")
 
 # --- 主程序 ---
 def performance_logger_thread():
