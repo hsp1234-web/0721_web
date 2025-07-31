@@ -309,13 +309,18 @@ async def main_logic(config: dict):
         update_status(stage="主儀表板運行中，準備啟動背景服務")
 
         # --- Colab 代理 URL 生成 ---
-        if 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ:
-            log_event("INFO", "偵測到 Colab 環境，正在生成主儀表板的公開代理 URL...")
+        # 進行更嚴格的檢查，確保不僅在 Colab 環境中，而且 `google.colab.output` 和其必要的功能都真實可用
+        if ('google.colab' in sys.modules or 'COLAB_GPU' in os.environ):
+            log_event("INFO", "偵測到 Colab 環境，正在嘗試生成主儀表板的公開代理 URL...")
             try:
                 from google.colab import output
-                proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
-                log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
-                update_status(url=proxy_url)
+                # 檢查 output 和 eval_js 是否真實可用
+                if output and hasattr(output, 'eval_js') and callable(output.eval_js):
+                    proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
+                    log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
+                    update_status(url=proxy_url)
+                else:
+                    log_event("WARN", "Colab `output` 模組可用，但其功能不完整，跳過代理 URL 生成。")
             except Exception as e:
                 log_event("ERROR", f"生成 Colab 代理 URL 時發生錯誤: {e}")
         # --- Colab 代理 URL 生成結束 ---

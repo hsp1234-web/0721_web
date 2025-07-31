@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab HTML 指揮中心 V17 (趨勢圖版)                         ║
+# ║      🚀 Colab HTML 指揮中心 V18 (優雅關閉 & 中文化報告)              ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
+# ║                                                                      ║
+# ║   V18 更新日誌:                                                      ║
+# ║   - 實作優雅關閉機制，確保手動中斷時能完整生成報告。             ║
+# ║   - 將最終產生的報告檔案名稱中文化。                             ║
+# ║   - 修正 Colab 代理 URL 在特定環境下的生成錯誤。                   ║
+# ║   - 更新 Colab 表單中的部分 UI 文字為繁體中文。                    ║
+# ║                                                                      ║
 # ║                                                                      ║
 # ║   採用背景執行緒處理耗時任務，主執行緒負責高頻渲染，實現零延遲啟動。 ║
 # ║                                                                      ║
@@ -38,7 +45,7 @@ except ImportError:
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.5.0" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.5.1" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -66,13 +73,21 @@ FAST_TEST_MODE = False #@param {type:"boolean"}
 #@markdown ---
 #@markdown ### **Part 3: 日誌顯示設定**
 #@markdown > **選擇您想在儀表板上看到的日誌等級。**
+#@markdown **顯示戰鬥日誌 (SHOW_LOG_LEVEL_BATTLE)**
 SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
+#@markdown **顯示成功日誌 (SHOW_LOG_LEVEL_SUCCESS)**
 SHOW_LOG_LEVEL_SUCCESS = True #@param {type:"boolean"}
+#@markdown **顯示資訊日誌 (SHOW_LOG_LEVEL_INFO)**
 SHOW_LOG_LEVEL_INFO = False #@param {type:"boolean"}
+#@markdown **顯示命令日誌 (SHOW_LOG_LEVEL_CMD)**
 SHOW_LOG_LEVEL_CMD = False #@param {type:"boolean"}
+#@markdown **顯示系統日誌 (SHOW_LOG_LEVEL_SHELL)**
 SHOW_LOG_LEVEL_SHELL = False #@param {type:"boolean"}
+#@markdown **顯示錯誤日誌 (SHOW_LOG_LEVEL_ERROR)**
 SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
+#@markdown **顯示嚴重錯誤日誌 (SHOW_LOG_LEVEL_CRITICAL)**
 SHOW_LOG_LEVEL_CRITICAL = True #@param {type:"boolean"}
+#@markdown **顯示效能日誌 (SHOW_LOG_LEVEL_PERF)**
 SHOW_LOG_LEVEL_PERF = False #@param {type:"boolean"}
 #@markdown ---
 #@markdown > **設定完成後，點擊此儲存格左側的「執行」按鈕。**
@@ -382,43 +397,86 @@ def render_dashboard_html():
     """
     return css + html_body + javascript
 
-def archive_reports(project_path, archive_folder_name, timezone_str):
-    """將生成的報告歸檔到指定目錄"""
+def final_report_processing(project_path, archive_folder_name, timezone_str):
+    """處理報告的重新命名、整合與歸檔"""
+    if not project_path:
+        return
+
+    logs_dir = project_path / "logs"
+    if not logs_dir.is_dir():
+        update_status(log=f"⚠️ 找不到日誌目錄 {logs_dir}，跳過報告處理。")
+        return
+
+    # --- 1. 報告檔名中文化 ---
+    update_status(task="報告中文化", log="正在將報告檔案重新命名為繁體中文...")
+    rename_map = {
+        "summary_report.md": "任務總結報告.md",
+        "performance_report.md": "效能分析報告.md",
+        "detailed_log_report.md": "詳細日誌報告.md"
+    }
+    renamed_files = []
+    for old_name, new_name in rename_map.items():
+        old_path = logs_dir / old_name
+        new_path = logs_dir / new_name
+        if old_path.exists():
+            try:
+                old_path.rename(new_path)
+                update_status(log=f"  - 已重新命名: {old_name} -> {new_name}")
+                renamed_files.append(new_name)
+            except Exception as e:
+                update_status(log=f"  - ❌ 重新命名失敗: {e}")
+        else:
+            update_status(log=f"  - 警告: 找不到原始報告檔案 {old_name}")
+
+    # --- 2. 整合報告生成 ---
+    update_status(task="生成整合報告", log="正在合併報告分卷...")
+    try:
+        # 使用已重新命名的中文檔案來生成整合報告
+        consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告產生時間:** {datetime.now(pytz.timezone(timezone_str)).isoformat()}\n\n---\n\n"
+        for report_file in renamed_files:
+            report_path = logs_dir / report_file
+            if report_path.exists():
+                consolidated_content += f"## 原始報告: {report_file}\n\n"
+                consolidated_content += report_path.read_text(encoding='utf-8')
+                consolidated_content += "\n\n---\n\n"
+
+        if len(consolidated_content) > 200:
+            final_report_path = project_path / "最終運行報告.md" # 整合報告也使用中文名
+            final_report_path.write_text(consolidated_content, encoding='utf-8')
+            update_status(log="✅ 整合報告已生成: 最終運行報告.md")
+        else:
+            update_status(log="沒有足夠的報告分卷來生成整合報告。")
+    except Exception as e:
+        update_status(log=f"❌ 生成整合報告時發生錯誤: {e}")
+
+    # --- 3. 歸檔 ---
     if not archive_folder_name:
         update_status(log="ℹ️ 日誌歸檔功能已關閉。")
         return
-
     try:
         archive_base_path = Path("/content") / archive_folder_name
         archive_base_path.mkdir(exist_ok=True)
-
         tz = pytz.timezone(timezone_str)
         timestamp_folder_name = datetime.now(tz).isoformat()
         archive_target_path = archive_base_path / timestamp_folder_name
         archive_target_path.mkdir()
 
-        source_reports_path = project_path / "logs"
-        # The generated filenames are in English.
-        report_files = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
-
         update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告至: {archive_target_path}")
-        for report_name in report_files:
-            source_file = source_reports_path / report_name
+        # 不再使用 glob，因為它對非 ASCII 字元的處理可能不可靠。
+        # 改為使用我們在重新命名步驟中建立的 `renamed_files` 列表，這樣更穩健。
+        files_to_archive = [logs_dir / f for f in renamed_files]
+        for source_file in files_to_archive:
             if source_file.exists():
-                shutil.move(str(source_file), str(archive_target_path / report_name))
-                update_status(log=f"  - 已移動: {report_name}")
-            else:
-                update_status(log=f"  - 警告: 找不到報告檔案 {report_name}")
-
+                shutil.move(str(source_file), str(archive_target_path / source_file.name))
+                update_status(log=f"  - 已移動: {source_file.name}")
         update_status(log="✅ 報告歸檔完成。")
-
     except Exception as e:
         update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
+
 
 def main():
     update_status(log="指揮中心 V17 (API驅動版) 啟動。")
 
-    # 顯示靜態的儀表板骨架，JS 將負責後續所有更新
     clear_output(wait=True)
     display(HTML(render_dashboard_html()))
 
@@ -427,17 +485,13 @@ def main():
 
     launch_process_local = None
     try:
-        # 主執行緒現在的任務簡化為：等待背景程序結束
-        # 我們仍然需要一個迴圈來獲取 launch_process 的控制代碼
         while not launch_process_local:
             with status_lock:
                 launch_process_local = shared_status.get("launch_process")
                 worker_error = shared_status.get("worker_error")
             if worker_error:
-                # 如果背景工作出錯，直接跳出
                 raise RuntimeError(f"背景工作執行緒出錯: {worker_error}")
             if not worker_thread.is_alive() and not launch_process_local:
-                # 背景工作結束了，但沒有啟動任何程序
                 raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
             time.sleep(0.5)
 
@@ -450,21 +504,22 @@ def main():
         else:
             update_status(task="前端偵測到錯誤", log=f"❌ {e}")
     finally:
-        # 重新從共享狀態獲取一次 launch_process，以防主迴圈未進入
         with status_lock:
             launch_process_local = shared_status.get("launch_process")
+            project_path = shared_status.get("project_path")
 
         update_status(task="執行最終清理", log="正在準備結束程序...")
 
         if launch_process_local and launch_process_local.poll() is None:
-            update_status(log="偵測到後端服務仍在運行，正在嘗試正常終止...")
-            launch_process_local.terminate()
+            update_status(log="偵測到後端服務仍在運行，正在嘗試正常終止 (SIGTERM)...")
+            launch_process_local.terminate() # 發送 SIGTERM
             try:
-                # 延長等待時間以確保報告能生成
+                # 給予後端寬裕的時間(例如 15 秒)來處理關閉、生成報告
+                update_status(log="給予後端 15 秒時間進行關機與報告生成...")
                 launch_process_local.wait(timeout=15)
                 update_status(log="✅ 後端服務已成功終止。")
             except subprocess.TimeoutExpired:
-                update_status(log="⚠️ 後端服務未能及時回應，將強制終結。")
+                update_status(log="⚠️ 後端服務未能及時回應，將強制終結 (SIGKILL)。")
                 launch_process_local.kill()
         elif launch_process_local:
             update_status(log=f"✅ 後端服務已自行結束 (返回碼: {launch_process_local.poll()})。")
@@ -472,42 +527,8 @@ def main():
         # 確保背景工作執行緒也結束
         worker_thread.join(timeout=5)
 
-        # --- 整合報告生成 ---
-        with status_lock:
-            project_path = shared_status.get("project_path")
-        if project_path:
-            update_status(task="生成整合報告", log="正在合併報告分卷...")
-            try:
-                logs_dir = project_path / "logs"
-                # The generated filenames are in English.
-                report_files = ["summary_report.md", "performance_report.md", "detailed_log_report.md"]
-                consolidated_content = f"# 鳳凰之心最終任務報告\n\n**報告生成時間:** {datetime.now(pytz.timezone(TIMEZONE)).isoformat()}\n\n---\n\n"
-
-                for report_file in report_files:
-                    report_path = logs_dir / report_file
-                    if report_path.exists():
-                        consolidated_content += f"## 原始報告: {report_file}\n\n"
-                        consolidated_content += report_path.read_text(encoding='utf-8')
-                        consolidated_content += "\n\n---\n\n"
-                    else:
-                        update_status(log=f"  - 警告: 找不到報告分卷 {report_file}")
-
-                if len(consolidated_content) > 200: # 確保有內容可寫
-                    final_report_path = project_path / "final_run_report.md" # 存在根目錄
-                    final_report_path.write_text(consolidated_content, encoding='utf-8')
-                    update_status(log="✅ 整合報告已生成: final_run_report.md")
-                else:
-                    update_status(log="沒有足夠的報告分卷來生成整合報告。")
-
-            except Exception as e:
-                update_status(log=f"❌ 生成整合報告時發生錯誤: {e}")
-
-
-        # 最後執行歸檔
-        with status_lock:
-            project_path = shared_status.get("project_path")
-        if project_path:
-            archive_reports(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
+        # 將報告處理邏輯統一到一個函式中
+        final_report_processing(project_path, LOG_ARCHIVE_FOLDER_NAME, TIMEZONE)
 
         # 最後的日誌和狀態將由JS的最後一次API呼叫來更新，這裡不需要再渲染。
         # 我們只打印一個最終訊息。
