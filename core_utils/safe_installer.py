@@ -65,8 +65,16 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
         logger.info(f"--- App '{app_name}' 安裝結束 (無檔案) ---")
         return
 
-    with open(requirements_path, "r") as f:
-        packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    with open(requirements_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    packages = []
+    for line in lines:
+        # 去除行內註解 (從 '#' 開始的部分)
+        line_content = line.split('#')[0].strip()
+        # 只有在處理後還有內容時才加入列表
+        if line_content:
+            packages.append(line_content)
 
     logger.info(f"從 {requirements_path} 發現 {len(packages)} 個套件需要安裝。")
 

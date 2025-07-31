@@ -132,7 +132,7 @@ def test_app(app_path: Path, test_mode: str) -> bool:
 
     # 2. 安裝通用測試依賴
     print_info(f"[{app_name}] 2. 安裝通用測試依賴 (pytest, xdist, timeout, etc.)...")
-    common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout"]
+    common_deps = ["pytest", "pytest-mock", "ruff", "httpx", "pytest-xdist", "pytest-timeout", "pip-audit"]
     if run_command(["uv", "pip", "install", "-p", python_exec, *common_deps]) != 0:
         print_fail(f"[{app_name}] 安裝通用依賴失敗。")
         return False
@@ -179,8 +179,15 @@ def test_app(app_path: Path, test_mode: str) -> bool:
         print_fail(f"[{app_name}] Ruff 檢查失敗。")
         # return False # Ruff 失敗不應阻斷測試
 
-    # 6. 執行 pytest
-    print_info(f"[{app_name}] 5. 執行 pytest (使用 xdist 和 timeout)...")
+    # 6. 執行 pip-audit 弱點掃描
+    print_info(f"[{app_name}] 5. 執行 pip-audit 弱點掃描...")
+    audit_cmd = ["uv", "run", "-p", python_exec, "--", "pip-audit"]
+    if run_command(audit_cmd) != 0:
+        print_fail(f"[{app_name}] 弱點掃描發現問題。")
+        return False
+
+    # 7. 執行 pytest
+    print_info(f"[{app_name}] 6. 執行 pytest (使用 xdist 和 timeout)...")
     test_env = os.environ.copy()
     test_env["PYTHONPATH"] = str(PROJECT_ROOT)
     test_env["APP_MOCK_MODE"] = app_mock_mode
