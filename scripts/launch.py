@@ -146,40 +146,26 @@ async def run_command_async_and_log(command: str, cwd: Path):
         raise RuntimeError(f"Command failed: {command}")
 
 async def safe_install_packages(app_name: str, requirements_path: Path, python_executable: str):
-    """安全地逐一安裝套件，並將日誌整合到主 TUI"""
+    """安全地從 requirements 檔案安裝所有套件，並將日誌整合到主 TUI"""
     if not requirements_path.exists():
         log_event("WARN", f"找不到 {requirements_path}，跳過安裝。")
         return
 
-    with open(requirements_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    packages = []
-    for line in lines:
-        # 去除行內註解 (從 '#' 開始的部分)
-        line_content = line.split('#')[0].strip()
-        # 只有在處理後還有內容時才加入列表
-        if line_content:
-            packages.append(line_content)
-
-    log_event("BATTLE", f"開始為 {app_name} 安裝 {len(packages)} 個依賴。")
+    log_event("BATTLE", f"開始為 {app_name} 從 {requirements_path.name} 安裝依賴。")
 
     settings = load_resource_settings()
-    for i, package in enumerate(packages):
-        console.update_status_tag(f"[{app_name}] 安裝依賴: {i+1}/{len(packages)}")
-        log_event("PROGRESS", f"正在安裝 {i+1}/{len(packages)}: {package}")
+    sufficient, message = is_resource_sufficient(settings)
+    if not sufficient:
+        log_event("ERROR", f"資源不足，中止安裝: {message}")
+        raise RuntimeError(f"Resource insufficient for {app_name}: {message}")
 
-        sufficient, message = is_resource_sufficient(settings)
-        if not sufficient:
-            log_event("ERROR", f"資源不足，中止安裝: {message}")
-            raise RuntimeError(f"Resource insufficient for {app_name}: {message}")
-
-        try:
-            command = f"uv pip install --python {shlex.quote(python_executable)} {package}"
-            await run_command_async_and_log(command, APPS_DIR.parent)
-        except Exception as e:
-            log_event("ERROR", f"安裝套件 '{package}' 失敗: {e}")
-            raise
+    try:
+        # 一次性安裝所有套件以獲得更好的依賴解析
+        command = f"uv pip install --python {shlex.quote(python_executable)} -r {shlex.quote(str(requirements_path))}"
+        await run_command_async_and_log(command, APPS_DIR.parent)
+    except Exception as e:
+        log_event("ERROR", f"從 '{requirements_path.name}' 安裝套件失敗: {e}")
+        raise
 
 # --- 核心啟動邏輯 ---
 async def manage_app_lifecycle(app_name, port, app_status):

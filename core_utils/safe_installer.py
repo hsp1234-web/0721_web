@@ -77,52 +77,50 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
 
     logger.info(f"從 {requirements_path} 發現 {len(packages)} 個套件需要安裝。")
 
-    # 3. 逐一套件安裝
-    for i, package in enumerate(packages):
-        logger.info(f"--- [{i+1}/{len(packages)}] 準備安裝: {package} ---")
+    # 3. 一次性安裝所有套件
+    logger.info(f"--- 準備從 {requirements_path} 一次性安裝所有依賴 ---")
 
-        # 3.1. 安裝前檢查資源
-        sufficient, message = is_resource_sufficient(settings)
-        logger.debug(f"資源檢查結果: {message}")
+    # 3.1. 安裝前檢查資源
+    sufficient, message = is_resource_sufficient(settings)
+    logger.debug(f"資源檢查結果: {message}")
 
-        if not sufficient:
-            logger.error(f"資源不足！{message}")
-            logger.error(f"因資源不足，安裝程序已在安裝 '{package}' 前中止。")
-            raise SystemExit(f"安裝失敗：App '{app_name}' 資源不足。")
+    if not sufficient:
+        logger.error(f"資源不足！{message}")
+        logger.error("因資源不足，安裝程序已中止。")
+        raise SystemExit(f"安裝失敗：App '{app_name}' 資源不足。")
 
-        logger.info(f"資源充足。開始安裝 '{package}'...")
+    logger.info("資源充足。開始安裝...")
 
-        # 3.2. 執行安裝命令
-        try:
-            # 使用 uv 來進行快速安裝
-            command = [
-                "uv", "pip", "install",
-                "--python", python_executable,
-                package
-            ]
+    # 3.2. 執行安裝命令
+    try:
+        # 使用 uv 來進行快速安裝，-r 表示從檔案讀取
+        command = [
+            "uv", "pip", "install",
+            "--python", python_executable,
+            "-r", requirements_path
+        ]
 
-            start_time = time.monotonic()
-            # 使用 subprocess.run 來執行命令並捕獲輸出
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=True,  # 如果返回非零結束代碼，則引發 CalledProcessError
-                encoding='utf-8'
-            )
-            end_time = time.monotonic()
-            duration = end_time - start_time
+        start_time = time.monotonic()
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding='utf-8'
+        )
+        end_time = time.monotonic()
+        duration = end_time - start_time
 
-            logger.debug(f"'{package}' 安裝命令輸出:\n{result.stdout}")
-            logger.info(f"✅ 套件 '{package}' 安裝成功，耗時: {duration:.2f} 秒。")
+        logger.debug(f"安裝命令輸出:\n{result.stdout}")
+        logger.info(f"✅ 從 {requirements_path} 安裝所有套件成功，耗時: {duration:.2f} 秒。")
 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"安裝套件 '{package}' 時發生錯誤。返回碼: {e.returncode}")
-            logger.error(f"錯誤訊息:\n{e.stderr}")
-            raise SystemExit(f"安裝失敗：App '{app_name}' 安裝套件 '{package}' 時出錯。")
-        except Exception as e:
-            logger.error(f"安裝套件 '{package}' 時發生未知錯誤: {e}")
-            raise SystemExit(f"安裝失敗：App '{app_name}' 發生未知錯誤。")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"從 {requirements_path} 安裝套件時發生錯誤。返回碼: {e.returncode}")
+        logger.error(f"錯誤訊息:\n{e.stderr}")
+        raise SystemExit(f"安裝失敗：App '{app_name}' 從 {requirements_path} 安裝時出錯。")
+    except Exception as e:
+        logger.error(f"安裝套件時發生未知錯誤: {e}")
+        raise SystemExit(f"安裝失敗：App '{app_name}' 發生未知錯誤。")
 
     logger.info(f"--- App '{app_name}' 所有套件均已成功安裝 ---")
 
