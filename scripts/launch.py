@@ -187,7 +187,9 @@ async def manage_app_lifecycle(app_name, port, app_status):
     app_status[app_name] = "pending"
     update_status(apps_status=app_status)
     venv_path = APPS_DIR / app_name / ".venv"
-    python_executable = str(venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
+    # 將 python_executable 的路徑解析為絕對路徑。
+    # 這樣可以避免在 subprocess.Popen 中因 cwd (目前工作目錄) 的改變而導致的路徑找不到問題。
+    python_executable = str(venv_path.resolve() / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
 
     try:
         # --- 1. 環境準備 ---
@@ -195,7 +197,8 @@ async def manage_app_lifecycle(app_name, port, app_status):
         update_status(stage=f"[{app_name}] 準備環境", apps_status=app_status)
         console.update_status_tag(f"[{app_name}] 準備虛擬環境")
         if not venv_path.exists():
-            await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path))}", APPS_DIR.parent)
+            # 使用 venv_path 的絕對路徑來建立 venv
+            await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path.resolve()))}", APPS_DIR.parent)
 
         # --- 2. 安裝依賴 ---
         update_status(stage=f"[{app_name}] 安裝依賴")
