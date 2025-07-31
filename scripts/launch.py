@@ -187,7 +187,9 @@ async def manage_app_lifecycle(app_name, port, app_status):
     app_status[app_name] = "pending"
     update_status(apps_status=app_status)
     venv_path = APPS_DIR / app_name / ".venv"
-    python_executable = str(venv_path / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
+    # 將 python_executable 的路徑解析為絕對路徑。
+    # 這樣可以避免在 subprocess.Popen 中因 cwd (目前工作目錄) 的改變而導致的路徑找不到問題。
+    python_executable = str(venv_path.resolve() / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))
 
     try:
         # --- 1. 環境準備 ---
@@ -195,7 +197,8 @@ async def manage_app_lifecycle(app_name, port, app_status):
         update_status(stage=f"[{app_name}] 準備環境", apps_status=app_status)
         console.update_status_tag(f"[{app_name}] 準備虛擬環境")
         if not venv_path.exists():
-            await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path))}", APPS_DIR.parent)
+            # 使用 venv_path 的絕對路徑來建立 venv
+            await run_command_async_and_log(f"uv venv {shlex.quote(str(venv_path.resolve()))}", APPS_DIR.parent)
 
         # --- 2. 安裝依賴 ---
         update_status(stage=f"[{app_name}] 安裝依賴")
@@ -217,12 +220,12 @@ async def manage_app_lifecycle(app_name, port, app_status):
         env["PORT"] = str(port)
 
         log_file = LOGS_DIR / f"{app_name}_service.log"
-        gunicorn_executable = str(venv_path / ('Scripts/gunicorn' if sys.platform == 'win32' else 'bin/gunicorn'))
-
         # 從 app/{app_name}/main.py 找到 FastAPI app instance, 預設為 "app"
-        # Gunicorn 指令: gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:PORT
+        # Gunicorn 指令: python -m gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:PORT
+        # 改為使用 `python -m gunicorn`，這種方式更可靠，可以避免因環境問題導致找不到 gunicorn 執行檔的問題。
         gunicorn_command = [
-            gunicorn_executable,
+            python_executable, # 使用虛擬環境的 python
+            "-m", "gunicorn",
             "main:app",  # 指向 main.py 中的 app = FastAPI()
             "--workers", "2",  # 啟動 2 個工人進程，可以根據需要調整
             "--worker-class", "uvicorn.workers.UvicornWorker",  # 使用 uvicorn 作為工人
@@ -306,13 +309,18 @@ async def main_logic(config: dict):
         update_status(stage="主儀表板運行中，準備啟動背景服務")
 
         # --- Colab 代理 URL 生成 ---
-        if 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ:
-            log_event("INFO", "偵測到 Colab 環境，正在生成主儀表板的公開代理 URL...")
+        # 進行更嚴格的檢查，確保不僅在 Colab 環境中，而且 `google.colab.output` 和其必要的功能都真實可用
+        if ('google.colab' in sys.modules or 'COLAB_GPU' in os.environ):
+            log_event("INFO", "偵測到 Colab 環境，正在嘗試生成主儀表板的公開代理 URL...")
             try:
                 from google.colab import output
-                proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
-                log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
-                update_status(url=proxy_url)
+                # 檢查 output 和 eval_js 是否真實可用
+                if output and hasattr(output, 'eval_js') and callable(output.eval_js):
+                    proxy_url = output.eval_js(f"google.colab.kernel.proxyPort({dashboard_config['port']})")
+                    log_event("SUCCESS", f"✅ 主儀表板 Colab 代理 URL: {proxy_url}")
+                    update_status(url=proxy_url)
+                else:
+                    log_event("WARN", "Colab `output` 模組可用，但其功能不完整，跳過代理 URL 生成。")
             except Exception as e:
                 log_event("ERROR", f"生成 Colab 代理 URL 時發生錯誤: {e}")
         # --- Colab 代理 URL 生成結束 ---
