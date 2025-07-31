@@ -111,7 +111,7 @@
 ```mermaid
 graph TD
     subgraph "後端核心"
-        D[🚀 launch.py<br>(背景主力部隊)] -- 寫入 --> C[(state.db)];
+        D[🚀 scripts/launch.py<br>(背景主力部隊)] -- 寫入 --> C[(state.db)];
         E[🌐 aiohttp API<br>(由 launch.py 啟動)] -- 讀取 --> C;
     end
 
@@ -121,7 +121,7 @@ graph TD
     end
 
     subgraph "離線分析"
-        F[📄 generate_report.py] -- 讀取 --> C;
+        F[📄 scripts/generate_report.py] -- 讀取 --> C;
     end
 
     style C fill:#f9f,stroke:#333,stroke-width:2px
