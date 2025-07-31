@@ -1,0 +1,14 @@
+{
+    "REFRESH_RATE_SECONDS": 1.0,
+    "PERFORMANCE_MONITOR_RATE_SECONDS": 0.5,
+    "LOG_DISPLAY_LINES": 50,
+    "LOG_ARCHIVE_FOLDER_NAME": "作戰日誌歸檔",
+    "TIMEZONE": "Asia/Taipei",
+    "FAST_TEST_MODE": false,
+    "LOG_LEVELS_TO_SHOW": {
+        "BATTLE": true,
+        "SUCCESS": true,
+        "ERROR": true,
+        "CRITICAL": true
+    }
+}

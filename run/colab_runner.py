@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║      🚀 Colab HTML 指揮中心 V16 (即時反饋版)                       ║
+# ║      🚀 Colab HTML 指揮中心 V17 (趨勢圖版)                         ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
@@ -9,7 +9,7 @@
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-#@title 💎 鳳凰之心指揮中心 V16 (即時反饋版) { vertical-output: true, display-mode: "form" }
+#@title 💎 鳳凰之心指揮中心 V17 (趨勢圖版) { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
@@ -17,7 +17,7 @@
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.2.5" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.3.2" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -33,7 +33,7 @@ REFRESH_RATE_SECONDS = 1.0 #@param {type:"number"}
 #@markdown > **建議小於等於儀表板更新頻率，以確保數據即時性。**
 PERFORMANCE_MONITOR_RATE_SECONDS = 0.5 #@param {type:"number"}
 #@markdown **日誌顯示行數 (LOG_DISPLAY_LINES)**
-LOG_DISPLAY_LINES = 20 #@param {type:"integer"}
+LOG_DISPLAY_LINES = 50 #@param {type:"integer"}
 #@markdown **日誌歸檔資料夾 (LOG_ARCHIVE_FOLDER_NAME)**
 #@markdown > **留空即關閉歸檔功能。歸檔位置在 Colab 左側檔案總管的 `/content/<您指定的資料夾名稱>` 中。**
 LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔" #@param {type:"string"}
@@ -41,13 +41,13 @@ LOG_ARCHIVE_FOLDER_NAME = "作戰日誌歸檔" #@param {type:"string"}
 TIMEZONE = "Asia/Taipei" #@param {type:"string"}
 #@markdown **快速測試模式 (FAST_TEST_MODE)**
 #@markdown > 預設開啟。將跳過所有 App 的依賴安裝和啟動，用於快速驗證核心通訊流程。
-FAST_TEST_MODE = True #@param {type:"boolean"}
+FAST_TEST_MODE = False #@param {type:"boolean"}
 #@markdown ---
 #@markdown ### **Part 3: 日誌顯示設定**
 #@markdown > **選擇您想在儀表板上看到的日誌等級。**
 SHOW_LOG_LEVEL_BATTLE = True #@param {type:"boolean"}
 SHOW_LOG_LEVEL_SUCCESS = True #@param {type:"boolean"}
-SHOW_LOG_LEVEL_INFO = True #@param {type:"boolean"}
+SHOW_LOG_LEVEL_INFO = False #@param {type:"boolean"}
 SHOW_LOG_LEVEL_CMD = False #@param {type:"boolean"}
 SHOW_LOG_LEVEL_SHELL = False #@param {type:"boolean"}
 SHOW_LOG_LEVEL_ERROR = True #@param {type:"boolean"}
@@ -251,6 +251,15 @@ def render_dashboard_html():
                         <table>
                             <tr><td>CPU</td><td id="cpu-usage">0.0%</td></tr>
                             <tr><td>RAM</td><td id="ram-usage">0.0%</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="title">效能趨勢 (文字圖)</div>
+                    <div class="content">
+                        <table>
+                            <tr><td>CPU</td><td id="cpu-trend">等待數據...</td></tr>
+                            <tr><td>RAM</td><td id="ram-trend">等待數據...</td></tr>
                         </table>
                     </div>
                 </div>

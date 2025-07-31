@@ -20,12 +20,14 @@ try:
     from IPython.display import display, clear_output
     import nest_asyncio
     from aiohttp import web
-    import pandas  # 確保 pandas 也被檢查
+    import pandas
+    import tabulate
+    import sparklines # 確保 sparklines 也被檢查
 except ImportError:
-    # 新增 pandas 到依賴列表
-    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio, aiohttp, pandas)...")
+    # 新增 sparklines 到依賴列表
+    print("偵測到缺少核心依賴，正在自動安裝 (pytz, psutil, ipython, nest_asyncio, aiohttp, pandas, tabulate, sparklines)...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio", "aiohttp", "pandas"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "pytz", "psutil", "ipython", "nest_asyncio", "aiohttp", "pandas", "tabulate", "sparklines"], check=True)
         print("依賴安裝成功。")
         import pytz
         import psutil
@@ -33,14 +35,15 @@ except ImportError:
         import nest_asyncio
         from aiohttp import web
         import pandas
+        import tabulate
+        import sparklines
     except Exception as e:
         print(f"自動安裝依賴失敗: {e}")
-        print("請手動執行 'pip install pytz psutil ipython nest_asyncio aiohttp pandas' 後再試一次。")
+        print("請手動執行 'pip install pytz psutil ipython nest_asyncio aiohttp pandas tabulate sparklines' 後再試一次。")
         sys.exit(1)
 
 from core_utils.commander_console import CommanderConsole
 from core_utils.resource_monitor import is_resource_sufficient, load_resource_settings
-from core_utils.report_generator import ReportGenerator
 
 # --- 全域設定 ---
 LOGS_DIR = Path("logs")
@@ -369,9 +372,16 @@ async def get_status_api(request):
         if not status_data:
             return web.json_response({"error": "Status not found"}, status=404)
 
+        # 查詢最近 20 筆效能數據
+        cursor.execute("SELECT cpu_usage, ram_usage FROM phoenix_logs WHERE level = 'PERF' ORDER BY id DESC LIMIT 20")
+        perf_history_data = cursor.fetchall()
+        # 將其反轉，以便從舊到新排序，適合趨勢圖
+        perf_history_data.reverse()
+
         response_data = {
             "status": dict(status_data),
-            "logs": [dict(log) for log in logs_data]
+            "logs": [dict(log) for log in logs_data],
+            "performance_history": [dict(row) for row in perf_history_data]
         }
         return web.json_response(response_data)
 
@@ -451,14 +461,35 @@ async def main(db_path: Path):
         log_event("INFO", "開始生成最終報告...")
         try:
             config_path = Path("config.json")
-            if config_path.exists():
-                generator = ReportGenerator(db_path=DB_FILE, config_path=config_path)
-                generator.generate_all_reports()
-                log_event("SUCCESS", "所有報告已成功生成。")
-            else:
+            if not config_path.exists():
                 log_event("WARN", "找不到設定檔 (config.json)，無法生成報告。")
+            elif not DB_FILE.exists():
+                log_event("WARN", f"找不到資料庫檔案 ({DB_FILE})，無法生成報告。")
+            else:
+                report_cmd = [
+                    sys.executable, "generate_report.py",
+                    "--db-file", str(DB_FILE),
+                    "--config-file", str(config_path)
+                ]
+                log_event("CMD", f"Executing: {' '.join(report_cmd)}")
+                # 使用 subprocess.run 執行，因為這是在主程序結束時
+                # 我們希望它同步執行並看到其輸出
+                result = subprocess.run(report_cmd, capture_output=True, text=True, encoding='utf-8')
+
+                # 將報告生成腳本的輸出也記錄到主日誌中
+                for line in result.stdout.strip().split('\n'):
+                    if line: log_event("INFO", f"[ReportGenerator] {line}")
+
+                if result.returncode == 0:
+                    log_event("SUCCESS", "所有報告已成功生成。")
+                else:
+                    log_event("ERROR", "報告生成腳本執行失敗。")
+                    if result.stderr:
+                         for line in result.stderr.strip().split('\n'):
+                            if line: log_event("ERROR", f"[ReportGenerator] {line}")
+
         except Exception as e:
-            log_event("CRITICAL", f"生成報告時發生嚴重錯誤: {e}")
+            log_event("CRITICAL", f"調用報告生成腳本時發生嚴重錯誤: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="鳳凰之心 v18.0 後端啟動器")
