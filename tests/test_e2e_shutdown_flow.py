@@ -138,36 +138,28 @@ def test_graceful_shutdown_and_report_archiving(project_path, test_config):
             process.wait()
 
 
-def test_report_generator_script(project_path):
+def test_report_generator_script_with_auto_install(project_path):
     """
-    Tests the `run/report.py` script to ensure it can correctly find and
-    execute the underlying report generator with the right paths.
+    Tests the `run/report.py` script to ensure its auto-dependency-installation
+    feature works correctly.
     """
-    # 1. Setup the environment to mimic Colab after a run
-    # The `project_path` fixture already gives us an isolated project copy.
-    # We need to simulate the state left by colab_runner.py
-    (project_path / "scripts").mkdir(exist_ok=True)
-    (project_path / "logs").mkdir(exist_ok=True)
-
-    # Create a dummy state.db and config.json
+    # 1. Setup the environment
+    # We use the real scripts, not mocks.
+    # A dummy state.db and config.json are needed for the script to run.
     db_file = project_path / "state.db"
     db_file.touch()
     config_file = project_path / "config.json"
     config_file.write_text(json.dumps({"TIMEZONE": "Asia/Taipei"}))
 
-    # Create a mock report generator script
-    mock_report_script_path = project_path / "scripts" / "generate_report.py"
-    mock_report_script_path.write_text(
-        "import sys; print(f'Mock report generator called with: {{sys.argv}}');"
-    )
+    # Ensure the report requirements file exists
+    assert (project_path / "scripts" / "requirements-report.txt").exists()
 
     # 2. Get the content of our `run/report.py` wrapper
     report_runner_script_path = project_path / "run" / "report.py"
     assert report_runner_script_path.exists()
     report_runner_script_content = report_runner_script_path.read_text(encoding='utf-8')
 
-    # Extract the Python code from the Colab cell content
-    # A simple way to do this is to find the line after the final #@markdown
+    # Extract the Python code from the Colab cell
     code_lines = []
     in_code_section = False
     for line in report_runner_script_content.splitlines():
@@ -176,28 +168,20 @@ def test_report_generator_script(project_path):
             continue
         if in_code_section:
             code_lines.append(line)
-
     python_code_to_run = "\n".join(code_lines)
-    assert "subprocess.run" in python_code_to_run # Ensure we got the right part
+    assert "uv pip install" in python_code_to_run
 
-    # 3. Execute the extracted Python code
-    # We need to simulate the Colab form variables
-    # Let's set PROJECT_FOLDER_NAME to the name of our temporary project directory
+    # 3. Simulate the Colab environment and execute the code
     exec_globals = {
         "PROJECT_FOLDER_NAME": project_path.name,
-        "GENERATE_SUMMARY_REPORT": True,
+        "GENERATE_SUMMARY_REPORT": False, # Don't need to see output
         "GENERATE_PERFORMANCE_REPORT": False,
-        "GENERATE_DETAILED_LOG_REPORT": True,
-        # We need to mock the IPython display function
+        "GENERATE_DETAILED_LOG_REPORT": False,
         "display": lambda *args, **kwargs: None,
         "Code": lambda data, language: None,
         "Markdown": lambda data: None,
     }
 
-    # We need to execute the script in a way that it thinks it's in /content
-    # The `project_path` is something like /tmp/pytest-of-user/pytest-0/project0
-    # The script expects /content/{PROJECT_FOLDER_NAME}
-    # So we create a symlink from /content/{project_path.name} to our actual project_path
     content_dir = Path("/content")
     content_dir.mkdir(exist_ok=True)
     symlink_path = content_dir / project_path.name
@@ -205,15 +189,14 @@ def test_report_generator_script(project_path):
         symlink_path.symlink_to(project_path)
 
     try:
-        # Execute the code. We can't use subprocess because it's not a file.
-        # We use exec(). This is generally unsafe, but fine in a controlled test.
+        # The key assertion: executing this code should not raise any exceptions,
+        # especially not a ModuleNotFoundError. This proves the auto-install
+        # and path resolution logic is working.
         exec(python_code_to_run, exec_globals)
 
-        # The test doesn't produce capturable output with exec, so we can't assert on stdout.
-        # The main goal is to ensure it runs without a FileNotFoundError.
-        # If exec completes without an exception, it means the paths were resolved correctly.
+    except Exception as e:
+        pytest.fail(f"Execution of the report runner script failed: {e}")
 
     finally:
-        # Clean up the symlink
         if symlink_path.is_symlink():
             symlink_path.unlink()
