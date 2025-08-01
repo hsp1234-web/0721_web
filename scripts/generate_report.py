@@ -238,7 +238,7 @@ class ReportGenerator:
         if self.df.empty:
             return "# 詳細日誌報告\n\n無數據。"
 
-        log_df = self.df[self.df['level'] != 'PERF'].copy()
+        log_df = self.df[self.df['level'] != 'PERF']
         if log_df.empty:
             return "# 詳細日誌報告\n\n無日誌數據。"
 
