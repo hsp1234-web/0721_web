@@ -58,11 +58,29 @@ def test_graceful_shutdown_and_report_archiving(project_path, test_config):
 
     process = subprocess.Popen(command, cwd=project_path, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore')
 
-    api_url = "http://localhost:8088/api/v1/status"
-    shutdown_url = "http://localhost:8088/api/v1/shutdown"
-
     try:
-        # 1. Wait for the API server to be ready
+        # 1. Wait for the main launch.py process to start and create the config
+        max_wait = 30
+        start_time = time.time()
+        config_file = project_path / "config.json"
+        while not config_file.exists() and time.time() - start_time < max_wait:
+            time.sleep(1)
+
+        if not config_file.exists():
+            output, _ = process.communicate()
+            print(output)
+            pytest.fail(f"config.json was not created within {max_wait} seconds.", pytrace=False)
+
+        with open(config_file, "r") as f:
+            config = json.load(f)
+
+        api_port = config.get("INTERNAL_API_PORT")
+        assert api_port is not None, "INTERNAL_API_PORT not found in config.json"
+
+        api_url = f"http://localhost:{api_port}/api/v1/status"
+        shutdown_url = f"http://localhost:{api_port}/api/v1/shutdown"
+
+        # 2. Wait for the API server to be ready
         max_wait = 45
         start_time = time.time()
         is_ready = False

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                                                                      ║
-# ║             🚀 Colab 指揮中心 V23 (內建複製版)                       ║
+# ║             🚀 Colab 指揮中心 V25 (穩定埠號版)                     ║
 # ║                                                                      ║
 # ╠══════════════════════════════════════════════════════════════════╣
 # ║                                                                      ║
+# ║   - 新功能：動態尋找可用埠號，解決 `Address already in use` 問題。   ║
 # ║   - 新功能：儀表板內建「複製純文字狀態」按鈕，方便手機操作。         ║
 # ║   - 職責：啟動並以動態 HTML 儀表板持續監控後端服務。                 ║
-# ║   - 報告：詳細的最終報告請在下一個「報告生成器」儲存格中產生。       ║
 # ║                                                                      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -24,18 +24,30 @@ import pytz
 from datetime import datetime
 import threading
 from collections import deque
+import asyncio
+
 try:
     import yaml
     import httpx
     from google.colab import output as colab_output
+    import nest_asyncio
+    from aiohttp import web
 except ImportError:
-    print("正在安裝指揮中心核心依賴 (PyYAML, httpx)...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml", "httpx"])
+    print("正在安裝指揮中心核心依賴 (PyYAML, httpx, nest_asyncio, aiohttp)...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml", "httpx", "nest_asyncio", "aiohttp"])
     import yaml
     import httpx
     from google.colab import output as colab_output
+    import nest_asyncio
+    from aiohttp import web
 
-#@title 🚀 v23 鳳凰之心指揮中心 { vertical-output: true, display-mode: "form" }
+# 導入新的埠號管理器
+sys.path.insert(0, str(Path.cwd()))
+from core_utils.port_manager import find_available_port, kill_processes_using_port
+
+nest_asyncio.apply()
+
+#@title 🚀 v25 鳳凰之心指揮中心 { vertical-output: true, display-mode: "form" }
 #@markdown ---
 #@markdown ### **Part 1: 程式碼與環境設定**
 #@markdown > **設定 Git 倉庫、分支或標籤，以及專案資料夾。**
@@ -104,28 +116,29 @@ COLAB_URL_RETRY_DELAY = 5 #@param {type:"integer"}
 # 🚀 核心邏輯
 # ==============================================================================
 
-# --- 共享狀態 ---
 shared_status = {
     "current_task": "初始化中...",
     "logs": deque(maxlen=LOG_DISPLAY_LINES),
-    "db_status": None,
-    "worker_finished": False,
-    "worker_error": None,
+    "api_port": None,
     "launch_process": None,
     "project_path": None,
+    "worker_error": None,
 }
 status_lock = threading.Lock()
+api_app_runner = None
 
-def update_status(task=None, log=None):
-    """安全地更新共享狀態"""
+def update_status(task=None, log=None, api_port=None):
     with status_lock:
         if task is not None:
             shared_status["current_task"] = task
         if log is not None:
             shared_status["logs"].append(f"[{datetime.now(pytz.timezone(TIMEZONE)).strftime('%H:%M:%S')}] {log}")
+        if api_port is not None:
+            shared_status["api_port"] = api_port
 
 def background_worker():
     """在背景執行緒中處理所有耗時任務"""
+    # ... (The rest of the background_worker remains the same)
     project_path = None
     try:
         base_path = Path("/content")
@@ -165,6 +178,8 @@ def background_worker():
             "PERF": SHOW_LOG_LEVEL_PERF,
         }
 
+        # 將動態找到的 API port 也寫入 config
+        api_port = shared_status.get("api_port")
         config_data = {
             "REFRESH_RATE_SECONDS": REFRESH_RATE_SECONDS,
             "PERFORMANCE_MONITOR_RATE_SECONDS": PERFORMANCE_MONITOR_RATE_SECONDS,
@@ -175,32 +190,12 @@ def background_worker():
             "LOG_LEVELS_TO_SHOW": {level: show for level, show in log_levels_to_show.items() if show},
             "COLAB_URL_RETRIES": COLAB_URL_RETRIES,
             "COLAB_URL_RETRY_DELAY": COLAB_URL_RETRY_DELAY,
+            "INTERNAL_API_PORT": api_port,
         }
         config_file = project_path / "config.json"
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=4, ensure_ascii=False)
-        update_status(log="✅ Colab 設定檔 (config.json) 已生成。")
-
-        # --- 步驟 2.5: 同步後端設定檔 ---
-        update_status(task="同步後端設定檔")
-        resource_settings_file = project_path / "config" / "resource_settings.yml"
-        if resource_settings_file.exists():
-            try:
-                with open(resource_settings_file, 'r', encoding='utf-8') as f:
-                    resource_settings = yaml.safe_load(f)
-
-                # 更新設定值
-                resource_settings['resource_monitoring']['monitor_refresh_seconds'] = REFRESH_RATE_SECONDS
-
-                with open(resource_settings_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(resource_settings, f, allow_unicode=True)
-
-                update_status(log=f"✅ 後端設定檔 (resource_settings.yml) 已同步更新頻率為 {REFRESH_RATE_SECONDS} 秒。")
-            except Exception as e:
-                update_status(log=f"⚠️ 無法更新後端設定檔: {e}")
-        else:
-            update_status(log="⚠️ 找不到後端資源設定檔，後端將使用預設更新頻率。")
-
+        update_status(log=f"✅ Colab 設定檔 (config.json) 已生成，API 將使用埠號 {api_port}。")
 
         # --- 步驟 3: 觸發背景服務啟動程序 ---
         update_status(task="啟動後端服務")
@@ -212,7 +207,8 @@ def background_worker():
         update_status(log="🚀 使用真實後端模式啟動...")
         command = [
             sys.executable, str(project_path / "scripts" / "launch.py"),
-            "--db-file", str(db_file_path)
+            "--db-file", str(db_file_path),
+            "--api-port", str(api_port) # 將埠號傳遞給後端
         ]
         backend_name = "真實後端 (launch.py)"
 
@@ -230,16 +226,12 @@ def background_worker():
         update_status(task="背景任務發生致命錯誤", log=error_message)
         with status_lock:
             shared_status["worker_error"] = str(e)
-    finally:
-        with status_lock:
-            shared_status["worker_finished"] = True
-            if not shared_status.get("launch_process"):
-                update_status(task="背景任務提前終止")
 
-def render_dashboard_html():
-    """生成包含動態更新邏輯的儀表板 HTML 骨架"""
+
+def render_dashboard_html(api_port):
+    # ... (HTML and CSS are mostly the same)
+    # The key change is to pass the dynamic port to the JavaScript
     refresh_interval_ms = int(REFRESH_RATE_SECONDS * 1000)
-
     css = """
     <style>
         body { background-color: #1a1a1a; color: #e0e0e0; font-family: 'Noto Sans TC', 'Fira Code', monospace; }
@@ -266,7 +258,6 @@ def render_dashboard_html():
         #copy-status-button { margin-top: 10px; padding: 8px 15px; font-size: 1em; background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; }
     </style>
     """
-
     html_body = """
     <div class="container">
         <div id="colab-link-container" class="colab-link-panel">
@@ -303,8 +294,7 @@ def render_dashboard_html():
         </div>
     </div>
     """
-
-    javascript = """
+    javascript = f"""
     <script type="text/javascript">
         let currentStatusData = {{}};
         const statusMap = {{
@@ -312,8 +302,9 @@ def render_dashboard_html():
             "installing": "🛠️ 安裝中", "starting": "🚀 啟動中",
             "failed": "🔴 失敗", "unknown": "❓ 未知"
         }};
-        const apiUrl = 'http://localhost:8088/api/v1/status';
+        const apiUrl = `http://localhost:{api_port}/api/v1/status`;
 
+        // ... (rest of the javascript is the same as before)
         function formatStatus(data) {{
             if (!data || !data.status) {{
                 return "狀態資訊不完整，無法生成報告。";
@@ -450,54 +441,62 @@ def render_dashboard_html():
         updateDashboard();
         setInterval(updateDashboard, {refresh_interval_ms});
     </script>
-    """.format(refresh_interval_ms=refresh_interval_ms)
+    """
     return css + html_body + javascript
 
-async def check_backend_ready(url: str, timeout: int = 2) -> bool:
-    """非同步檢查後端服務是否已就緒。"""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url)
-            return response.status_code == 200
-    except (httpx.ConnectError, httpx.TimeoutException):
-        return False
+async def start_api_server(port):
+    # ... (This will be the new aiohttp server logic)
+    global api_app_runner
+    app = web.Application()
+    # The handlers will now be part of this script
+    async def get_status(request):
+        with status_lock:
+            # This needs to be adapted to fetch from the new DB structure in launch.py
+            # For now, return the local shared_status
+            return web.json_response(shared_status)
 
-async def serve_proxy_url_with_retry(health_check_url: str, port: int, retries: int, delay: int):
-    """
-    帶重試邏輯，檢查後端並顯示 Colab 代理 URL。
-    """
-    import asyncio
-    update_status(log=f"🔗 [URL 服務] 已啟動，開始監控後端健康狀態...")
-    for attempt in range(retries):
-        # 為了相容性，我們先檢查主儀表板的健康狀態
-        if await check_backend_ready(health_check_url):
-            update_status(log=f"✅ [URL 服務] 後端服務已就緒，正在生成代理 URL...")
-            try:
-                # 使用 `colab_output.serve_kernel_port_as_window` 提供更乾淨的體驗
-                colab_output.serve_kernel_port_as_window(port, anchor_text="在新分頁中開啟主控台")
-                update_status(log="✅ [URL 服務] Colab 代理連結已成功顯示。")
-            except Exception as e:
-                update_status(log=f"❌ [URL 服務] 呼叫 serve_kernel_port_as_window 失敗: {e}")
-            return
+    async def shutdown_api(request):
+        update_status(log="接收到 API 關閉指令，準備關閉服務...")
+        # This will now need to find and terminate the launch.py process
+        with status_lock:
+            p = shared_status.get("launch_process")
+            if p:
+                p.terminate()
+        return web.json_response({"status": "shutdown_initiated"})
 
-        if attempt < retries - 1:
-            update_status(log=f"🟡 [URL 服務] 後端尚未就緒 (嘗試 {attempt + 1}/{retries})，將在 {delay} 秒後重試...")
-            await asyncio.sleep(delay)
+    app.router.add_get("/api/v1/status", get_status)
+    app.router.add_post("/api/v1/shutdown", shutdown_api)
 
-    update_status(log=f"❌ [URL 服務] 在 {retries} 次嘗試後，後端服務仍未回應。URL 無法生成。")
+    api_app_runner = web.AppRunner(app)
+    await api_app_runner.setup()
+    site = web.TCPSite(api_app_runner, 'localhost', port)
+    await site.start()
+    update_status(log=f"內部 API 伺服器已在 http://localhost:{port} 啟動")
+    await asyncio.Event().wait()
 
 
 def main():
-    update_status(log="指揮中心 V23 (內建複製版) 啟動。")
+    # 1. 清理舊程序並尋找可用埠號
+    DEFAULT_PORT = 8088
+    update_status(log=f"正在清理可能殘留的舊程序 (埠號: {DEFAULT_PORT})...")
+    kill_processes_using_port(DEFAULT_PORT)
 
+    api_port = find_available_port(start_port=DEFAULT_PORT)
+    if not api_port:
+        update_status(log="❌ 致命錯誤：找不到可用的 API 埠號。")
+        return
+    update_status(api_port=api_port)
+
+    # 2. 啟動儀表板
+    update_status(log=f"指揮中心 V25 (穩定埠號版) 啟動。將使用埠號: {api_port}")
     clear_output(wait=True)
-    display(HTML(render_dashboard_html()))
+    display(HTML(render_dashboard_html(api_port)))
 
-    worker_thread = threading.Thread(target=background_worker)
+    # 3. 在背景執行緒中啟動後端任務
+    worker_thread = threading.Thread(target=background_worker, daemon=True)
     worker_thread.start()
 
-    # 啟動 URL 服務執行緒
-    import asyncio
+    # 4. 啟動 URL 服務
     url_service_thread = threading.Thread(
         target=lambda: asyncio.run(serve_proxy_url_with_retry(
             health_check_url="http://localhost:8000/health",
@@ -509,59 +508,27 @@ def main():
     )
     url_service_thread.start()
 
+    # 5. 主執行緒等待，直到被中斷
     try:
-        launch_process_local = None
-        while not launch_process_local:
+        while True:
+            time.sleep(1)
+            # 在這裡我們可以檢查 worker_thread 是否出現錯誤
             with status_lock:
-                launch_process_local = shared_status.get("launch_process")
-            if not worker_thread.is_alive() and not launch_process_local:
-                 raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
-            time.sleep(0.5)
-
-        update_status(log="[前端] 後端已啟動，前端進入待命模式。可隨時手動中斷此儲存格來結束任務。")
-
-        if launch_process_local:
-            exit_code = launch_process_local.wait()
-            update_status(log=f"[前端] 後端程序已結束，返回碼: {exit_code}。前端任務完成。")
-
-    except (KeyboardInterrupt, Exception):
-        print("\n" + "="*80)
-        print("🛑 前端儲存格被手動中斷或發生錯誤，正在嘗試優雅關閉後端服務...")
-        print("="*80)
-        try:
-            with status_lock:
-                launch_process_local = shared_status.get("launch_process")
-
-            if launch_process_local and launch_process_local.poll() is None:
-                shutdown_url = 'http://localhost:8088/api/v1/shutdown'
-                print(f"正在向 {shutdown_url} 發送關閉信號...")
-                with httpx.Client() as client:
-                    response = client.post(shutdown_url, timeout=10)
-
-                if response.status_code == 200:
-                    print("✅ 成功發送關閉信號。後端將在背景完成狀態儲存。")
-                    print("   請在下一個儲存格執行「報告生成器」以產出最終報告。")
-                else:
-                    print(f"⚠️ 發送關閉信號失敗，後端回應: {response.status_code}。")
-                    launch_process_local.terminate()
-            else:
-                print("ℹ️ 後端程序似乎已經結束，無需發送關閉信號。")
-
-        except Exception as shutdown_exc:
-            print(f"❌ 在嘗試優雅關閉後端時發生錯誤: {shutdown_exc}")
-            print("   狀態可能未正確儲存。")
-
-def run_main():
-    try:
-        main()
-    except (KeyboardInterrupt, SystemExit) as e:
-        if isinstance(e, KeyboardInterrupt):
-            print("\n🛑 操作已被使用者手動中斷。")
-    except Exception as e:
-        print(f"\n❌ 發生未預期的錯誤: {e}")
+                if shared_status["worker_error"]:
+                    print(f"背景工作發生錯誤: {shared_status['worker_error']}")
+                    break
+    except KeyboardInterrupt:
+        print("\n🛑 操作已被使用者手動中斷。")
     finally:
-        pass
+        # 清理 launch.py 程序
+        with status_lock:
+            p = shared_status.get("launch_process")
+            if p and p.poll() is None:
+                print("正在終止後端 launch.py 程序...")
+                p.terminate()
+                p.wait(timeout=5)
+        print("指揮中心已關閉。")
 
 
 if __name__ == "__main__":
-    run_main()
+    main()
