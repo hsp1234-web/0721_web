@@ -1,3 +1,0 @@
-# 語音轉錄功能額外依賴
-torch
-faster-whisper
