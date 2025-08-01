@@ -39,6 +39,16 @@ from collections import deque
 import pytz
 import traceback
 
+# --- 修正 sys.path ---
+# 取得目前檔案的絕對路徑
+current_file_path = Path(__file__).resolve()
+# 取得專案根目錄 (此檔案位於 run/ 資料夾下，所以往上兩層)
+project_root = current_file_path.parent.parent
+# 將專案根目錄加到 sys.path 的最前面
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+# --- 修正結束 ---
+
 try:
     from IPython.display import display, HTML, clear_output
     import nest_asyncio
@@ -191,7 +201,6 @@ def main():
     if not project_path.is_dir():
         print(f"❌ 錯誤：專案資料夾 '{project_path}' 不存在。請先執行主指揮中心來下載專案。")
         return
-    sys.path.insert(0, str(project_path))
     from core_utils.port_manager import find_available_port, kill_processes_using_port
 
     DEFAULT_PORT = 8089

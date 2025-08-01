@@ -26,6 +26,16 @@ import threading
 from collections import deque
 import asyncio
 
+# --- 修正 sys.path ---
+# 取得目前檔案的絕對路徑
+current_file_path = Path(__file__).resolve()
+# 取得專案根目錄 (假設此檔案在 run/ 資料夾下)
+project_root = current_file_path.parent.parent
+# 將專案根目錄加入 sys.path
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+# --- 修正結束 ---
+
 try:
     import yaml
     import httpx
@@ -53,7 +63,7 @@ nest_asyncio.apply()
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.6.3" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.6.4" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
