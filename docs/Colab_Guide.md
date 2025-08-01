@@ -53,16 +53,24 @@ else:
     os.chdir(project_path)
     print(f"✅ 工作目錄已切換至: {os.getcwd()}")
 
-    # --- 步驟 2: 安裝依賴 ---
+    # --- 步驟 2: 安裝專案與依賴 ---
     # 我們將安裝所有必要的依賴，以便在 Colab 中運行
-    print("--- 正在安裝核心、轉錄及測試依賴 ---")
+    print("--- 正在安裝專案套件與核心依賴 ---")
     try:
+        # 步驟 2.1: 將專案本身以可編輯模式安裝
+        # 這是套件化方案的核心，讓 Python 知道如何找到專案內的模組
+        print("--- 正在安裝專案本身 (可編輯模式) ---")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+        print("✅ 專案套件安裝完成。")
+
+        # 步驟 2.2: 安裝其他依賴
+        print("--- 正在安裝第三方依賴 ---")
         # 使用 uv 來加速安裝
-        subprocess.run(["pip", "install", "uv"], check=True)
+        subprocess.run(["pip", "install", "-q", "uv"], check=True)
         # 安裝運行所需的所有 requirements
         subprocess.run(["uv", "pip", "install", "-r", "requirements/base.txt"], check=True)
         subprocess.run(["uv", "pip", "install", "-r", "requirements/transcriber.txt"], check=True)
-        print("✅ 依賴安裝完成。")
+        print("✅ 第三方依賴安裝完成。")
 
         # --- 步驟 3: 啟動服務 ---
         print(f"--- 準備在埠號 {FASTAPI_PORT} 上啟動 FastAPI 服務 ---")

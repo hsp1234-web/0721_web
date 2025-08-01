@@ -39,16 +39,6 @@ from collections import deque
 import pytz
 import traceback
 
-# --- 修正 sys.path ---
-# 取得目前檔案的絕對路徑
-current_file_path = Path(__file__).resolve()
-# 取得專案根目錄 (此檔案位於 run/ 資料夾下，所以往上兩層)
-project_root = current_file_path.parent.parent
-# 將專案根目錄加到 sys.path 的最前面
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-# --- 修正結束 ---
-
 try:
     from IPython.display import display, HTML, clear_output
     import nest_asyncio
@@ -59,6 +49,8 @@ except ImportError:
     from IPython.display import display, HTML, clear_output
     import nest_asyncio
     from aiohttp import web
+
+from core_utils.port_manager import find_available_port, kill_processes_using_port
 
 nest_asyncio.apply()
 
@@ -111,21 +103,29 @@ def background_worker(project_path):
         update_state(status="環境準備失敗", log=f"❌ {e}\n{traceback.format_exc()}")
 
 def run_report_generation(project_path):
-    """執行核心的 generate_report.py 腳本"""
-    venv_python = str(project_path / "apps" / "report_generator" / ".venv" / "bin" / "python")
-    report_script_path = project_path / "scripts" / "generate_report.py"
-    db_file = project_path / "state.db"
-    config_file = project_path / "config.json"
-    if not db_file.exists():
-        (project_path / "logs").mkdir(exist_ok=True)
-        (project_path / "logs" / "summary_report.md").write_text("# 綜合戰情簡報\n\n錯誤：找不到 state.db，無法生成報告。")
-        raise FileNotFoundError("找不到 state.db，無法生成報告。")
-    if not config_file.exists():
-        config_file.write_text(json.dumps({"TIMEZONE": "Asia/Taipei"}))
+    """透過直接匯入和呼叫函式來執行核心報告生成邏輯。"""
+    try:
+        from scripts.generate_report import ReportGenerator
 
-    cmd = [venv_python, str(report_script_path), "--db-file", str(db_file), "--config-file", str(config_file)]
-    subprocess.run(cmd, capture_output=True, text=True, cwd=project_path, check=True)
-    update_state(log="✅ 核心報告腳本執行成功。")
+        db_file = project_path / "state.db"
+        config_file = project_path / "config.json"
+
+        if not db_file.exists():
+            (project_path / "logs").mkdir(exist_ok=True)
+            (project_path / "logs" / "summary_report.md").write_text("# 綜合戰情簡報\n\n錯誤：找不到 state.db，無法生成報告。")
+            raise FileNotFoundError("找不到 state.db，無法生成報告。")
+        if not config_file.exists():
+            # 為防萬一，建立一個預設設定檔
+            config_file.write_text(json.dumps({"TIMEZONE": "Asia/Taipei"}))
+
+        # 實例化報告生成器並執行
+        generator = ReportGenerator(db_path=db_file, config_path=config_file)
+        generator.generate_all_reports()
+        update_state(log="✅ 核心報告腳本執行成功。")
+    except Exception as e:
+        update_state(log=f"❌ 報告生成失敗: {e}")
+        # 重新引發異常，以便上層可以捕捉到
+        raise
 
 # --- API 伺服器 ---
 async def get_status(request):
@@ -201,7 +201,6 @@ def main():
     if not project_path.is_dir():
         print(f"❌ 錯誤：專案資料夾 '{project_path}' 不存在。請先執行主指揮中心來下載專案。")
         return
-    from core_utils.port_manager import find_available_port, kill_processes_using_port
 
     DEFAULT_PORT = 8089
     update_state(log=f"正在清理可能殘留的舊程序 (埠號: {DEFAULT_PORT})...")

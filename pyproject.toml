@@ -1,0 +1,10 @@
+[project]
+name = "phoenix-heart"
+version = "1.0.0"
+description = "Phoenix Heart project, structured as an installable package."
+readme = "README.md"
+requires-python = ">=3.8"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "core_utils*", "scripts*", "run*"]

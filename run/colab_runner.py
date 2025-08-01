@@ -26,16 +26,6 @@ import threading
 from collections import deque
 import asyncio
 
-# --- 修正 sys.path ---
-# 取得目前檔案的絕對路徑
-current_file_path = Path(__file__).resolve()
-# 取得專案根目錄 (假設此檔案在 run/ 資料夾下)
-project_root = current_file_path.parent.parent
-# 將專案根目錄加入 sys.path
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-# --- 修正結束 ---
-
 try:
     import yaml
     import httpx
@@ -51,7 +41,7 @@ except ImportError:
     import nest_asyncio
     from aiohttp import web
 
-from core_utils.port_manager import find_available_port, kill_processes_using_port
+# from core_utils.port_manager import find_available_port, kill_processes_using_port
 
 nest_asyncio.apply()
 
@@ -63,7 +53,7 @@ nest_asyncio.apply()
 #@markdown **後端程式碼倉庫 (REPOSITORY_URL)**
 REPOSITORY_URL = "https://github.com/hsp1234-web/0721_web" #@param {type:"string"}
 #@markdown **後端版本分支或標籤 (TARGET_BRANCH_OR_TAG)**
-TARGET_BRANCH_OR_TAG = "6.6.4" #@param {type:"string"}
+TARGET_BRANCH_OR_TAG = "6.6.5" #@param {type:"string"}
 #@markdown **專案資料夾名稱 (PROJECT_FOLDER_NAME)**
 PROJECT_FOLDER_NAME = "WEB1" #@param {type:"string"}
 #@markdown **強制刷新後端程式碼 (FORCE_REPO_REFRESH)**
@@ -146,17 +136,14 @@ def update_status(task=None, log=None, api_port=None):
 
 def background_worker():
     """在背景執行緒中處理所有耗時任務"""
-    # ... (The rest of the background_worker remains the same)
     project_path = None
     try:
+        # --- 專案路徑設定 ---
+        # 這裡的路徑是 Colab 環境特有的結構
         base_path = Path("/content")
         project_path = base_path / PROJECT_FOLDER_NAME
         with status_lock:
             shared_status["project_path"] = project_path
-
-        # 將專案根目錄加入 sys.path
-        sys.path.insert(0, str(project_path))
-
 
         # --- 步驟 1: 準備專案環境 ---
         update_status(task="準備專案環境")
@@ -167,30 +154,30 @@ def background_worker():
 
         if not project_path.exists():
             update_status(log="正在從 Github 下載程式碼...")
+            # 使用 subprocess 執行 git clone
             process = subprocess.run(
                 ["git", "clone", "--depth", "1", "--branch", TARGET_BRANCH_OR_TAG, REPOSITORY_URL, str(project_path)],
-                capture_output=True, text=True
+                capture_output=True, text=True, check=True
             )
-            if process.returncode != 0:
-                raise RuntimeError(f"Git clone 失敗: {process.stderr}")
             update_status(log="✅ 程式碼下載成功。")
         else:
             update_status(log="專案資料夾已存在，跳過下載。")
 
-        # --- 步驟 2: 生成設定檔 ---
-        update_status(task="生成專案設定檔")
-        log_levels_to_show = {
-            "BATTLE": SHOW_LOG_LEVEL_BATTLE,
-            "SUCCESS": SHOW_LOG_LEVEL_SUCCESS,
-            "INFO": SHOW_LOG_LEVEL_INFO,
-            "CMD": SHOW_LOG_LEVEL_CMD,
-            "SHELL": SHOW_LOG_LEVEL_SHELL,
-            "ERROR": SHOW_LOG_LEVEL_ERROR,
-            "CRITICAL": SHOW_LOG_LEVEL_CRITICAL,
-            "PERF": SHOW_LOG_LEVEL_PERF,
-        }
+        # --- 步驟 2: 安裝專案套件 ---
+        update_status(task="安裝專案套件")
+        # 這是套件化方案的核心步驟
+        # 我們在下載下來的專案目錄中執行 `pip install -e .`
+        # 這會讓 `core_utils`, `scripts` 等模組在整個環境中都可被 import
+        install_process = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", "."],
+            cwd=project_path,
+            capture_output=True, text=True, check=True
+        )
+        update_status(log="✅ 專案已在可編輯模式下安裝成功。")
 
-        # 將動態找到的 API port 也寫入 config
+        # --- 步驟 3: 生成設定檔 ---
+        # (此步驟邏輯不變)
+        update_status(task="生成專案設定檔")
         api_port = shared_status.get("api_port")
         config_data = {
             "REFRESH_RATE_SECONDS": REFRESH_RATE_SECONDS,
@@ -199,41 +186,44 @@ def background_worker():
             "LOG_ARCHIVE_FOLDER_NAME": LOG_ARCHIVE_FOLDER_NAME,
             "TIMEZONE": TIMEZONE,
             "FAST_TEST_MODE": FAST_TEST_MODE,
-            "LOG_LEVELS_TO_SHOW": {level: show for level, show in log_levels_to_show.items() if show},
+            "LOG_LEVELS_TO_SHOW": {
+                level: globals()[f"SHOW_LOG_LEVEL_{level.upper()}"]
+                for level in ["BATTLE", "SUCCESS", "INFO", "CMD", "SHELL", "ERROR", "CRITICAL", "PERF"]
+                if globals()[f"SHOW_LOG_LEVEL_{level.upper()}"]
+            },
             "COLAB_URL_RETRIES": COLAB_URL_RETRIES,
             "COLAB_URL_RETRY_DELAY": COLAB_URL_RETRY_DELAY,
             "INTERNAL_API_PORT": api_port,
         }
         config_file = project_path / "config.json"
-        with open(config_file, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=4, ensure_ascii=False)
-        update_status(log=f"✅ Colab 設定檔 (config.json) 已生成，API 將使用埠號 {api_port}。")
+        config_file.write_text(json.dumps(config_data, indent=4, ensure_ascii=False))
+        update_status(log=f"✅ Colab 設定檔 (config.json) 已生成。")
 
-        # --- 步驟 3: 觸發背景服務啟動程序 ---
+        # --- 步驟 4: 啟動後端服務 (重構後) ---
         update_status(task="啟動後端服務")
-
         db_file_path = project_path / "state.db"
-        log_file_path = project_path / "logs" / "backend.log"
-        log_file_path.parent.mkdir(exist_ok=True)
 
-        update_status(log="🚀 使用真實後端模式啟動...")
-        command = [
-            sys.executable, str(project_path / "scripts" / "launch.py"),
-            "--db-file", str(db_file_path),
-            "--api-port", str(api_port) # 將埠號傳遞給後端
-        ]
-        backend_name = "真實後端 (launch.py)"
+        # 由於專案已安裝，我們現在可以直接 import
+        from scripts import launch
 
-        with open(log_file_path, "w") as f:
-            process = subprocess.Popen(command, cwd=project_path, stdout=f, stderr=subprocess.STDOUT)
+        update_status(log="🚀 使用模組化方式啟動後端...")
+        # 直接呼叫 launch.py 的 main 函式
+        # 注意：launch.main 是 async，所以我們需要用 asyncio.run 來執行
+        # 這會在當前執行緒中啟動並運行 asyncio 事件循環
+        asyncio.run(launch.main(db_path=db_file_path))
 
+        # 因為 launch.main 會持續運行直到被中斷，所以下面的程式碼可能不會立即執行
+        update_status(log="✅ 後端服務已停止。")
+        update_status(task="後端服務已結束")
+
+    except subprocess.CalledProcessError as e:
+        # 處理 git 或 pip 的錯誤
+        error_message = f"❌ 子程序執行失敗: {e.stderr}"
+        update_status(task="背景任務發生致命錯誤", log=error_message)
         with status_lock:
-            shared_status["launch_process"] = process
-
-        update_status(log=f"✅ {backend_name} 已啟動 (PID: {process.pid})。")
-        update_status(task=f"{backend_name} 運行中...")
-
+            shared_status["worker_error"] = e.stderr
     except Exception as e:
+        # 處理其他所有錯誤
         error_message = f"❌ {e}"
         update_status(task="背景任務發生致命錯誤", log=error_message)
         with status_lock:
@@ -488,6 +478,7 @@ async def start_api_server(port):
 
 
 def main():
+    from core_utils.port_manager import find_available_port, kill_processes_using_port
     # 1. 清理舊程序並尋找可用埠號
     DEFAULT_PORT = 8088
     update_status(log=f"正在清理可能殘留的舊程序 (埠號: {DEFAULT_PORT})...")
