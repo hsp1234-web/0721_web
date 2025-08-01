@@ -109,25 +109,111 @@ def test_graceful_shutdown_and_report_archiving(project_path, test_config):
         if process.returncode != 0:
             pytest.fail(f"Process did not terminate cleanly. Return code: {process.returncode}", pytrace=False)
 
-        # 4. Check for the archived reports
-        archive_path = project_path / archive_dir_name
-        assert archive_path.is_dir(), f"Archive directory '{archive_dir_name}' was not created."
+        # 4. Verify that the state database was created and contains data.
+        assert db_file.exists(), "state.db was not created."
+        assert db_file.stat().st_size > 0, "state.db is empty."
 
-        timestamp_folders = list(archive_path.iterdir())
-        assert len(timestamp_folders) == 1, "Expected one timestamped folder in the archive directory."
+        # 5. Verify the database content
+        import sqlite3
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
 
-        final_archive_path = timestamp_folders[0]
-        assert final_archive_path.is_dir()
+        # Check if the logs table has records
+        cursor.execute("SELECT COUNT(*) FROM phoenix_logs")
+        log_count = cursor.fetchone()[0]
+        assert log_count > 0, "The phoenix_logs table should not be empty."
 
-        # In FAST_TEST_MODE, the main logic is skipped, but the shutdown report generation should still run.
-        # Let's check for the consolidated report.
-        expected_reports = ["最終運行報告.md", "任務總結報告.md"]
-        archived_files = [f.name for f in final_archive_path.iterdir()]
+        # Check if the status table has a final status
+        cursor.execute("SELECT current_stage FROM status_table WHERE id = 1")
+        final_stage = cursor.fetchone()[0]
+        assert final_stage is not None, "The final stage was not recorded in the status_table."
+        # In fast test mode, this is the expected final stage
+        assert "快速測試通過" in final_stage
 
-        for report in expected_reports:
-             assert report in archived_files, f"Expected '{report}' not found in archive. Found: {archived_files}"
+        conn.close()
 
     finally:
         if process.poll() is None:
             process.terminate()
             process.wait()
+
+
+def test_report_generator_script(project_path):
+    """
+    Tests the `run/report.py` script to ensure it can correctly find and
+    execute the underlying report generator with the right paths.
+    """
+    # 1. Setup the environment to mimic Colab after a run
+    # The `project_path` fixture already gives us an isolated project copy.
+    # We need to simulate the state left by colab_runner.py
+    (project_path / "scripts").mkdir(exist_ok=True)
+    (project_path / "logs").mkdir(exist_ok=True)
+
+    # Create a dummy state.db and config.json
+    db_file = project_path / "state.db"
+    db_file.touch()
+    config_file = project_path / "config.json"
+    config_file.write_text(json.dumps({"TIMEZONE": "Asia/Taipei"}))
+
+    # Create a mock report generator script
+    mock_report_script_path = project_path / "scripts" / "generate_report.py"
+    mock_report_script_path.write_text(
+        "import sys; print(f'Mock report generator called with: {{sys.argv}}');"
+    )
+
+    # 2. Get the content of our `run/report.py` wrapper
+    report_runner_script_path = project_path / "run" / "report.py"
+    assert report_runner_script_path.exists()
+    report_runner_script_content = report_runner_script_path.read_text(encoding='utf-8')
+
+    # Extract the Python code from the Colab cell content
+    # A simple way to do this is to find the line after the final #@markdown
+    code_lines = []
+    in_code_section = False
+    for line in report_runner_script_content.splitlines():
+        if "#@markdown >" in line and "點擊「執行」以生成報告" in line:
+            in_code_section = True
+            continue
+        if in_code_section:
+            code_lines.append(line)
+
+    python_code_to_run = "\n".join(code_lines)
+    assert "subprocess.run" in python_code_to_run # Ensure we got the right part
+
+    # 3. Execute the extracted Python code
+    # We need to simulate the Colab form variables
+    # Let's set PROJECT_FOLDER_NAME to the name of our temporary project directory
+    exec_globals = {
+        "PROJECT_FOLDER_NAME": project_path.name,
+        "GENERATE_SUMMARY_REPORT": True,
+        "GENERATE_PERFORMANCE_REPORT": False,
+        "GENERATE_DETAILED_LOG_REPORT": True,
+        # We need to mock the IPython display function
+        "display": lambda *args, **kwargs: None,
+        "Code": lambda data, language: None,
+        "Markdown": lambda data: None,
+    }
+
+    # We need to execute the script in a way that it thinks it's in /content
+    # The `project_path` is something like /tmp/pytest-of-user/pytest-0/project0
+    # The script expects /content/{PROJECT_FOLDER_NAME}
+    # So we create a symlink from /content/{project_path.name} to our actual project_path
+    content_dir = Path("/content")
+    content_dir.mkdir(exist_ok=True)
+    symlink_path = content_dir / project_path.name
+    if not symlink_path.exists():
+        symlink_path.symlink_to(project_path)
+
+    try:
+        # Execute the code. We can't use subprocess because it's not a file.
+        # We use exec(). This is generally unsafe, but fine in a controlled test.
+        exec(python_code_to_run, exec_globals)
+
+        # The test doesn't produce capturable output with exec, so we can't assert on stdout.
+        # The main goal is to ensure it runs without a FileNotFoundError.
+        # If exec completes without an exception, it means the paths were resolved correctly.
+
+    finally:
+        # Clean up the symlink
+        if symlink_path.is_symlink():
+            symlink_path.unlink()

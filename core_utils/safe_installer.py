@@ -56,7 +56,7 @@ def install_packages(app_name: str, requirements_path: str, python_executable: s
 
     # 1. 載入資源設定
     settings = load_resource_settings()
-    logger.info(f"成功載入資源設定檔。記憶體閾值: {settings['resource_monitoring']['memory_usage_threshold_percent']}%, 磁碟閾值: {settings['resource_monitoring']['min_disk_space_mb']}MB。")
+    logger.info(f"成功載入資源設定檔。磁碟閾值: {settings['resource_monitoring']['min_disk_space_mb']}MB。")
 
     # 2. 讀取 requirements 檔案
     if not Path(requirements_path).exists():
