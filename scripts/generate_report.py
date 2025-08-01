@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-獨立報告生成器 (V16 - 模組化)
+獨立報告生成器 (V16.1 - 簡化依賴)
 
 這個腳本是一個獨立的工具，專門用來從 SQLite 資料庫生成標準的 Markdown 報告。
 它實現了報告產生與主業務邏輯的完全解耦。
+移除了 sparklines 和 tabulate 依賴，以提高在任何環境下的安裝成功率。
 
 使用方法:
     python generate_report.py --db-file /path/to/your/database.db --config-file /path/to/your/config.json
@@ -16,8 +17,18 @@ import json
 import pytz
 import argparse
 import sys
-import sparklines
 import re
+
+def df_to_markdown_table(df: pd.DataFrame) -> str:
+    """手動將 pandas DataFrame 轉換為 Markdown 表格，避免 tabulate 依賴。"""
+    if df.empty:
+        return ""
+
+    header = "| " + " | ".join(df.columns) + " |"
+    separator = "| " + " | ".join(["---"] * len(df.columns)) + " |"
+    body = "\n".join(["| " + " | ".join(map(str, row)) + " |" for row in df.itertuples(index=False)])
+
+    return f"{header}\n{separator}\n{body}"
 
 class ReportGenerator:
     """
@@ -104,23 +115,16 @@ class ReportGenerator:
         if self.df.empty:
             return pd.DataFrame()
 
-        # 我們只關心 CMD 和 BATTLE 等級的日誌來定義任務邊界
         task_logs = self.df[self.df['level'].isin(['CMD', 'BATTLE', 'SUCCESS', 'ERROR', 'CRITICAL'])].copy()
 
         events = []
-        # 使用正則表達式來捕捉更通用的模式
         start_pattern = r"開始為 (.*) 安裝"
 
-        # 尋找安裝任務
         for index, log in task_logs.iterrows():
-            # 尋找開始事件
             match_start = re.search(start_pattern, log['message'])
             if match_start:
                 app_name = match_start.group(1)
                 start_time = index
-
-                # 尋找對應的結束事件
-                # 這裡我們簡化處理：假設下一個 SUCCESS/ERROR 是對應的結束
                 end_log = task_logs[
                     (task_logs.index > start_time) &
                     (task_logs['message'].str.contains(f"[{app_name}] 所有依賴已成功安裝") | task_logs['level'].isin(['ERROR', 'CRITICAL']))
@@ -132,8 +136,8 @@ class ReportGenerator:
                     events.append({
                         "任務名稱": f"安裝 {app_name} 的依賴",
                         "耗時 (秒)": duration,
-                        "開始時間": start_time,
-                        "結束時間": end_time
+                        "開始時間": start_time.strftime('%H:%M:%S'),
+                        "結束時間": end_time.strftime('%H:%M:%S')
                     })
 
         if not events:
@@ -147,17 +151,13 @@ class ReportGenerator:
         if self.df.empty:
             return "# 綜合戰情簡報\n\n無數據。"
 
-        # 效能摘要
         perf_df = self.df[self.df['level'] == 'PERF'].copy()
         avg_cpu = perf_df['cpu_usage'].mean() if not perf_df.empty else 0
         peak_cpu = perf_df['cpu_usage'].max() if not perf_df.empty else 0
         avg_ram = perf_df['ram_usage'].mean() if not perf_df.empty else 0
         peak_ram = perf_df['ram_usage'].max() if not perf_df.empty else 0
 
-        # 關鍵事件
         key_events = self.df[self.df['level'].isin(['SUCCESS', 'ERROR', 'WARN', 'BATTLE', 'CRITICAL'])].copy()
-
-        # 最終狀態
         has_errors = "ERROR" in self.df['level'].values or "CRITICAL" in self.df['level'].values
         status_color = "red" if has_errors else "green"
         status_text = "執行完畢，但有錯誤發生" if has_errors else "任務成功"
@@ -181,12 +181,11 @@ class ReportGenerator:
 ### 三、耗時最長任務 Top 5
 """
         if not top_events.empty:
-            md += top_events.to_markdown(index=False)
+            md += df_to_markdown_table(top_events)
         else:
             md += "- 無法分析具體的任務耗時。\n"
 
         md += "\n\n### 四、關鍵事件摘要\n"
-
         if not key_events.empty:
             for _, row in key_events.iterrows():
                 md += f"- **[{row['level']}]** {row['message']}\n"
@@ -209,9 +208,6 @@ class ReportGenerator:
             'RAM 使用率': (perf_df['ram_usage'].mean(), perf_df['ram_usage'].max(), perf_df['ram_usage'].min())
         }
 
-        cpu_trend = sparklines.sparklines(perf_df['cpu_usage'].tolist())[0]
-        ram_trend = sparklines.sparklines(perf_df['ram_usage'].tolist())[0]
-
         md = f"""# 📊 效能分析報告
 
 **報告產生時間:** {datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S %Z')}
@@ -221,14 +217,20 @@ class ReportGenerator:
 
 ### 一、總體效能摘要
 
-| 指標 | 平均值 | 峰值 | 最低值 | 趨勢 (文字圖) |
-|---|---|---|---|---|
-| CPU 使用率 | {summary['CPU 使用率'][0]:.1f}% | {summary['CPU 使用率'][1]:.1f}% | {summary['CPU 使用率'][2]:.1f}% | `{cpu_trend}` |
-| 記憶體使用率 | {summary['RAM 使用率'][0]:.1f}% | {summary['RAM 使用率'][1]:.1f}% | {summary['RAM 使用率'][2]:.1f}% | `{ram_trend}` |
+| 指標 | 平均值 | 峰值 | 最低值 |
+|---|---|---|---|
+| CPU 使用率 | {summary['CPU 使用率'][0]:.1f}% | {summary['CPU 使用率'][1]:.1f}% | {summary['CPU 使用率'][2]:.1f}% |
+| 記憶體使用率 | {summary['RAM 使用率'][0]:.1f}% | {summary['RAM 使用率'][1]:.1f}% | {summary['RAM 使用率'][2]:.1f}% |
 
 ### 二、詳細數據表
-{perf_df[['cpu_usage', 'ram_usage']].to_markdown()}
 """
+        # Manually format the detailed data table
+        perf_df_display = perf_df[['cpu_usage', 'ram_usage']].copy()
+        perf_df_display.index = perf_df_display.index.strftime('%Y-%m-%d %H:%M:%S')
+        perf_df_display.reset_index(inplace=True)
+        perf_df_display.rename(columns={'timestamp': '時間', 'cpu_usage': 'CPU 使用率 (%)', 'ram_usage': 'RAM 使用率 (%)'}, inplace=True)
+        md += df_to_markdown_table(perf_df_display.round(2))
+
         return md.strip()
 
     def _generate_log_report(self) -> str:
@@ -236,7 +238,7 @@ class ReportGenerator:
         if self.df.empty:
             return "# 詳細日誌報告\n\n無數據。"
 
-        log_df = self.df[self.df['level'] != 'PERF']
+        log_df = self.df[self.df['level'] != 'PERF'].copy()
         if log_df.empty:
             return "# 詳細日誌報告\n\n無日誌數據。"
 
@@ -247,25 +249,17 @@ class ReportGenerator:
 
 ---
 ```
-{log_df[['level', 'message']].to_string()}
-```
 """
+        # Manually format the log to avoid heavy dependencies
+        for index, row in log_df.iterrows():
+            md += f"[{index.strftime('%Y-%m-%d %H:%M:%S')}] [{row['level']}] {row['message']}\n"
+
+        md += "```"
         return md.strip()
 
 if __name__ == "__main__":
     try:
-        # 確保腳本執行時，其相依的核心套件都已安裝
-        try:
-            import pandas
-            import pytz
-            import sparklines
-            import tabulate
-        except ImportError as e:
-            print(f"❌ 錯誤：缺少報告生成所需的依賴套件: {e}", file=sys.stderr)
-            print("請確保已安裝 pandas, pytz, sparklines, tabulate。", file=sys.stderr)
-            sys.exit(1)
-
-        parser = argparse.ArgumentParser(description="鳳凰之心 V16 報告生成器")
+        parser = argparse.ArgumentParser(description="鳳凰之心 V16.1 報告生成器")
         parser.add_argument("--db-file", type=Path, required=True, help="來源 SQLite 資料庫的路徑")
         parser.add_argument("--config-file", type=Path, required=True, help="對應的 JSON 設定檔路徑")
         args = parser.parse_args()
@@ -276,7 +270,6 @@ if __name__ == "__main__":
         print("報告生成器執行完畢。")
 
     except Exception as e:
-        # 捕獲所有未預期的錯誤，確保不會靜默失敗
         import traceback
         print(f"❌ 報告生成腳本發生致命錯誤: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
