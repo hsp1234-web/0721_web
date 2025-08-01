@@ -12,6 +12,7 @@ import shlex
 import threading
 import argparse
 import signal
+import shutil
 
 # --- 依賴預檢和自動安裝 ---
 try:
@@ -598,6 +599,47 @@ async def main(db_path: Path):
                     old_path.rename(new_path)
                     log_event("INFO", f"  - 已重新命名: {old_name} -> {new_name}")
                     renamed_paths_for_archive.append(new_path)
+
+            # --- 步驟 3: 歸檔報告 ---
+            log_event("INFO", "===== 開始歸檔最終報告 =====")
+            log_event("CRITICAL", f"準備歸檔，讀取到的資料夾名稱為: '{archive_folder_name}'")
+            if not archive_folder_name:
+                log_event("CRITICAL", "歸檔資料夾名稱為空，因此跳過歸檔。")
+            else:
+                try:
+                    # 在 launch.py 中，CWD 就是專案根目錄，即 project_path
+                    archive_base_path = project_path / archive_folder_name
+                    archive_base_path.mkdir(exist_ok=True)
+
+                    tz = pytz.timezone(timezone_str)
+                    timestamp_folder_name = datetime.now(tz).isoformat()
+                    archive_target_path = archive_base_path / timestamp_folder_name
+                    archive_target_path.mkdir()
+
+                    files_to_archive_names = [
+                        "任務總結報告.md",
+                        "效能分析報告.md",
+                        "詳細日誌報告.md",
+                        "最終運行報告.md"
+                    ]
+
+                    for filename in files_to_archive_names:
+                        # 檢查 logs 目錄和專案根目錄
+                        source_path = logs_dir / filename
+                        if not source_path.exists():
+                            source_path = project_path / filename
+
+                        if source_path.exists():
+                            shutil.move(str(source_path), str(archive_target_path / filename))
+                            log_event("INFO", f"  - 已歸檔: {filename}")
+                        else:
+                            log_event("WARN", f"  - 警告: 未找到報告檔案 {filename}，無法歸檔。")
+
+                    log_event("SUCCESS", f"✅ 所有報告已歸檔至: {archive_target_path}")
+
+                except Exception as e:
+                    import traceback
+                    log_event("CRITICAL", f"歸檔報告時發生嚴重錯誤: {e}\n{traceback.format_exc()}")
 
         except Exception as e:
             import traceback

@@ -458,53 +458,6 @@ def render_dashboard_html():
     """.format(refresh_interval_ms=refresh_interval_ms)
     return css + html_body + javascript
 
-def final_report_processing(project_path, archive_folder_name, timezone_str):
-    """
-    (前端職責) 處理報告的最終歸檔。
-    此函式假定後端已完成報告的生成與重新命名。
-    """
-    if not project_path or not archive_folder_name:
-        update_status(log="ℹ️ 歸檔功能已關閉或專案路徑無效，跳過歸檔。")
-        return
-
-    update_status(task="歸檔報告", log=f"🗄️ 開始歸檔報告...")
-
-    logs_dir = project_path / "logs"
-    # 已知由後端生成的報告檔案
-    files_to_archive_names = [
-        "任務總結報告.md",
-        "效能分析報告.md",
-        "詳細日誌報告.md",
-        "最終運行報告.md" # 這個在專案根目錄
-    ]
-
-    try:
-        # 準備歸檔目標路徑
-        archive_base_path = Path("/content") / archive_folder_name
-        archive_base_path.mkdir(exist_ok=True)
-        tz = pytz.timezone(timezone_str)
-        timestamp_folder_name = datetime.now(tz).isoformat()
-        archive_target_path = archive_base_path / timestamp_folder_name
-        archive_target_path.mkdir()
-
-        for filename in files_to_archive_names:
-            # 檢查 logs 目錄和專案根目錄
-            source_path = logs_dir / filename
-            if not source_path.exists():
-                source_path = project_path / filename
-
-            if source_path.exists():
-                shutil.move(str(source_path), str(archive_target_path / source_path.name))
-                update_status(log=f"  - 已歸檔: {source_path.name}")
-            else:
-                update_status(log=f"  - 警告: 未找到報告檔案 {filename}，無法歸檔。")
-
-        update_status(log=f"✅ 報告歸檔完成至 {archive_target_path}")
-
-    except Exception as e:
-        update_status(log=f"❌ 歸檔報告時發生錯誤: {e}")
-
-
 async def check_backend_ready(url: str, timeout: int = 2) -> bool:
     """非同步檢查後端服務是否已就緒。"""
     try:
@@ -563,8 +516,7 @@ def main():
     )
     url_service_thread.start()
 
-    # 新的簡化邏輯：前端只負責啟動，並透過長時間 sleep 來保持儲存格運行。
-    # 所有的關閉和清理工作都由後端的 API 觸發和執行。
+    # 採用更健壯的邏輯：前端等待後端程序結束，並在被中斷時觸發後端優雅關閉。
     try:
         # 等待後端程序 handle 被建立
         launch_process_local = None
@@ -575,20 +527,42 @@ def main():
                  raise RuntimeError("背景工作執行緒結束，但未能啟動後端服務。")
             time.sleep(0.5)
 
-        update_status(log="[前端] 後端已啟動，前端進入待命模式。請使用儀表板上的關閉按鈕來結束服務。")
+        update_status(log="[前端] 後端已啟動，前端進入待命模式。請使用儀表板上的關閉按鈕，或手動中斷此儲存格來結束任務。")
 
-        # 進入長時間休眠以保持儲存格運行
-        while True:
-            time.sleep(3600)
+        # 等待後端程序結束。這比無限睡眠更健壯。
+        # launch_process_local 是 Popen 物件
+        if launch_process_local:
+            exit_code = launch_process_local.wait()
+            update_status(log=f"[前端] 後端程序已結束，返回碼: {exit_code}。前端任務完成。")
 
     except (KeyboardInterrupt, Exception) as e:
-        # 即使被手動中斷，我們也不再執行複雜的清理邏輯。
-        # 而是提示使用者使用 UI 按鈕。
         print("\n" + "="*80)
-        print("🛑 前端 runner 已被手動中斷。")
-        print("   請注意：這不會優雅地關閉後端服務或生成報告。")
-        print("   強烈建議使用儀表板上提供的「關閉服務」按鈕來操作。")
+        print("🛑 前端儲存格被手動中斷或發生錯誤，正在嘗試優雅關閉後端服務...")
         print("="*80)
+        try:
+            # 檢查後端程序是否仍在運行
+            with status_lock:
+                launch_process_local = shared_status.get("launch_process")
+
+            if launch_process_local and launch_process_local.poll() is None:
+                shutdown_url = 'http://localhost:8088/api/v1/shutdown'
+                print(f"正在向 {shutdown_url} 發送關閉信號...")
+                # 使用 httpx 的同步 client
+                with httpx.Client() as client:
+                    response = client.post(shutdown_url, timeout=10)
+
+                if response.status_code == 200:
+                    print("✅ 成功發送關閉信號。後端將在背景完成報告生成與歸檔。")
+                    print("   請等待約 30 秒後，在 Colab 左側檔案總管的歸檔資料夾中檢查報告。")
+                else:
+                    print(f"⚠️ 發送關閉信號失敗，後端回應: {response.status_code}。嘗試強制終止...")
+                    launch_process_local.terminate()
+            else:
+                print("ℹ️ 後端程序似乎已經結束，無需發送關閉信號。")
+
+        except Exception as shutdown_exc:
+            print(f"❌ 在嘗試優雅關閉後端時發生錯誤: {shutdown_exc}")
+            print("   報告可能無法正常生成。")
 
 def run_main():
     """

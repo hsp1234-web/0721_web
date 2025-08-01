@@ -125,6 +125,8 @@ propcache==0.3.2
     # via
     #   aiohttp
     #   yarl
+psutil==5.9.8
+    # via -r requirements-dev.in
 ptyprocess==0.7.0
     # via pexpect
 pure-eval==0.2.3
