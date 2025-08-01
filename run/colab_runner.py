@@ -41,8 +41,6 @@ except ImportError:
     import nest_asyncio
     from aiohttp import web
 
-# 導入新的埠號管理器
-sys.path.insert(0, str(Path.cwd()))
 from core_utils.port_manager import find_available_port, kill_processes_using_port
 
 nest_asyncio.apply()
@@ -145,6 +143,10 @@ def background_worker():
         project_path = base_path / PROJECT_FOLDER_NAME
         with status_lock:
             shared_status["project_path"] = project_path
+
+        # 將專案根目錄加入 sys.path
+        sys.path.insert(0, str(project_path))
+
 
         # --- 步驟 1: 準備專案環境 ---
         update_status(task="準備專案環境")
