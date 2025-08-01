@@ -138,28 +138,51 @@ def test_graceful_shutdown_and_report_archiving(project_path, test_config):
             process.wait()
 
 
-def test_report_generator_script_with_auto_install(project_path):
+@pytest.mark.slow
+def test_full_e2e_report_generation(project_path, test_config):
     """
-    Tests the `run/report.py` script to ensure its auto-dependency-installation
-    feature works correctly.
+    A true end-to-end test that first runs the main application to generate
+    a real state.db, and then runs the report generator to process that data.
+    This validates the entire user workflow.
     """
-    # 1. Setup the environment
-    # We use the real scripts, not mocks.
-    # A dummy state.db and config.json are needed for the script to run.
+    # --- Part 1: Run the main application to generate data ---
+    # This part is similar to the `test_graceful_shutdown_and_report_archiving`
     db_file = project_path / "state.db"
-    db_file.touch()
-    config_file = project_path / "config.json"
-    config_file.write_text(json.dumps({"TIMEZONE": "Asia/Taipei"}))
+    launch_script = project_path / "scripts" / "launch.py"
+    command = [sys.executable, str(launch_script), "--db-file", str(db_file)]
+    process = subprocess.Popen(command, cwd=project_path, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore')
 
-    # Ensure the report requirements file exists
-    assert (project_path / "scripts" / "requirements-report.txt").exists()
+    try:
+        max_wait = 45
+        start_time = time.time()
+        is_ready = False
+        while time.time() - start_time < max_wait:
+            try:
+                with httpx.Client() as client:
+                    response = client.get("http://localhost:8088/api/v1/status", timeout=2)
+                if response.status_code == 200:
+                    is_ready = True
+                    break
+            except httpx.ConnectError:
+                time.sleep(1)
 
-    # 2. Get the content of our `run/report.py` wrapper
+        if not is_ready:
+            pytest.fail(f"API server did not become ready within {max_wait} seconds.", pytrace=False)
+
+        with httpx.Client() as client:
+            response = client.post("http://localhost:8088/api/v1/shutdown", timeout=10)
+        assert response.status_code == 200
+        process.communicate(timeout=45)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+
+    assert db_file.exists(), "state.db was not created by the main application."
+
+    # --- Part 2: Run the report generator script ---
     report_runner_script_path = project_path / "run" / "report.py"
-    assert report_runner_script_path.exists()
     report_runner_script_content = report_runner_script_path.read_text(encoding='utf-8')
 
-    # Extract the Python code from the Colab cell
     code_lines = []
     in_code_section = False
     for line in report_runner_script_content.splitlines():
@@ -169,14 +192,13 @@ def test_report_generator_script_with_auto_install(project_path):
         if in_code_section:
             code_lines.append(line)
     python_code_to_run = "\n".join(code_lines)
-    assert "uv pip install" in python_code_to_run
 
-    # 3. Simulate the Colab environment and execute the code
+    # Simulate Colab environment and form inputs
     exec_globals = {
         "PROJECT_FOLDER_NAME": project_path.name,
-        "GENERATE_SUMMARY_REPORT": False, # Don't need to see output
-        "GENERATE_PERFORMANCE_REPORT": False,
-        "GENERATE_DETAILED_LOG_REPORT": False,
+        "GENERATE_SUMMARY_REPORT": True,
+        "GENERATE_PERFORMANCE_REPORT": True,
+        "GENERATE_DETAILED_LOG_REPORT": True,
         "display": lambda *args, **kwargs: None,
         "Code": lambda data, language: None,
         "Markdown": lambda data: None,
@@ -189,13 +211,23 @@ def test_report_generator_script_with_auto_install(project_path):
         symlink_path.symlink_to(project_path)
 
     try:
-        # The key assertion: executing this code should not raise any exceptions,
-        # especially not a ModuleNotFoundError. This proves the auto-install
-        # and path resolution logic is working.
+        # Execute the report generation logic
         exec(python_code_to_run, exec_globals)
 
+        # --- Part 3: Verify the output ---
+        logs_dir = project_path / "logs"
+        summary_report = logs_dir / "summary_report.md"
+        perf_report = logs_dir / "performance_report.md"
+
+        assert summary_report.exists(), "Summary report was not generated."
+        assert perf_report.exists(), "Performance report was not generated."
+
+        summary_content = summary_report.read_text(encoding="utf-8")
+        assert "綜合戰情簡報" in summary_content
+        assert "平均 CPU 使用率" in summary_content
+
     except Exception as e:
-        pytest.fail(f"Execution of the report runner script failed: {e}")
+        pytest.fail(f"Execution of the report runner script failed during E2E test: {e}")
 
     finally:
         if symlink_path.is_symlink():
